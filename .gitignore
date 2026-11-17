@@ -1,0 +1,32 @@
+# Rust build output
+/target/
+**/target/
+
+# Local application state
+/data/
+/logs/
+*.log
+*.pid
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!fixtures/**/*.key
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Test and coverage output
+/coverage/
+*.profraw
+*.profdata
+
+# Generated API/client artifacts that are not committed yet
+/docs/api/openapi.yaml.tmp
