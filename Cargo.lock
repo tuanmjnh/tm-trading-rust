@@ -1818,6 +1818,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
+name = "tm-trading-agent-protocol"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "tm-trading-config"
 version = "0.1.0"
 dependencies = [
@@ -1867,6 +1876,16 @@ dependencies = [
  "tm-trading-domain",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "tm-trading-supervisor-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "thiserror",
+ "tm-trading-agent-protocol",
+ "tm-trading-domain",
 ]
 
 [[package]]

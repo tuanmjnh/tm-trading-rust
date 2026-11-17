@@ -1,0 +1,14 @@
+[package]
+name = "tm-trading-supervisor-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+thiserror.workspace = true
+tm-trading-agent-protocol.workspace = true
+tm-trading-domain.workspace = true
+
+[lints]
+workspace = true

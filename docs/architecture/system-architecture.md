@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation implemented; Phase 2 runtime not yet implemented<br>
+> Status: Phase 1 foundation and Phase 2 protocol/lifecycle core implemented; runtime not yet complete<br>
 > Last updated: 2026-11-17<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -15,13 +15,15 @@ Implemented:
 - versioned API DTOs, a stable error model, and a generated OpenAPI snapshot;
 - typed environment configuration with production fail-closed checks;
 - tracing initialization and correlation spans;
-- a MongoDB connection boundary and an in-memory operation repository for tests.
+- a MongoDB connection boundary and an in-memory operation repository for tests;
+- a versioned JSON-line worker IPC protocol with explicit shutdown and drained status;
+- a static worker registry plus deterministic desired/observed/readiness state transitions, bounded logs, heartbeat freshness, and bounded restart policy.
 
 Not implemented:
 
 - Axum Management API and HTTP authentication;
 - TM Hub token verification and capability enforcement;
-- Host Agent, worker registry, process lifecycle, or sample worker;
+- Host Agent executable, OS process lifecycle, or sample worker executable;
 - MongoDB operation repository and service snapshot persistence;
 - Dioxus Desktop client.
 
@@ -43,6 +45,8 @@ tm-trading-contracts  tm-trading-storage
                              ^
                              |
 tm-trading-config -> tm-trading-observability
+
+tm-trading-agent-protocol -> tm-trading-supervisor-core -> future tm-trading-agent
 ```
 
 Dependency rules:
@@ -52,6 +56,8 @@ Dependency rules:
 - `storage` implements repository behavior behind traits and translates errors at its boundary.
 - `config` owns typed environment parsing and validation.
 - `observability` owns tracing setup and correlation spans.
+- `agent-protocol` owns the versioned worker IPC messages and explicit control commands.
+- `supervisor-core` owns static worker definitions and deterministic lifecycle/readiness transitions; it has no OS process or UI dependency.
 - Executable processes will be thin composition roots in later phases.
 
 ## 3. Contracts and versioning
@@ -118,7 +124,7 @@ Tracing uses `tracing` and `tracing-subscriber`. JSON output is available for st
 
 The later Agent slice must add heartbeat, bounded log tails, exit codes, restart counters, and service-state reporting. Process liveness must not be reported as functional readiness.
 
-## 8. Phase 1 checklist
+## 8. Phase checklist
 
 - [x] Pin Rust 1.99.1 with rustfmt and Clippy.
 - [x] Create the Cargo workspace and commit `Cargo.lock`.
@@ -127,8 +133,11 @@ The later Agent slice must add heartbeat, bounded log tails, exit codes, restart
 - [x] Add MongoDB connection and test-repository abstractions.
 - [x] Generate the first OpenAPI snapshot.
 - [x] Add CI checks for formatting, Clippy, tests, release build, OpenAPI drift, dependency audit, and secret scanning.
-
-Phase 2 starts with an independent Host Agent, a static sample-worker registry, explicit shutdown control, and durable operation/service reporting. The API executable may be added only after those process boundaries are testable.
+- [x] Define the worker IPC protocol and static worker registry.
+- [x] Implement deterministic lifecycle, readiness, heartbeat, log-tail, and restart-policy state transitions.
+- [ ] Implement the independent Host Agent and sample-worker executable.
+- [ ] Persist operations and service snapshots through the Management API.
+- [ ] Run crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification
 
