@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/contracts",
+    "crates/config",
+    "crates/observability",
+    "crates/storage",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+
+[workspace.dependencies]
+async-trait = "=0.1.92"
+chrono = { version = "=0.4.45", features = ["serde"] }
+mongodb = { version = "=3.10.1", default-features = false, features = ["compat-3-0-0", "dns-resolver", "rustls-tls-aws-lc"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+thiserror = "=2.0.21"
+tokio = { version = "=1.54.1", features = ["macros", "rt"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "json"] }
+utoipa = { version = "=6.0.0", features = ["chrono", "yaml"] }
+url = "=2.5.8"
+uuid = { version = "=1.29.3", features = ["v4"] }
+
+tm-trading-contracts = { path = "crates/contracts" }
+tm-trading-domain = { path = "crates/domain" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

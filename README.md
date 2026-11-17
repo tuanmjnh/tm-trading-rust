@@ -6,13 +6,15 @@ The authoritative product and architecture specification is [`docs/TM-TRADING-RU
 
 ## Current status
 
-The Phase 0 migration audit is complete. The first implementation milestone will prove this path:
+The Phase 0 migration audit and Phase 1 Rust workspace foundation are complete. The workspace now contains shared domain, API-contract, configuration, observability, and storage crates, plus the first generated OpenAPI snapshot.
+
+The next implementation slice adds the independent Host Agent and sample worker before exposing the Axum API. The full milestone will prove this path:
 
 ```text
 Dioxus Desktop -> Axum Management API -> independent Host Agent -> sample worker
 ```
 
-The project will reuse the existing MongoDB data where practical and will not perform a destructive migration.
+No executable API, Agent, Desktop client, or worker exists yet. The project will reuse the existing MongoDB data where practical and will not perform a destructive migration.
 
 ## Product boundary
 
@@ -37,7 +39,7 @@ TM Hub remains authoritative for identity, sessions, RBAC, routes, and shared co
 
 ## Workspace commands
 
-Once the Cargo workspace is available, the required verification commands are:
+The required verification commands are:
 
 ```powershell
 cargo fmt --all --check
@@ -46,15 +48,26 @@ cargo test --workspace
 cargo build --workspace --release
 ```
 
+Regenerate and verify the API contract snapshot with:
+
+```powershell
+cargo run -p tm-trading-contracts --example generate_openapi
+git diff --exit-code -- docs/api/openapi.yaml
+```
+
+The CI workflow also runs a RustSec dependency audit and a repository secret scan with pinned third-party actions.
+
 No command is considered passed unless it was executed and its result observed. Reports use `PASS`, `FAIL`, `NOT RUN`, `BLOCKED`, or `SKIPPED`.
 
 ## Documentation
 
 - [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](docs/TM-TRADING-RUST-MASTER-ROADMAP.md) — product and architecture authority
+- [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md) — current implemented architecture and phase status
 - [`docs/migration/source-inventory.md`](docs/migration/source-inventory.md) — audited legacy source inventory
 - [`docs/migration/module-mapping.md`](docs/migration/module-mapping.md) — source-to-target mapping
 - [`docs/migration/data-contract-map.md`](docs/migration/data-contract-map.md) — MongoDB and event contract map
 - [`docs/migration/tm-hub-integration-map.md`](docs/migration/tm-hub-integration-map.md) — TM Hub integration contract
+- [`docs/api/openapi.yaml`](docs/api/openapi.yaml) — generated API contract snapshot
 
 ## Development rules
 

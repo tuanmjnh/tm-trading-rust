@@ -1,0 +1,15 @@
+[package]
+name = "tm-trading-observability"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tm-trading-config = { path = "../config" }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

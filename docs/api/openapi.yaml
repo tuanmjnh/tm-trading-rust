@@ -1,0 +1,234 @@
+openapi: 3.1.0
+info:
+  title: TM Trading Rust Management API
+  description: Read-only market intelligence and service-management API.
+  license:
+    name: ''
+  version: 1.0.0
+paths:
+  /api/v1/health:
+    get:
+      tags:
+      - System
+      operationId: health
+      responses:
+        '200':
+          description: Current API health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: A required dependency is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/v1/version:
+    get:
+      tags:
+      - System
+      operationId: version
+      responses:
+        '200':
+          description: API and service versions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiVersionInfo'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+components:
+  schemas:
+    ApiErrorBody:
+      type: object
+      required:
+      - code
+      - message
+      - correlation_id
+      properties:
+        code:
+          $ref: '#/components/schemas/ApiErrorCode'
+        correlation_id:
+          type: string
+        details:
+          type:
+          - object
+          - 'null'
+          additionalProperties:
+            type: string
+          propertyNames:
+            type: string
+        message:
+          type: string
+    ApiErrorCode:
+      type: string
+      enum:
+      - bad_request
+      - unauthorized
+      - forbidden
+      - not_found
+      - conflict
+      - unprocessable_entity
+      - too_many_requests
+      - internal
+      - service_unavailable
+    ApiErrorResponse:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          $ref: '#/components/schemas/ApiErrorBody'
+    ApiVersionInfo:
+      type: object
+      required:
+      - api_version
+      - contract_version
+      - service_version
+      properties:
+        api_version:
+          type: string
+        contract_version:
+          type: string
+        service_version:
+          type: string
+    CreateOperationRequest:
+      type: object
+      required:
+      - service_instance_id
+      - action
+      properties:
+        action:
+          $ref: '#/components/schemas/OperationActionDto'
+        service_instance_id:
+          type: string
+    HealthResponse:
+      type: object
+      required:
+      - status
+      - version
+      properties:
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        version:
+          $ref: '#/components/schemas/ApiVersionInfo'
+    HealthStatus:
+      type: string
+      enum:
+      - healthy
+      - degraded
+      - unhealthy
+    OperationActionDto:
+      type: string
+      enum:
+      - start
+      - stop
+      - restart
+    OperationResponse:
+      type: object
+      required:
+      - operation_id
+      - schema_version
+      - idempotency_key
+      - correlation_id
+      - service_instance_id
+      - service_definition_id
+      - target_agent_id
+      - action
+      - status
+      - attempt
+      - fencing_token
+      - requested_by
+      - requested_at
+      - expires_at
+      properties:
+        action:
+          $ref: '#/components/schemas/OperationActionDto'
+        attempt:
+          type: integer
+          format: int32
+          minimum: 0
+        correlation_id:
+          type: string
+        error_code:
+          type:
+          - string
+          - 'null'
+        expires_at:
+          type: string
+          format: date-time
+        fencing_token:
+          type: integer
+          format: int64
+          minimum: 0
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        idempotency_key:
+          type: string
+        lease_expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        operation_id:
+          type: string
+        redacted_error:
+          type:
+          - string
+          - 'null'
+        requested_at:
+          type: string
+          format: date-time
+        requested_by:
+          type: string
+        result_summary:
+          type:
+          - string
+          - 'null'
+        schema_version:
+          type: integer
+          format: int32
+          minimum: 0
+        service_definition_id:
+          type: string
+        service_instance_id:
+          type: string
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          $ref: '#/components/schemas/OperationStatusDto'
+        target_agent_id:
+          type: string
+    OperationStatusDto:
+      type: string
+      enum:
+      - accepted
+      - queued
+      - claimed
+      - running
+      - succeeded
+      - failed
+      - cancelled
+      - expired
+tags:
+- name: System
+  description: Version and health endpoints
+- name: Operations
+  description: Durable asynchronous service operations

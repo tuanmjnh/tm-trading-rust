@@ -1,0 +1,19 @@
+[package]
+name = "tm-trading-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+mongodb.workspace = true
+thiserror.workspace = true
+tm-trading-domain.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
