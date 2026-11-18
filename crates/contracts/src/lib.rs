@@ -1,12 +1,19 @@
 mod error;
 pub mod openapi;
 mod operation;
+mod service;
 mod system;
 
 pub use error::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
 pub use openapi::ApiDoc;
 pub use operation::{
     CreateOperationRequest, OperationActionDto, OperationResponse, OperationStatusDto,
+};
+pub use service::{
+    AgentCommandDto, AgentHeartbeatRequest, AgentHeartbeatResponse, ClaimCommandRequest,
+    ClaimCommandResponse, CompleteCommandRequest, CompleteCommandResponse, DesiredStateDto,
+    ObservedStateDto, ProgressCommandRequest, ProgressCommandResponse, ReadinessDto,
+    ServiceSnapshot,
 };
 pub use system::{ApiVersionInfo, HealthResponse, HealthStatus};
 

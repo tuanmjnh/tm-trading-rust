@@ -6,6 +6,164 @@ info:
     name: ''
   version: 1.0.0
 paths:
+  /api/v1/agent/commands/claim:
+    post:
+      tags:
+      - Agent
+      operationId: agent_claim_command
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimCommandRequest'
+        required: true
+      responses:
+        '200':
+          description: Next leased command, if any
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimCommandResponse'
+        '401':
+          description: Missing or invalid agent credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/agent/commands/{operation_id}/complete:
+    post:
+      tags:
+      - Agent
+      operationId: agent_complete_command
+      parameters:
+      - name: operation_id
+        in: path
+        description: Operation identifier
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteCommandRequest'
+        required: true
+      responses:
+        '200':
+          description: Command result accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteCommandResponse'
+        '401':
+          description: Missing or invalid agent credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: Lease is no longer held by this Agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/agent/commands/{operation_id}/progress:
+    post:
+      tags:
+      - Agent
+      operationId: agent_progress_command
+      parameters:
+      - name: operation_id
+        in: path
+        description: Operation identifier
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProgressCommandRequest'
+        required: true
+      responses:
+        '200':
+          description: Command started executing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProgressCommandResponse'
+        '401':
+          description: Missing or invalid agent credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: Lease is no longer held by this Agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/agent/heartbeat:
+    post:
+      tags:
+      - Agent
+      operationId: agent_heartbeat
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentHeartbeatRequest'
+        required: true
+      responses:
+        '200':
+          description: Heartbeat accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHeartbeatResponse'
+        '401':
+          description: Missing or invalid agent credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/health:
     get:
       tags:
@@ -30,6 +188,179 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /api/v1/operations/{operation_id}:
+    get:
+      tags:
+      - Operations
+      operationId: get_operation
+      parameters:
+      - name: operation_id
+        in: path
+        description: Operation identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Durable operation state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/services:
+    get:
+      tags:
+      - Services
+      operationId: list_services
+      responses:
+        '200':
+          description: Known service instances and their last reported state
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceSnapshot'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/services/{service_instance_id}:
+    get:
+      tags:
+      - Services
+      operationId: get_service
+      parameters:
+      - name: service_instance_id
+        in: path
+        description: Service instance identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Service instance state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceSnapshot'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown service instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/services/{service_instance_id}/operations:
+    post:
+      tags:
+      - Operations
+      operationId: create_service_operation
+      parameters:
+      - name: service_instance_id
+        in: path
+        description: Service instance identifier
+        required: true
+        schema:
+          type: string
+      - name: Idempotency-Key
+        in: header
+        description: Caller supplied idempotency key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOperationRequest'
+        required: true
+      responses:
+        '202':
+          description: Operation accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Malformed request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: Idempotency key reused with a different request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Request does not match the target service
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/version:
     get:
       tags:
@@ -50,6 +381,70 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
 components:
   schemas:
+    AgentCommandDto:
+      type: object
+      description: A single leased command addressed to an Agent.
+      required:
+      - operation_id
+      - service_instance_id
+      - service_definition_id
+      - action
+      - fencing_token
+      - lease_expires_at
+      - expires_at
+      properties:
+        action:
+          $ref: '#/components/schemas/OperationActionDto'
+        expires_at:
+          type: string
+          format: date-time
+        fencing_token:
+          type: integer
+          format: int64
+          minimum: 0
+        lease_expires_at:
+          type: string
+          format: date-time
+        operation_id:
+          type: string
+        service_definition_id:
+          type: string
+        service_instance_id:
+          type: string
+    AgentHeartbeatRequest:
+      type: object
+      description: Agent heartbeat carrying the current service read model.
+      required:
+      - agent_id
+      - agent_version
+      - host_os
+      - host_architecture
+      - services
+      properties:
+        agent_id:
+          type: string
+        agent_version:
+          type: string
+        host_architecture:
+          type: string
+        host_os:
+          type: string
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceSnapshot'
+    AgentHeartbeatResponse:
+      type: object
+      description: Response to an Agent heartbeat.
+      required:
+      - accepted
+      - server_time
+      properties:
+        accepted:
+          type: boolean
+        server_time:
+          type: string
+          format: date-time
     ApiErrorBody:
       type: object
       required:
@@ -103,6 +498,61 @@ components:
           type: string
         service_version:
           type: string
+    ClaimCommandRequest:
+      type: object
+      description: Request to claim the next command addressed to an Agent.
+      required:
+      - agent_id
+      properties:
+        agent_id:
+          type: string
+    ClaimCommandResponse:
+      type: object
+      description: Response to a command claim.
+      properties:
+        command:
+          oneOf:
+          - $ref: '#/components/schemas/AgentCommandDto'
+          - type: 'null'
+    CompleteCommandRequest:
+      type: object
+      description: Agent report of the outcome of a claimed command.
+      required:
+      - operation_id
+      - agent_id
+      - fencing_token
+      - succeeded
+      properties:
+        agent_id:
+          type: string
+        error_code:
+          type:
+          - string
+          - 'null'
+        fencing_token:
+          type: integer
+          format: int64
+          minimum: 0
+        operation_id:
+          type: string
+        redacted_error:
+          type:
+          - string
+          - 'null'
+        result_summary:
+          type:
+          - string
+          - 'null'
+        succeeded:
+          type: boolean
+    CompleteCommandResponse:
+      type: object
+      description: Response to a command completion report.
+      required:
+      - accepted
+      properties:
+        accepted:
+          type: boolean
     CreateOperationRequest:
       type: object
       required:
@@ -113,6 +563,12 @@ components:
           $ref: '#/components/schemas/OperationActionDto'
         service_instance_id:
           type: string
+    DesiredStateDto:
+      type: string
+      description: Canonical desired state of a service instance.
+      enum:
+      - RUNNING
+      - STOPPED
     HealthResponse:
       type: object
       required:
@@ -129,6 +585,16 @@ components:
       - healthy
       - degraded
       - unhealthy
+    ObservedStateDto:
+      type: string
+      description: Canonical observed state of a service instance.
+      enum:
+      - STARTING
+      - RUNNING
+      - STOPPING
+      - STOPPED
+      - FAILED
+      - UNKNOWN
     OperationActionDto:
       type: string
       enum:
@@ -227,8 +693,93 @@ components:
       - failed
       - cancelled
       - expired
+    ProgressCommandRequest:
+      type: object
+      description: Agent report that a claimed command has started executing.
+      required:
+      - operation_id
+      - agent_id
+      - fencing_token
+      properties:
+        agent_id:
+          type: string
+        fencing_token:
+          type: integer
+          format: int64
+          minimum: 0
+        operation_id:
+          type: string
+    ProgressCommandResponse:
+      type: object
+      description: Response to a command progress report.
+      required:
+      - accepted
+      properties:
+        accepted:
+          type: boolean
+    ReadinessDto:
+      type: string
+      description: Canonical readiness of a service instance.
+      enum:
+      - READY
+      - DEGRADED
+      - NOT_READY
+      - UNKNOWN
+    ServiceSnapshot:
+      type: object
+      description: Read model of one service instance as reported by its owning Agent.
+      required:
+      - service_instance_id
+      - service_definition_id
+      - agent_id
+      - desired_state
+      - observed_state
+      - readiness
+      - restart_count
+      - retry_blocked
+      - updated_at
+      properties:
+        agent_id:
+          type: string
+        desired_state:
+          $ref: '#/components/schemas/DesiredStateDto'
+        last_exit_code:
+          type:
+          - integer
+          - 'null'
+          format: int32
+        last_heartbeat_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        observed_state:
+          $ref: '#/components/schemas/ObservedStateDto'
+        process_alive:
+          type:
+          - boolean
+          - 'null'
+        readiness:
+          $ref: '#/components/schemas/ReadinessDto'
+        restart_count:
+          type: integer
+          format: int32
+          minimum: 0
+        retry_blocked:
+          type: boolean
+        service_definition_id:
+          type: string
+        service_instance_id:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
 tags:
 - name: System
   description: Version and health endpoints
+- name: Services
+  description: Service read model
 - name: Operations
   description: Durable asynchronous service operations
+- name: Agent
+  description: Agent-only heartbeat and command endpoints

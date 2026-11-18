@@ -46,8 +46,13 @@ tm-trading-domain
   ^                 ^
   |                 |
 tm-trading-contracts  tm-trading-storage
-                             ^
-                             |
+  ^        ^              ^
+  |        |              |
+  |        +-> tm-trading-management-api -> loopback HTTP
+  |                     ^
+  |                     |
+  +-> tm-trading-agent  (outbound command channel)
+
 tm-trading-config -> tm-trading-observability
 
 tm-trading-agent-protocol -> tm-trading-supervisor-core -> tm-trading-agent
@@ -67,6 +72,8 @@ Dependency rules:
 - `supervisor-core` owns static worker definitions and deterministic lifecycle/readiness transitions; it has no OS process or UI dependency.
 - `apps/agent` is the sole OS process owner for workers, uses a static executable registry, clears inherited child environment before adding an allowlist, and never accepts arbitrary executable paths or arguments. It holds an exclusive state-directory lock, validates the worker's PID, executable path, and executable version during the `worker.v2` handshake, uses a Windows Job Object or Unix process group, and isolates a rejected worker without stopping other workers. On Windows the worker is spawned with `DETACHED_PROCESS` so console control events reach only the Agent, which drains the worker over the explicit control channel. Windows Job Object descendant containment is implemented; Unix forced termination targets the process group, while descendant cleanup after an abrupt Agent loss remains unverified on a Unix runtime.
 - `workers/sample-worker` implements the versioned control protocol, performs its capability self-check before readiness, and reports explicit drain status.
+- `apps/management-api` is the local Axum Management API. It binds to loopback only, is a command producer and read-model provider, never spawns a process, and never runs a continuous worker loop. User endpoints require a bearer credential that carries exact `trading.*` capabilities; Agent endpoints require the separate per-installation Agent credential and may only act as the Agent named in the request. Operations are durable and idempotent, and are claimed with an expiring lease and fencing token.
+- `apps/agent` additionally opens an outbound command channel to the Management API: it heartbeats its service read model, claims commands addressed to its own Agent identity, executes them against its own worker registry, and reports the real outcome. The Agent never accepts an executable path or command line from the API.
 - Executable processes remain thin composition roots around these crates.
 
 ## 3. Contracts and versioning
@@ -77,7 +84,7 @@ Dependency rules:
 - API errors use stable typed codes and include a correlation ID.
 - The generated contract snapshot is [`docs/api/openapi.yaml`](../api/openapi.yaml).
 
-The current OpenAPI document defines the initial health/version paths and the operation DTO schemas. It is a contract snapshot, not evidence that an HTTP server is running.
+The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
 
 ## 4. Service and operation model
 

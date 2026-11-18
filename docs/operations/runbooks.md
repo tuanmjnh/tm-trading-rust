@@ -1,6 +1,6 @@
 # Operations Runbooks
 
-> Status: Phase 2 local runtime runbook implemented and hardened on 2026-11-18<br>
+> Status: Phase 3 local Management API and Agent command channel implemented on 2026-11-18<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## Build the Agent and sample worker
@@ -54,12 +54,52 @@ Expected result:
 - the replacement worker reaches `RUNNING` and `READY`;
 - final shutdown reports `drained: true` and `forced: false`.
 
+## Run the Management API and Agent command channel
+
+The Management API binds to loopback only and requires two separate credentials. The user credential carries exact `trading.*` capabilities; the Agent credential is per installation and may only act as the Agent named in the request.
+
+```powershell
+cargo build -p tm-trading-management-api -p tm-trading-agent -p tm-trading-sample-worker
+
+$env:TM_TRADING_LOCAL_API_TOKEN = "local-user-token"
+$env:TM_TRADING_AGENT_TOKEN = "local-agent-token"
+$env:TM_TRADING_API_BIND = "127.0.0.1:8787"
+.\target\debug\tm-trading-management-api.exe
+```
+
+In a second terminal, connect the Agent to that API. The Agent credential is read from the environment so it never appears in the process command line:
+
+```powershell
+$env:TM_TRADING_AGENT_TOKEN = "local-agent-token"
+.\target\debug\tm-trading-agent.exe --worker-dir .\target\debug --state-dir .\target\tmp\agent-local --api-url http://127.0.0.1:8787
+```
+
+The Agent heartbeats its service read model and then claims commands addressed to its own Agent identity. Drive it over HTTP:
+
+```powershell
+$headers = @{ Authorization = "Bearer local-user-token" }
+$services = Invoke-RestMethod -Uri http://127.0.0.1:8787/api/v1/services -Headers $headers
+$instance = $services[0].service_instance_id
+$body = @{ service_instance_id = $instance; action = "stop" } | ConvertTo-Json
+$operation = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8787/api/v1/services/$instance/operations" `
+    -Headers ($headers + @{ "Idempotency-Key" = "stop-sample-1" }) -ContentType "application/json" -Body $body
+Invoke-RestMethod -Uri "http://127.0.0.1:8787/api/v1/operations/$($operation.operation_id)" -Headers $headers
+```
+
+Expected result:
+
+- the operation is returned as `accepted` with an operation ID;
+- the Agent claims it, reports it running, and completes it;
+- the final operation status is `succeeded` with a result summary, or `failed` with a redacted error;
+- the service read model shows the new desired, observed, and readiness values.
+
+The read model is authoritative per Agent: each heartbeat replaces that Agent's reported instances, so an instance the Agent no longer reports disappears instead of lingering.
+
 ## Run the Agent
 
 ```powershell
 .\target\debug\tm-trading-agent.exe --worker-dir .\target\debug --state-dir .\target\tmp\agent-local
 ```
-
 The Agent starts the registered sample worker and remains independent of any Desktop process. The state directory is installation-local: the Agent holds an exclusive `agent.lock` file for its lifetime and writes a minimal `agent-state.json` checkpoint with an `agent-state.json.bak` recovery copy. A second Agent using the same state directory fails closed.
 
 Press `Ctrl+C` to request Agent shutdown; on Unix, `SIGTERM` requests the same shutdown. Shutdown requests are monotonic and cannot be cancelled by a later signal. The Agent then sends the explicit worker shutdown command and waits up to the configured grace period before escalating. After the worker process exits, the Agent collects the final protocol events for at most one second so the reported drain status reflects the worker's own final message. A forced kill is reaped for at most five seconds. Windows console close, logoff, and shutdown events use the same drain path.
@@ -86,7 +126,10 @@ Agent shutdown preserves the worker's desired `RUNNING` state, pending restart b
 - An explicit stop cancels a pending automatic restart. Agent shutdown preserves desired `RUNNING`, pending backoff, and restart budget.
 - Each polling pass handles at most 128 worker events from one worker, leaving remaining events for a later pass.
 - Windows workers run in a kill-on-close Job Object. Unix workers run in a process group and explicit forced termination targets that group; descendant cleanup after an abrupt Agent loss remains unverified on a Unix runtime.
+- The Management API never spawns a process. A command that cannot be executed is reported as a failed operation with a redacted error; an unknown operation, an expired lease, or a fencing-token mismatch is reported as a conflict and never as a success.
+- A missing or invalid bearer credential is rejected with `401`; an Agent credential used on a user endpoint, or a user credential used on an Agent endpoint, is rejected with `403`. An operation without an `Idempotency-Key` header is rejected with `400`.
+- The service read model is rebuilt from Agent heartbeats. When no Agent heartbeat has been received, the service list is empty rather than assumed healthy.
 
 ## Rollback
 
-This slice adds new executables only. Rollback is to stop the Agent, remove the new Agent/sample-worker artifacts, and roll back the corresponding Git commit. It does not modify legacy services, MongoDB collections, indexes, or documents.
+This slice adds new executables only. Rollback is to stop the Agent, remove the new Agent/sample-worker/Management API artifacts, and roll back the corresponding Git commit. It does not modify legacy services, MongoDB collections, indexes, or documents.

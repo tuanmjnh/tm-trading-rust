@@ -27,6 +27,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tm_trading_observability::init(log_format)?;
 
     let cli = Cli::parse()?;
+    let api = management_api(&cli).await?;
     let worker_dir = cli.worker_dir.unwrap_or_else(default_worker_dir);
     let state_dir = cli
         .state_dir
@@ -80,8 +81,26 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    agent.run_until_shutdown(DEFAULT_POLL_INTERVAL).await?;
+    agent
+        .run_until_shutdown(DEFAULT_POLL_INTERVAL, api.as_ref())
+        .await?;
     Ok(())
+}
+
+/// Builds the Management API client when the command channel is configured.
+async fn management_api(
+    cli: &Cli,
+) -> Result<Option<tm_trading_agent::ManagementApiClient>, Box<dyn std::error::Error>> {
+    let Some(api_url) = cli.api_url.as_ref() else {
+        return Ok(None);
+    };
+    let token = env::var("TM_TRADING_AGENT_TOKEN")
+        .map_err(|_| "TM_TRADING_AGENT_TOKEN must be set when --api-url is used")?;
+    Ok(Some(tm_trading_agent::ManagementApiClient::new(
+        api_url,
+        &token,
+        &cli.agent_id,
+    )?))
 }
 
 async fn run_crash_drill(
@@ -146,6 +165,7 @@ struct Cli {
     service_id: String,
     self_test: bool,
     crash_after_ms: Option<u64>,
+    api_url: Option<String>,
 }
 
 impl Cli {
@@ -156,6 +176,7 @@ impl Cli {
         let mut service_id = "sample-worker".to_owned();
         let mut self_test = false;
         let mut crash_after_ms = None;
+        let mut api_url = env::var("TM_TRADING_API_URL").ok();
         let mut arguments = env::args().skip(1);
 
         while let Some(argument) = arguments.next() {
@@ -182,6 +203,14 @@ impl Cli {
                         .ok_or("--start requires a value")?
                         .to_owned();
                 }
+                "--api-url" => {
+                    api_url = Some(
+                        arguments
+                            .next()
+                            .ok_or("--api-url requires a value")?
+                            .to_owned(),
+                    );
+                }
                 "--self-test" => self_test = true,
                 "--crash-after-ms" => {
                     let value = arguments
@@ -192,7 +221,10 @@ impl Cli {
                 }
                 "--help" | "-h" => {
                     println!(
-                        "tm-trading-agent [--agent-id ID] [--worker-dir PATH] [--state-dir PATH] [--start SERVICE] [--self-test] [--crash-after-ms MS]"
+                        "tm-trading-agent [--agent-id ID] [--worker-dir PATH] [--state-dir PATH] [--start SERVICE] [--api-url URL] [--self-test] [--crash-after-ms MS]"
+                    );
+                    println!(
+                        "The management API credential is read from TM_TRADING_AGENT_TOKEN; set TM_TRADING_API_URL to enable the command channel."
                     );
                     std::process::exit(0);
                 }
@@ -207,6 +239,7 @@ impl Cli {
             service_id,
             self_test,
             crash_after_ms,
+            api_url,
         })
     }
 }

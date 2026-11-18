@@ -9,6 +9,7 @@ members = [
     "crates/agent-protocol",
     "crates/supervisor-core",
     "apps/agent",
+    "apps/management-api",
     "workers/sample-worker",
 ]
 
@@ -19,9 +20,11 @@ rust-version = "1.99.1"
 
 [workspace.dependencies]
 async-trait = "=0.1.92"
+axum = "=0.8.9"
 chrono = { version = "=0.4.45", features = ["serde"] }
 mongodb = { version = "=3.10.1", default-features = false, features = ["compat-3-0-0", "dns-resolver", "rustls-tls-aws-lc"] }
 process-wrap = { version = "=10.0.1", default-features = false, features = ["creation-flags", "job-object", "kill-on-drop", "process-group", "tokio1"] }
+reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 thiserror = "=2.0.21"
@@ -38,6 +41,7 @@ tm-trading-config = { path = "crates/config" }
 tm-trading-contracts = { path = "crates/contracts" }
 tm-trading-domain = { path = "crates/domain" }
 tm-trading-observability = { path = "crates/observability" }
+tm-trading-storage = { path = "crates/storage" }
 tm-trading-supervisor-core = { path = "crates/supervisor-core" }
 
 [workspace.lints.rust]

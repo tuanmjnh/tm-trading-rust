@@ -1,0 +1,31 @@
+[package]
+name = "tm-trading-management-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axum = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tracing = { workspace = true }
+utoipa = { workspace = true }
+uuid = { workspace = true }
+
+tm-trading-contracts = { workspace = true }
+tm-trading-config = { workspace = true }
+tm-trading-domain = { workspace = true }
+tm-trading-observability = { workspace = true }
+tm-trading-storage = { workspace = true }
+
+[dev-dependencies]
+http-body-util = "=0.1.5"
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { version = "=0.5.3", features = ["util"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,99 @@
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use tm_trading_contracts::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
+use tm_trading_domain::OperationError;
+use tm_trading_storage::RepositoryError;
+use uuid::Uuid;
+
+/// Typed API failure with a stable machine-readable code.
+#[derive(Debug)]
+pub enum ApiError {
+    BadRequest(String),
+    Unauthorized(String),
+    Forbidden(String),
+    NotFound(String),
+    Conflict(String),
+    UnprocessableEntity(String),
+    Internal(String),
+}
+
+impl ApiError {
+    fn parts(&self) -> (StatusCode, ApiErrorCode, &str) {
+        match self {
+            Self::BadRequest(message) => {
+                (StatusCode::BAD_REQUEST, ApiErrorCode::BadRequest, message)
+            }
+            Self::Unauthorized(message) => (
+                StatusCode::UNAUTHORIZED,
+                ApiErrorCode::Unauthorized,
+                message,
+            ),
+            Self::Forbidden(message) => (StatusCode::FORBIDDEN, ApiErrorCode::Forbidden, message),
+            Self::NotFound(message) => (StatusCode::NOT_FOUND, ApiErrorCode::NotFound, message),
+            Self::Conflict(message) => (StatusCode::CONFLICT, ApiErrorCode::Conflict, message),
+            Self::UnprocessableEntity(message) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiErrorCode::UnprocessableEntity,
+                message,
+            ),
+            Self::Internal(message) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiErrorCode::Internal,
+                message,
+            ),
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let (status, code, message) = self.parts();
+        let body = ApiErrorResponse {
+            error: ApiErrorBody {
+                code,
+                message: message.to_owned(),
+                correlation_id: Uuid::new_v4().to_string(),
+                details: None,
+            },
+        };
+        (status, Json(body)).into_response()
+    }
+}
+
+impl From<RepositoryError> for ApiError {
+    fn from(error: RepositoryError) -> Self {
+        match error {
+            RepositoryError::IdempotencyConflict { .. } => {
+                Self::Conflict("idempotency key was reused with a different request".to_owned())
+            }
+            RepositoryError::OperationNotFound => {
+                Self::NotFound("operation was not found".to_owned())
+            }
+            RepositoryError::InvalidLeaseDuration | RepositoryError::LeaseDurationOutOfRange => {
+                Self::Internal("operation lease configuration is invalid".to_owned())
+            }
+            RepositoryError::Domain(OperationError::Expired) => {
+                Self::Conflict("operation expired before it could be claimed".to_owned())
+            }
+            RepositoryError::Domain(
+                OperationError::InvalidTransition { .. }
+                | OperationError::WrongTargetAgent
+                | OperationError::LeaseOwnershipMismatch
+                | OperationError::NotClaimable,
+            ) => Self::Conflict("operation lease is no longer valid".to_owned()),
+            RepositoryError::Domain(error) => Self::BadRequest(error.to_string()),
+            RepositoryError::LockPoisoned => {
+                Self::Internal("operation repository lock was poisoned".to_owned())
+            }
+            RepositoryError::Mongo(_) => {
+                Self::Internal("operation store is unavailable".to_owned())
+            }
+            RepositoryError::TlsRequired
+            | RepositoryError::InsecureTls
+            | RepositoryError::InvalidDatabaseName => {
+                Self::Internal("operation store configuration is invalid".to_owned())
+            }
+        }
+    }
+}

@@ -98,6 +98,11 @@ impl WorkerRegistry {
             .iter()
             .find(|worker| worker.id == service_definition_id)
     }
+
+    /// All registered worker definitions in registration order.
+    pub fn iter(&self) -> impl Iterator<Item = &WorkerDefinition> {
+        self.workers.iter()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

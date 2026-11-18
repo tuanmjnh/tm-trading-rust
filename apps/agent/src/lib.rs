@@ -1,3 +1,4 @@
+mod api;
 mod state;
 
 use std::collections::{HashMap, HashSet};
@@ -17,10 +18,16 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use tm_trading_agent_protocol::{SupervisorCommand, WorkerMessage};
-use tm_trading_domain::DesiredState;
+use tm_trading_contracts::{
+    AgentCommandDto, DesiredStateDto, ObservedStateDto, OperationActionDto, ReadinessDto,
+    ServiceSnapshot,
+};
+use tm_trading_domain::{DesiredState, ObservedState, Readiness};
 use tm_trading_supervisor_core::{
     ServiceState, SupervisorError, WorkerDefinition, WorkerProcessIdentity, WorkerRegistry,
 };
+
+pub use api::ManagementApiClient;
 
 #[cfg(windows)]
 use process_wrap::tokio::{CreationFlags, JobObject, KillOnDrop};
@@ -72,6 +79,8 @@ pub enum AgentError {
     InvalidState(String),
     #[error("Agent state I/O failed: {0}")]
     StateIo(#[source] io::Error),
+    #[error("management API request failed: {0}")]
+    Api(String),
 }
 
 impl AgentError {
@@ -528,9 +537,16 @@ impl Agent {
         self.dirty = true;
     }
 
-    pub async fn run_until_shutdown(&mut self, poll_interval: Duration) -> Result<(), AgentError> {
+    pub async fn run_until_shutdown(
+        &mut self,
+        poll_interval: Duration,
+        api: Option<&ManagementApiClient>,
+    ) -> Result<(), AgentError> {
         let mut shutdown = self.shutdown_rx.clone();
         loop {
+            if let Some(api) = api {
+                self.serve_management_api(api).await;
+            }
             match self.poll_once().await {
                 Err(AgentError::ShutdownRequested) => break,
                 result => result?,
@@ -548,6 +564,82 @@ impl Agent {
             }
         }
         self.stop_all("agent shutdown").await
+    }
+
+    /// Reports the current service read model and executes one claimed command, if any.
+    async fn serve_management_api(&mut self, api: &ManagementApiClient) {
+        let snapshots = self.service_snapshots();
+        if let Err(error) = api.heartbeat(snapshots).await {
+            warn!(%error, "management API heartbeat failed");
+            return;
+        }
+
+        let command = match api.claim_command().await {
+            Ok(Some(command)) => command,
+            Ok(None) => return,
+            Err(error) => {
+                warn!(%error, "management API command claim failed");
+                return;
+            }
+        };
+
+        if let Err(error) = api.mark_running(&command).await {
+            warn!(%error, "management API command progress report failed");
+            return;
+        }
+
+        let result = self.execute_command(&command).await;
+        if let Err(error) = api.complete_command(&command, result).await {
+            warn!(%error, "management API command completion report failed");
+        }
+    }
+
+    /// Read model of every registered service, including services that are not running.
+    fn service_snapshots(&self) -> Vec<ServiceSnapshot> {
+        self.registry
+            .iter()
+            .map(|definition| {
+                let state = self
+                    .workers
+                    .get(definition.id)
+                    .map(|worker| &worker.state)
+                    .or_else(|| self.stopped_states.get(definition.id));
+                match state {
+                    Some(state) => service_snapshot(self.agent_id(), state),
+                    None => service_snapshot(
+                        self.agent_id(),
+                        &ServiceState::new(
+                            definition.id,
+                            &planned_instance_id(definition.id, self.agent_id()),
+                        ),
+                    ),
+                }
+            })
+            .collect()
+    }
+
+    async fn execute_command(&mut self, command: &AgentCommandDto) -> Result<String, AgentError> {
+        let service_id = command.service_definition_id.as_str();
+        match command.action {
+            OperationActionDto::Start => {
+                self.start_service(service_id).await?;
+                Ok(format!("service '{service_id}' started and ready"))
+            }
+            OperationActionDto::Stop => {
+                let outcome = self
+                    .stop_service(service_id, "management API command")
+                    .await?;
+                Ok(format!(
+                    "service '{service_id}' stopped (drained={}, forced={})",
+                    outcome.drained, outcome.forced
+                ))
+            }
+            OperationActionDto::Restart => {
+                self.restart_service(service_id, "management API command")
+                    .await?;
+                Ok(format!("service '{service_id}' restarted and ready"))
+            }
+        }
     }
 
     async fn stop_all(&mut self, reason: &str) -> Result<(), AgentError> {
@@ -1055,11 +1147,48 @@ fn executable_identity(path: &Path) -> String {
     }
 }
 
+/// Instance identifier used before a service has ever been started.
+fn planned_instance_id(service_definition_id: &str, agent_id: &str) -> String {
+    format!("{service_definition_id}@{agent_id}")
+}
+
+/// Maps the supervisor state model onto the shared API read model.
+fn service_snapshot(agent_id: &str, state: &ServiceState) -> ServiceSnapshot {
+    ServiceSnapshot {
+        service_instance_id: state.service_instance_id.clone(),
+        service_definition_id: state.service_definition_id.clone(),
+        agent_id: agent_id.to_owned(),
+        desired_state: match state.desired_state {
+            DesiredState::Running => DesiredStateDto::Running,
+            DesiredState::Stopped => DesiredStateDto::Stopped,
+        },
+        observed_state: match state.observed_state {
+            ObservedState::Starting => ObservedStateDto::Starting,
+            ObservedState::Running => ObservedStateDto::Running,
+            ObservedState::Stopping => ObservedStateDto::Stopping,
+            ObservedState::Stopped => ObservedStateDto::Stopped,
+            ObservedState::Failed => ObservedStateDto::Failed,
+            ObservedState::Unknown => ObservedStateDto::Unknown,
+        },
+        readiness: match state.readiness {
+            Readiness::Ready => ReadinessDto::Ready,
+            Readiness::Degraded => ReadinessDto::Degraded,
+            Readiness::NotReady => ReadinessDto::NotReady,
+            Readiness::Unknown => ReadinessDto::Unknown,
+        },
+        process_alive: state.process_alive,
+        restart_count: state.restart_count,
+        last_exit_code: state.last_exit_code,
+        retry_blocked: state.retry_blocked,
+        last_heartbeat_at: state.last_heartbeat_at,
+        updated_at: Utc::now(),
+    }
+}
+
 #[cfg(unix)]
 fn apply_platform_containment(command: &mut CommandWrap) {
     command.wrap(ProcessGroup::leader()).wrap(KillOnDrop);
 }
-
 #[cfg(windows)]
 fn apply_platform_containment(command: &mut CommandWrap) {
     // Detach the worker from the Agent console so console control events reach only the Agent,
@@ -1726,7 +1855,7 @@ mod tests {
 
         tokio::time::timeout(
             Duration::from_secs(1),
-            agent.run_until_shutdown(Duration::from_millis(10)),
+            agent.run_until_shutdown(Duration::from_millis(10), None),
         )
         .await
         .unwrap()
