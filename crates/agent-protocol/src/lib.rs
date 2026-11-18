@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-pub const WORKER_SCHEMA_VERSION: &str = "worker.v1";
+pub const WORKER_SCHEMA_VERSION: &str = "worker.v2";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -32,6 +32,8 @@ pub enum WorkerMessage {
         instance_id: String,
         at: DateTime<Utc>,
         pid: u32,
+        executable_path: String,
+        executable_version: String,
         schema_version: String,
     },
     Heartbeat {
@@ -112,18 +114,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn worker_hello_uses_the_v1_schema() {
+    fn worker_hello_uses_the_v2_schema() {
+        assert_eq!(WORKER_SCHEMA_VERSION, "worker.v2");
+
         let message = WorkerMessage::Hello {
             instance_id: "sample-worker@local-agent:1".to_owned(),
             at: Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap(),
             pid: 42,
+            executable_path: "C:\\tm-trading\\sample-worker.exe".to_owned(),
+            executable_version: "0.1.0".to_owned(),
             schema_version: WORKER_SCHEMA_VERSION.to_owned(),
         };
 
         let value = serde_json::to_value(message).unwrap();
 
         assert_eq!(value["type"], "hello");
-        assert_eq!(value["schema_version"], "worker.v1");
+        assert_eq!(value["schema_version"], "worker.v2");
+        assert_eq!(value["pid"], 42);
+        assert_eq!(value["executable_version"], "0.1.0");
+        assert!(value["executable_path"].as_str().is_some());
     }
 
     #[test]

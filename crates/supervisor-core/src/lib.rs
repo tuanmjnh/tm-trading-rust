@@ -21,6 +21,10 @@ pub enum SupervisorError {
     },
     #[error("worker instance mismatch: expected {expected}, got {actual}")]
     InstanceMismatch { expected: String, actual: String },
+    #[error("worker must complete the {expected} handshake first")]
+    HandshakeRequired { expected: &'static str },
+    #[error("worker handshake was already completed")]
+    HandshakeAlreadyComplete,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +58,7 @@ pub struct ReadinessRule {
 pub struct WorkerDefinition {
     pub id: &'static str,
     pub executable_name: &'static str,
+    pub executable_version: &'static str,
     pub readiness_rules: Vec<ReadinessRule>,
     pub startup_timeout: Duration,
     pub stop_grace: Duration,
@@ -66,6 +71,20 @@ pub struct WorkerRegistry {
 }
 
 impl WorkerRegistry {
+    #[must_use]
+    pub fn new(workers: Vec<WorkerDefinition>) -> Self {
+        Self { workers }
+    }
+
+    #[must_use]
+    pub fn sample_with_version(executable_version: &'static str) -> Self {
+        let mut definition = sample_worker_definition();
+        definition.executable_version = executable_version;
+        Self {
+            workers: vec![definition],
+        }
+    }
+
     #[must_use]
     pub fn sample() -> Self {
         Self {
@@ -88,6 +107,13 @@ pub struct LogEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerProcessIdentity {
+    pub pid: u32,
+    pub executable_path: String,
+    pub executable_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceState {
     pub service_definition_id: String,
     pub service_instance_id: String,
@@ -95,12 +121,15 @@ pub struct ServiceState {
     pub observed_state: ObservedState,
     pub readiness: Readiness,
     pub process_alive: Option<bool>,
+    pub process_identity: Option<WorkerProcessIdentity>,
+    handshake_complete: bool,
     pub evidence: WorkerEvidence,
     pub last_heartbeat_at: Option<DateTime<Utc>>,
     pub last_success_at: Option<DateTime<Utc>>,
     pub last_exit_code: Option<i32>,
     pub restart_count: u32,
     pub next_restart_at: Option<DateTime<Utc>>,
+    pub retry_blocked: bool,
     pub logs: VecDeque<LogEntry>,
 }
 
@@ -114,12 +143,15 @@ impl ServiceState {
             observed_state: ObservedState::Unknown,
             readiness: Readiness::Unknown,
             process_alive: None,
+            process_identity: None,
+            handshake_complete: false,
             evidence: WorkerEvidence::default(),
             last_heartbeat_at: None,
             last_success_at: None,
             last_exit_code: None,
             restart_count: 0,
             next_restart_at: None,
+            retry_blocked: false,
             logs: VecDeque::new(),
         }
     }
@@ -129,21 +161,54 @@ impl ServiceState {
         self.observed_state = ObservedState::Starting;
         self.readiness = Readiness::Unknown;
         self.process_alive = None;
+        self.process_identity = None;
+        self.handshake_complete = false;
         self.evidence = WorkerEvidence::default();
         self.last_heartbeat_at = None;
         self.last_success_at = None;
         self.next_restart_at = None;
+        self.retry_blocked = false;
     }
 
     pub fn request_stop(&mut self) {
         self.desired_state = DesiredState::Stopped;
-        self.observed_state = if self.process_alive == Some(false) {
-            ObservedState::Stopped
-        } else {
+        self.observed_state = if self.process_alive == Some(true) {
             ObservedState::Stopping
+        } else {
+            ObservedState::Stopped
         };
         self.readiness = Readiness::NotReady;
         self.next_restart_at = None;
+        self.retry_blocked = false;
+    }
+
+    pub fn request_process_stop(&mut self) {
+        self.observed_state = if self.process_alive == Some(true) {
+            ObservedState::Stopping
+        } else {
+            ObservedState::Stopped
+        };
+        self.readiness = Readiness::NotReady;
+    }
+
+    pub fn apply_agent_shutdown_exit(&mut self, exit_code: i32) {
+        self.process_alive = Some(false);
+        self.last_exit_code = Some(exit_code);
+        self.last_heartbeat_at = None;
+        self.readiness = Readiness::NotReady;
+        self.observed_state = ObservedState::Stopped;
+    }
+
+    pub fn quarantine(&mut self, exit_code: Option<i32>) {
+        self.process_alive = Some(false);
+        if let Some(exit_code) = exit_code {
+            self.last_exit_code = Some(exit_code);
+        }
+        self.last_heartbeat_at = None;
+        self.readiness = Readiness::NotReady;
+        self.next_restart_at = None;
+        self.observed_state = ObservedState::Failed;
+        self.retry_blocked = true;
     }
 
     pub fn apply_worker_message(
@@ -159,10 +224,23 @@ impl ServiceState {
                 actual: actual_instance_id.to_owned(),
             });
         }
+        if self.handshake_complete && matches!(message, WorkerMessage::Hello { .. }) {
+            return Err(SupervisorError::HandshakeAlreadyComplete);
+        }
+        if !self.handshake_complete && !matches!(message, WorkerMessage::Hello { .. }) {
+            return Err(SupervisorError::HandshakeRequired {
+                expected: WORKER_SCHEMA_VERSION,
+            });
+        }
 
         match message {
             WorkerMessage::Hello {
-                at, schema_version, ..
+                at: _,
+                pid,
+                executable_path,
+                executable_version,
+                schema_version,
+                ..
             } => {
                 if schema_version != WORKER_SCHEMA_VERSION {
                     return Err(SupervisorError::UnsupportedSchema {
@@ -171,13 +249,18 @@ impl ServiceState {
                     });
                 }
                 self.process_alive = Some(true);
+                self.process_identity = Some(WorkerProcessIdentity {
+                    pid: *pid,
+                    executable_path: executable_path.clone(),
+                    executable_version: executable_version.clone(),
+                });
+                self.handshake_complete = true;
                 self.observed_state = if self.desired_state == DesiredState::Stopped {
                     ObservedState::Stopping
                 } else {
                     ObservedState::Starting
                 };
                 self.readiness = Readiness::NotReady;
-                self.last_heartbeat_at = Some(*at);
             }
             WorkerMessage::Heartbeat { at, evidence, .. } => {
                 self.update_evidence(evidence);
@@ -188,16 +271,17 @@ impl ServiceState {
                 {
                     self.observed_state = ObservedState::Running;
                 }
-                self.refresh_readiness(definition, *at);
+                self.refresh_readiness(definition, now);
             }
-            WorkerMessage::Ready { at, evidence, .. } => {
+            WorkerMessage::Ready {
+                at: _, evidence, ..
+            } => {
                 self.update_evidence(evidence);
                 self.process_alive = Some(true);
-                self.last_heartbeat_at = Some(*at);
                 if self.desired_state == DesiredState::Running {
                     self.observed_state = ObservedState::Running;
                 }
-                self.refresh_readiness(definition, *at);
+                self.refresh_readiness(definition, now);
             }
             WorkerMessage::Cycle {
                 instance_id: _,
@@ -212,7 +296,6 @@ impl ServiceState {
             } => {
                 self.update_evidence(evidence);
                 self.process_alive = Some(true);
-                self.last_heartbeat_at = Some(*at);
                 if self.desired_state == DesiredState::Running {
                     self.observed_state = ObservedState::Running;
                 }
@@ -226,7 +309,7 @@ impl ServiceState {
                     self.record_log(*at, format!("cycle skipped: {skipped}"));
                 }
                 let _ = (duration_ms, summary);
-                self.refresh_readiness(definition, *at);
+                self.refresh_readiness(definition, now);
             }
             WorkerMessage::OperationResult {
                 ok,
@@ -237,7 +320,6 @@ impl ServiceState {
             } => {
                 self.update_evidence(evidence);
                 self.process_alive = Some(true);
-                self.last_heartbeat_at = Some(now);
                 if *ok && result.skipped.is_none() && error.is_none() {
                     self.last_success_at = Some(now);
                     self.evidence.last_success_at = Some(now);
@@ -286,16 +368,17 @@ impl ServiceState {
         self.readiness = Readiness::NotReady;
         self.next_restart_at = None;
 
-        if self.desired_state == DesiredState::Running
-            && self.observed_state != ObservedState::Stopping
-        {
+        if self.desired_state == DesiredState::Running {
             self.observed_state = ObservedState::Failed;
-            self.restart_count = self.restart_count.saturating_add(1);
-            if self.restart_count <= definition.max_restart_attempts {
-                let delay = restart_backoff(self.restart_count, jitter_percent);
-                self.next_restart_at = now.checked_add_signed(
-                    chrono::Duration::from_std(delay).unwrap_or_else(|_| chrono::Duration::zero()),
-                );
+            if !self.retry_blocked {
+                self.restart_count = self.restart_count.saturating_add(1);
+                if self.restart_count <= definition.max_restart_attempts {
+                    let delay = restart_backoff(self.restart_count, jitter_percent);
+                    self.next_restart_at = now.checked_add_signed(
+                        chrono::Duration::from_std(delay)
+                            .unwrap_or_else(|_| chrono::Duration::zero()),
+                    );
+                }
             }
         } else {
             self.observed_state = ObservedState::Stopped;
@@ -308,11 +391,13 @@ impl ServiceState {
         self.observed_state = ObservedState::Starting;
         self.readiness = Readiness::Unknown;
         self.process_alive = None;
+        self.process_identity = None;
+        self.handshake_complete = false;
         self.evidence = WorkerEvidence::default();
         self.last_heartbeat_at = None;
         self.last_success_at = None;
-        self.last_exit_code = None;
         self.next_restart_at = None;
+        self.retry_blocked = false;
     }
 
     #[must_use]
@@ -343,7 +428,7 @@ impl ServiceState {
         }
     }
 
-    fn refresh_readiness(&mut self, definition: &WorkerDefinition, now: DateTime<Utc>) {
+    pub fn refresh_readiness(&mut self, definition: &WorkerDefinition, now: DateTime<Utc>) {
         self.readiness = evaluate_readiness(
             definition,
             self.process_alive,
@@ -364,6 +449,7 @@ pub fn sample_worker_definition() -> WorkerDefinition {
         } else {
             "tm-trading-sample-worker"
         },
+        executable_version: env!("CARGO_PKG_VERSION"),
         readiness_rules: vec![
             ReadinessRule {
                 id: "process-alive",
@@ -572,6 +658,8 @@ mod tests {
                     instance_id: state.service_instance_id.clone(),
                     at: now,
                     pid: 42,
+                    executable_path: "sample-worker".to_owned(),
+                    executable_version: env!("CARGO_PKG_VERSION").to_owned(),
                     schema_version: WORKER_SCHEMA_VERSION.to_owned(),
                 },
                 now,
@@ -584,11 +672,25 @@ mod tests {
     }
 
     #[test]
-    fn ready_message_proves_functional_readiness() {
+    fn ready_message_requires_a_separate_heartbeat() {
         let definition = sample_worker_definition();
         let now = Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap();
         let mut state = state();
         state.request_start();
+        state
+            .apply_worker_message(
+                &definition,
+                &WorkerMessage::Hello {
+                    instance_id: state.service_instance_id.clone(),
+                    at: now,
+                    pid: 42,
+                    executable_path: "sample-worker".to_owned(),
+                    executable_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    schema_version: WORKER_SCHEMA_VERSION.to_owned(),
+                },
+                now,
+            )
+            .unwrap();
         let evidence = WorkerEvidence {
             capability_verified: Some(true),
             ..WorkerEvidence::default()
@@ -607,7 +709,140 @@ mod tests {
             .unwrap();
 
         assert_eq!(state.observed_state, ObservedState::Running);
+        assert_eq!(state.readiness, Readiness::NotReady);
+
+        state
+            .apply_worker_message(
+                &definition,
+                &WorkerMessage::Heartbeat {
+                    instance_id: state.service_instance_id.clone(),
+                    at: now,
+                    evidence: WorkerEvidence {
+                        capability_verified: Some(true),
+                        ..WorkerEvidence::default()
+                    },
+                },
+                now,
+            )
+            .unwrap();
+
         assert_eq!(state.readiness, Readiness::Ready);
+    }
+
+    #[test]
+    fn stale_heartbeat_is_evaluated_at_agent_receipt_time() {
+        let definition = sample_worker_definition();
+        let now = Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap();
+        let mut state = state();
+        state.request_start();
+        state
+            .apply_worker_message(
+                &definition,
+                &WorkerMessage::Hello {
+                    instance_id: state.service_instance_id.clone(),
+                    at: now,
+                    pid: 42,
+                    executable_path: "sample-worker".to_owned(),
+                    executable_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    schema_version: WORKER_SCHEMA_VERSION.to_owned(),
+                },
+                now,
+            )
+            .unwrap();
+        let evidence = WorkerEvidence {
+            capability_verified: Some(true),
+            ..WorkerEvidence::default()
+        };
+
+        state
+            .apply_worker_message(
+                &definition,
+                &WorkerMessage::Heartbeat {
+                    instance_id: state.service_instance_id.clone(),
+                    at: now - Duration::seconds(31),
+                    evidence,
+                },
+                now,
+            )
+            .unwrap();
+
+        assert_eq!(state.readiness, Readiness::NotReady);
+    }
+
+    #[test]
+    fn future_heartbeat_is_evaluated_at_agent_receipt_time() {
+        let definition = sample_worker_definition();
+        let now = Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap();
+        let mut state = state();
+        state.request_start();
+        state
+            .apply_worker_message(
+                &definition,
+                &WorkerMessage::Hello {
+                    instance_id: state.service_instance_id.clone(),
+                    at: now,
+                    pid: 42,
+                    executable_path: "sample-worker".to_owned(),
+                    executable_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    schema_version: WORKER_SCHEMA_VERSION.to_owned(),
+                },
+                now,
+            )
+            .unwrap();
+        let evidence = WorkerEvidence {
+            capability_verified: Some(true),
+            ..WorkerEvidence::default()
+        };
+
+        state
+            .apply_worker_message(
+                &definition,
+                &WorkerMessage::Heartbeat {
+                    instance_id: state.service_instance_id.clone(),
+                    at: now + Duration::seconds(10),
+                    evidence,
+                },
+                now,
+            )
+            .unwrap();
+
+        assert_eq!(state.readiness, Readiness::NotReady);
+    }
+
+    #[test]
+    fn duplicate_hello_is_rejected() {
+        let definition = sample_worker_definition();
+        let now = Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap();
+        let mut state = state();
+        state.request_start();
+        let hello = WorkerMessage::Hello {
+            instance_id: state.service_instance_id.clone(),
+            at: now,
+            pid: 42,
+            executable_path: "sample-worker".to_owned(),
+            executable_version: env!("CARGO_PKG_VERSION").to_owned(),
+            schema_version: WORKER_SCHEMA_VERSION.to_owned(),
+        };
+        state
+            .apply_worker_message(&definition, &hello, now)
+            .unwrap();
+
+        let error = state
+            .apply_worker_message(&definition, &hello, now)
+            .unwrap_err();
+
+        assert!(matches!(error, SupervisorError::HandshakeAlreadyComplete));
+    }
+
+    #[test]
+    fn stopping_without_a_live_process_is_observed_as_stopped() {
+        let mut state = state();
+        state.request_start();
+
+        state.request_stop();
+
+        assert_eq!(state.observed_state, ObservedState::Stopped);
+        assert_eq!(state.readiness, Readiness::NotReady);
     }
 
     #[test]
@@ -623,7 +858,9 @@ mod tests {
                     instance_id: state.service_instance_id.clone(),
                     at: now,
                     pid: 42,
-                    schema_version: "worker.v2".to_owned(),
+                    executable_path: "sample-worker".to_owned(),
+                    executable_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    schema_version: "worker.v1".to_owned(),
                 },
                 now,
             )
@@ -633,7 +870,7 @@ mod tests {
             error,
             SupervisorError::UnsupportedSchema {
                 expected: WORKER_SCHEMA_VERSION,
-                actual: "worker.v2".to_owned(),
+                actual: "worker.v1".to_owned(),
             }
         );
     }
@@ -671,6 +908,42 @@ mod tests {
     }
 
     #[test]
+    fn agent_shutdown_preserves_the_running_intent_without_consuming_restart_budget() {
+        let now = Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap();
+        let restart_at = now + Duration::seconds(30);
+        let mut state = state();
+        state.request_start();
+        state.process_alive = Some(true);
+        state.next_restart_at = Some(restart_at);
+
+        state.apply_agent_shutdown_exit(0);
+
+        assert_eq!(state.desired_state, DesiredState::Running);
+        assert_eq!(state.observed_state, ObservedState::Stopped);
+        assert_eq!(state.readiness, Readiness::NotReady);
+        assert_eq!(state.restart_count, 0);
+        assert_eq!(state.next_restart_at, Some(restart_at));
+    }
+
+    #[test]
+    fn a_quarantined_worker_is_not_automatically_retried() {
+        let definition = sample_worker_definition();
+        let now = Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap();
+        let mut state = state();
+        state.request_start();
+        state.process_alive = Some(true);
+
+        state.quarantine(Some(2));
+        state.apply_exit(&definition, 2, now, 0);
+
+        assert_eq!(state.desired_state, DesiredState::Running);
+        assert_eq!(state.observed_state, ObservedState::Failed);
+        assert_eq!(state.restart_count, 0);
+        assert!(state.next_restart_at.is_none());
+        assert!(state.retry_blocked);
+    }
+
+    #[test]
     fn exhausted_restart_budget_does_not_schedule_another_attempt() {
         let mut definition = sample_worker_definition();
         definition.max_restart_attempts = 1;
@@ -687,6 +960,102 @@ mod tests {
 
         assert_eq!(state.restart_count, 2);
         assert!(state.next_restart_at.is_none());
+    }
+
+    #[test]
+    fn ready_without_a_successful_handshake_is_rejected() {
+        let definition = sample_worker_definition();
+        let now = Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap();
+        let mut state = state();
+        state.request_start();
+        let evidence = WorkerEvidence {
+            capability_verified: Some(true),
+            ..WorkerEvidence::default()
+        };
+
+        let result = state.apply_worker_message(
+            &definition,
+            &WorkerMessage::Ready {
+                instance_id: state.service_instance_id.clone(),
+                at: now,
+                evidence,
+            },
+            now,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stale_heartbeat_refresh_makes_a_live_worker_not_ready() {
+        let definition = sample_worker_definition();
+        let now = Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap();
+        let mut state = state();
+        state.process_alive = Some(true);
+        state.last_heartbeat_at = Some(now - Duration::seconds(31));
+        state.readiness = Readiness::Ready;
+        let evidence = WorkerEvidence {
+            capability_verified: Some(true),
+            ..WorkerEvidence::default()
+        };
+        state.evidence = evidence;
+
+        state.refresh_readiness(&definition, now);
+
+        assert_eq!(state.readiness, Readiness::NotReady);
+    }
+
+    #[test]
+    fn a_crash_after_a_stopping_message_still_restarts_when_desired_state_is_running() {
+        let definition = sample_worker_definition();
+        let now = Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap();
+        let mut state = state();
+        state.request_start();
+        state.process_alive = Some(true);
+        state
+            .apply_worker_message(
+                &definition,
+                &WorkerMessage::Hello {
+                    instance_id: state.service_instance_id.clone(),
+                    at: now,
+                    pid: 42,
+                    executable_path: "sample-worker".to_owned(),
+                    executable_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    schema_version: WORKER_SCHEMA_VERSION.to_owned(),
+                },
+                now,
+            )
+            .unwrap();
+        state
+            .apply_worker_message(
+                &definition,
+                &WorkerMessage::Stopping {
+                    instance_id: state.service_instance_id.clone(),
+                    at: now,
+                    reason: "worker announced shutdown".to_owned(),
+                },
+                now,
+            )
+            .unwrap();
+
+        state.apply_exit(&definition, 9, now, 0);
+
+        assert_eq!(state.restart_count, 1);
+        assert!(state.next_restart_at.is_some());
+    }
+
+    #[test]
+    fn preparing_a_restart_preserves_the_previous_exit_code() {
+        let definition = sample_worker_definition();
+        let now = Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap();
+        let mut state = state();
+        state.request_start();
+        state.process_alive = Some(true);
+        state.apply_exit(&definition, 9, now, 0);
+
+        state.prepare_restart("sample-worker@local-agent:2");
+
+        assert_eq!(state.last_exit_code, Some(9));
     }
 
     #[test]

@@ -1,12 +1,12 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation and Phase 2 protocol/lifecycle core implemented; runtime not yet complete<br>
-> Last updated: 2026-11-17<br>
+> Status: Phase 1 foundation and Phase 2 local Agent/sample-worker runtime implemented and hardened; API persistence not yet complete<br>
+> Last updated: 2026-11-18<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## 1. Current scope
 
-The repository currently contains the shared Rust foundation needed by the first Desktop-to-Agent vertical slice. It does not yet contain an executable API, Agent, Desktop client, or worker.
+The repository currently contains the shared Rust foundation and an independent local Host Agent with one sample worker. It does not yet contain an executable Management API or Desktop client.
 
 Implemented:
 
@@ -17,13 +17,17 @@ Implemented:
 - tracing initialization and correlation spans;
 - a MongoDB connection boundary and an in-memory operation repository for tests;
 - a versioned JSON-line worker IPC protocol with explicit shutdown and drained status;
-- a static worker registry plus deterministic desired/observed/readiness state transitions, bounded logs, heartbeat freshness, and bounded restart policy.
+- a static worker registry plus deterministic desired/observed/readiness state transitions, bounded logs, heartbeat freshness, and bounded restart policy;
+- an independent Tokio Host Agent that owns allowlisted worker processes, separates liveness from readiness, captures bounded logs, restarts crashed workers, and drains workers explicitly;
+- an exclusive per-installation Agent lock, a recoverable local process checkpoint, worker PID/path/version handshake validation, Windows Job Object containment, and Unix process-group termination;
+- bounded worker-event batches, receipt-time heartbeat evaluation, persisted restart budgets and deterministic-failure quarantine, monotonic Agent shutdown, and bounded forced-process reaping;
+- a JSON-line sample worker with handshake, readiness, heartbeat, cycle, operation, and graceful-shutdown messages.
 
 Not implemented:
 
 - Axum Management API and HTTP authentication;
 - TM Hub token verification and capability enforcement;
-- Host Agent executable, OS process lifecycle, or sample worker executable;
+- Agent-to-Management-API polling and durable Agent credential rotation;
 - MongoDB operation repository and service snapshot persistence;
 - Dioxus Desktop client.
 
@@ -46,7 +50,10 @@ tm-trading-contracts  tm-trading-storage
                              |
 tm-trading-config -> tm-trading-observability
 
-tm-trading-agent-protocol -> tm-trading-supervisor-core -> future tm-trading-agent
+tm-trading-agent-protocol -> tm-trading-supervisor-core -> tm-trading-agent
+        |                                      |
+        |                                      +-> local locked checkpoint
+        +-> tm-trading-sample-worker -> worker.v2 JSON lines
 ```
 
 Dependency rules:
@@ -58,7 +65,9 @@ Dependency rules:
 - `observability` owns tracing setup and correlation spans.
 - `agent-protocol` owns the versioned worker IPC messages and explicit control commands.
 - `supervisor-core` owns static worker definitions and deterministic lifecycle/readiness transitions; it has no OS process or UI dependency.
-- Executable processes will be thin composition roots in later phases.
+- `apps/agent` is the sole OS process owner for workers, uses a static executable registry, clears inherited child environment before adding an allowlist, and never accepts arbitrary executable paths or arguments. It holds an exclusive state-directory lock, validates the worker's PID, executable path, and executable version during the `worker.v2` handshake, uses a Windows Job Object or Unix process group, and isolates a rejected worker without stopping other workers. Windows Job Object descendant containment is implemented; Unix forced termination targets the process group, while descendant cleanup after an abrupt Agent loss remains unverified on a Unix runtime.
+- `workers/sample-worker` implements the versioned control protocol, performs its capability self-check before readiness, and reports explicit drain status.
+- Executable processes remain thin composition roots around these crates.
 
 ## 3. Contracts and versioning
 
@@ -122,7 +131,7 @@ TM Hub remains authoritative for human identity, sessions, RBAC, routes, and sha
 
 Tracing uses `tracing` and `tracing-subscriber`. JSON output is available for structured local or cloud logs. Correlation spans carry a UUID without logging credentials or raw authorization headers.
 
-The later Agent slice must add heartbeat, bounded log tails, exit codes, restart counters, and service-state reporting. Process liveness must not be reported as functional readiness.
+The Agent now captures heartbeat timestamps, bounded log tails, exit codes, restart counters, PID/executable identity, and service-state projections. It refreshes readiness against the current time on every poll and evaluates heartbeat freshness at Agent receipt time, so a stale heartbeat cannot remain `READY`. The local checkpoint retains desired/observed state, process identity, the last exit code, restart count, restart schedule, and deterministic-failure retry block needed to reconcile after an Agent restart; MongoDB remains the target for durable operation and service-snapshot persistence. An explicit service stop persists desired `STOPPED`, while Agent-level shutdown stops the process but preserves desired `RUNNING` and any pending restart backoff without consuming the restart budget. The next slice must expose those snapshots and operation outcomes through the Management API.
 
 ## 8. Phase checklist
 
@@ -135,9 +144,11 @@ The later Agent slice must add heartbeat, bounded log tails, exit codes, restart
 - [x] Add CI checks for formatting, Clippy, tests, release build, OpenAPI drift, dependency audit, and secret scanning.
 - [x] Define the worker IPC protocol and static worker registry.
 - [x] Implement deterministic lifecycle, readiness, heartbeat, log-tail, and restart-policy state transitions.
-- [ ] Implement the independent Host Agent and sample-worker executable.
+- [x] Implement the independent Host Agent and sample-worker executable.
+- [x] Enforce one Agent owner per installation, Windows Job Object containment and Unix process-group termination, worker identity validation, bounded replacement startup, and local restart reconciliation.
+- [x] Harden local lifecycle behavior with receipt-time heartbeat evaluation, persisted restart budgets and quarantine, bounded event draining and termination, and distinct explicit-stop versus Agent-shutdown semantics.
 - [ ] Persist operations and service snapshots through the Management API.
-- [ ] Run crash, restart, readiness, and graceful-shutdown drills.
+- [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification
 

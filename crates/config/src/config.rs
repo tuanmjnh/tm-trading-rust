@@ -58,6 +58,11 @@ impl LogFormat {
             _ => Err(ConfigError::InvalidLogFormat(value.to_owned())),
         }
     }
+
+    pub fn from_env() -> Result<Self, ConfigError> {
+        let value = std::env::var("TM_LOG_FORMAT").unwrap_or_else(|_| "compact".to_owned());
+        Self::parse(&value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

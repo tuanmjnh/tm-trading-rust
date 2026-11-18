@@ -458,6 +458,34 @@ Agent registration and revocation are per host. A static shared Agent secret is 
 
 Append-only audit entries for operation creation, claim, progress, completion, expiry, revocation, and service reconciliation. Entries contain IDs, actor, action, timestamp, and redacted detail only.
 
+### 8.5 Local Agent checkpoint (not MongoDB)
+
+The current local runtime slice persists `agent-state.json` inside the installation-local Agent state directory. The same directory contains `agent.lock`, which enforces one Agent owner per installation. The previous known-good checkpoint is retained as `agent-state.json.bak`; a missing or corrupt primary is restored from that backup.
+
+The checkpoint is deliberately smaller than the proposed MongoDB `service_instances` snapshot:
+
+```text
+schemaVersion
++agentId
++services[]
++  serviceDefinitionId
++  serviceInstanceId
++  desiredState
++  observedState
++  readiness
++  processIdentity { pid, executablePath, executableVersion }
++  lastExitCode
++  restartCount
++  nextRestartAt
++  retryBlocked
+```
+
+`retryBlocked` defaults to `false` when absent so schema-v1 checkpoints created before deterministic-failure quarantine remain readable. A true value records that the worker was quarantined after a deterministic protocol, schema, or identity rejection and must not be automatically retried.
+
+Its only durable purpose is local restart reconciliation. It contains no durable operation, command, lease, fencing token, readiness evidence details, heartbeat history, log tail, or complete service snapshot. After an Agent restart, a previously desired-running service is reconciled as failed and scheduled for a fresh bounded replacement unless its restart budget is exhausted or it is quarantined; the checkpoint never proves that the old PID is still live or ready. Agent-level shutdown preserves desired `RUNNING` and any pending restart schedule without consuming the restart budget, while an explicit service stop persists desired `STOPPED`.
+
+MongoDB remains the target for durable operation and service-snapshot persistence. When `service_instances` is implemented, its document remains the authoritative persisted service projection read through the Management API; it must not be conflated with or replaced by `agent-state.json`.
+
 ## 9. Repository boundaries
 
 The Rust repository layer should expose narrow domain traits rather than leaking BSON into contracts.

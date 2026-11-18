@@ -1,0 +1,23 @@
+[package]
+name = "tm-trading-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+process-wrap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+tm-trading-agent-protocol.workspace = true
+tm-trading-config.workspace = true
+tm-trading-domain.workspace = true
+tm-trading-observability.workspace = true
+tm-trading-supervisor-core.workspace = true
+
+[lints]
+workspace = true

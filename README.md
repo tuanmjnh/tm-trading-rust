@@ -6,15 +6,15 @@ The authoritative product and architecture specification is [`docs/TM-TRADING-RU
 
 ## Current status
 
-The Phase 0 migration audit and Phase 1 Rust workspace foundation are complete. The workspace now contains shared domain, API-contract, configuration, observability, and storage crates, plus the first generated OpenAPI snapshot.
+The Phase 0 migration audit, Phase 1 Rust workspace foundation, and the Phase 2 local runtime slice are implemented. The workspace now contains shared domain, API-contract, configuration, observability, and storage crates, an independent hardened Host Agent, a sample worker, and the first generated OpenAPI snapshot.
 
-The next implementation slice adds the independent Host Agent and sample worker before exposing the Axum API. The full milestone will prove this path:
+The next implementation slice exposes durable operations and service snapshots through the Axum API. The full milestone will prove this path:
 
 ```text
 Dioxus Desktop -> Axum Management API -> independent Host Agent -> sample worker
 ```
 
-No executable API, Agent, Desktop client, or worker exists yet. The project will reuse the existing MongoDB data where practical and will not perform a destructive migration.
+No executable Management API or Desktop client exists yet. The project will reuse the existing MongoDB data where practical and will not perform a destructive migration.
 
 ## Product boundary
 
@@ -57,6 +57,18 @@ git diff --exit-code -- docs/api/openapi.yaml
 
 The CI workflow also runs a RustSec dependency audit and a repository secret scan with pinned third-party actions.
 
+Build and exercise the independent Agent/sample-worker runtime:
+
+```powershell
+cargo build -p tm-trading-agent -p tm-trading-sample-worker
+$selfTestState = Join-Path (Resolve-Path target/tmp).Path ("agent-self-test-" + [guid]::NewGuid().ToString("N"))
+.\target\debug\tm-trading-agent.exe --self-test --worker-dir .\target\debug --state-dir $selfTestState
+$crashState = Join-Path (Resolve-Path target/tmp).Path ("agent-crash-test-" + [guid]::NewGuid().ToString("N"))
+.\target\debug\tm-trading-agent.exe --crash-after-ms 100 --worker-dir .\target\debug --state-dir $crashState
+```
+
+The Agent holds an exclusive lock for its state directory and persists a small local process checkpoint there. Windows workers run in a kill-on-close Job Object; Unix workers run in a process group, with abrupt Unix descendant cleanup still requiring runtime verification. A second Agent using the same state directory fails closed.
+
 No command is considered passed unless it was executed and its result observed. Reports use `PASS`, `FAIL`, `NOT RUN`, `BLOCKED`, or `SKIPPED`.
 
 ## Documentation
@@ -68,6 +80,8 @@ No command is considered passed unless it was executed and its result observed. 
 - [`docs/migration/data-contract-map.md`](docs/migration/data-contract-map.md) — MongoDB and event contract map
 - [`docs/migration/tm-hub-integration-map.md`](docs/migration/tm-hub-integration-map.md) — TM Hub integration contract
 - [`docs/api/openapi.yaml`](docs/api/openapi.yaml) — generated API contract snapshot
+- [`docs/operations/service-catalog.md`](docs/operations/service-catalog.md) — registered worker definitions and readiness probes
+- [`docs/operations/runbooks.md`](docs/operations/runbooks.md) — Agent, crash/restart, and graceful-shutdown procedures
 
 ## Development rules
 
