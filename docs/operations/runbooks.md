@@ -64,6 +64,10 @@ The Agent starts the registered sample worker and remains independent of any Des
 
 Press `Ctrl+C` to request Agent shutdown; on Unix, `SIGTERM` requests the same shutdown. Shutdown requests are monotonic and cannot be cancelled by a later signal. The Agent then sends the explicit worker shutdown command and waits up to the configured grace period before escalating. After the worker process exits, the Agent collects the final protocol events for at most one second so the reported drain status reflects the worker's own final message. A forced kill is reaped for at most five seconds. Windows console close, logoff, and shutdown events use the same drain path.
 
+Windows console hosting note: `Ctrl+C` is delivered only when the Agent is hosted by an existing console (Windows Terminal, `cmd.exe`, PowerShell). A dedicated console window — Explorer double-click or `cmd /c start` — is created with `CREATE_NEW_CONSOLE`, and Windows disables `Ctrl+C` for every process in that console until the application calls `SetConsoleCtrlHandler(NULL, FALSE)`. The Agent does not call that API because this workspace forbids unsafe code, so in a dedicated console window use the console close action, which uses the same drain path. Verified on Windows: the `CTRL_C_EVENT` is delivered by the operating system but not received by the application in a `CREATE_NEW_CONSOLE` console, and is received after the ignore attribute is cleared.
+
+The worker is spawned detached from the Agent console on Windows, so a console close, logoff, or shutdown event reaches the Agent only. The Agent then drains the worker over the explicit control channel; the worker exits with code `0` instead of being terminated by the console event with `0xC000013A`.
+
 Agent shutdown preserves the worker's desired `RUNNING` state, pending restart backoff, and restart budget. The next Agent launch reconciles that desired state. Only an explicit service stop persists desired `STOPPED` and cancels a pending automatic restart.
 
 ## Logs and status

@@ -23,9 +23,11 @@ use tm_trading_supervisor_core::{
 };
 
 #[cfg(windows)]
-use process_wrap::tokio::{JobObject, KillOnDrop};
+use process_wrap::tokio::{CreationFlags, JobObject, KillOnDrop};
 #[cfg(unix)]
 use process_wrap::tokio::{KillOnDrop, ProcessGroup};
+#[cfg(windows)]
+use windows::Win32::System::Threading::DETACHED_PROCESS;
 
 const AGENT_LOCK_FILE_NAME: &str = "agent.lock";
 const MAX_WORKER_EVENTS_PER_BATCH: usize = 128;
@@ -699,14 +701,7 @@ impl Agent {
                 crash_after_ms.to_string(),
             );
         }
-        #[cfg(unix)]
-        {
-            command.wrap(ProcessGroup::leader()).wrap(KillOnDrop);
-        }
-        #[cfg(windows)]
-        {
-            command.wrap(JobObject).wrap(KillOnDrop);
-        }
+        apply_platform_containment(&mut command);
 
         let mut child = command.spawn().map_err(AgentError::Command)?;
         self.crash_after_ms = None;
@@ -1060,6 +1055,22 @@ fn executable_identity(path: &Path) -> String {
     }
 }
 
+#[cfg(unix)]
+fn apply_platform_containment(command: &mut CommandWrap) {
+    command.wrap(ProcessGroup::leader()).wrap(KillOnDrop);
+}
+
+#[cfg(windows)]
+fn apply_platform_containment(command: &mut CommandWrap) {
+    // Detach the worker from the Agent console so console control events reach only the Agent,
+    // which drains the worker over the explicit control channel. Without this, a console close
+    // kills the worker with 0xC000013A before the drain can complete.
+    command
+        .wrap(CreationFlags(DETACHED_PROCESS))
+        .wrap(JobObject)
+        .wrap(KillOnDrop);
+}
+
 async fn shutdown_signal() -> io::Result<()> {
     #[cfg(windows)]
     {
@@ -1102,6 +1113,20 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/tmp/agent-tests")
             .join(format!("tm-trading-agent-{}", Uuid::new_v4()))
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn worker_is_detached_from_the_agent_console() {
+        let mut command = CommandWrap::with_new("worker.exe", |_| {});
+        apply_platform_containment(&mut command);
+
+        let flags = command
+            .get_wrap::<CreationFlags>()
+            .expect("windows worker command must set creation flags");
+        assert_eq!(flags.0, DETACHED_PROCESS);
+        assert!(command.get_wrap::<JobObject>().is_some());
+        assert!(command.get_wrap::<KillOnDrop>().is_some());
     }
 
     #[test]
