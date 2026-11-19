@@ -5685,6 +5685,7 @@ dependencies = [
  "futures-util",
  "mongodb",
  "thiserror 2.0.21",
+ "tm-trading-contracts",
  "tm-trading-domain",
  "tokio",
  "uuid",

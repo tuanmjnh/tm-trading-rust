@@ -309,13 +309,13 @@ fn bson_timestamp(value: DateTime<Utc>) -> Result<BsonDateTime, RepositoryError>
 }
 
 fn bson_i64(value: u64) -> Result<i64, RepositoryError> {
-    i64::try_from(value).map_err(|_| RepositoryError::CorruptOperation("fencing token overflow"))
+    i64::try_from(value).map_err(|_| RepositoryError::CorruptRecord("fencing token overflow"))
 }
 
 fn from_bson_timestamp(value: BsonDateTime) -> Result<DateTime<Utc>, RepositoryError> {
     Utc.timestamp_millis_opt(value.timestamp_millis())
         .single()
-        .ok_or(RepositoryError::CorruptOperation("invalid timestamp"))
+        .ok_or(RepositoryError::CorruptRecord("invalid timestamp"))
 }
 
 fn to_document(operation: &Operation) -> Result<Document, RepositoryError> {
@@ -363,19 +363,19 @@ fn from_document(document: Document) -> Result<Operation, RepositoryError> {
         document
             .get_str(field)
             .map(str::to_owned)
-            .map_err(|_| RepositoryError::CorruptOperation(field))
+            .map_err(|_| RepositoryError::CorruptRecord(field))
     };
     let optional_text = |field: &'static str| -> Result<Option<String>, RepositoryError> {
         match document.get(field) {
             None | Some(Bson::Null) => Ok(None),
             Some(Bson::String(value)) => Ok(Some(value.clone())),
-            Some(_) => Err(RepositoryError::CorruptOperation(field)),
+            Some(_) => Err(RepositoryError::CorruptRecord(field)),
         }
     };
     let timestamp = |field: &'static str| -> Result<DateTime<Utc>, RepositoryError> {
         document
             .get_datetime(field)
-            .map_err(|_| RepositoryError::CorruptOperation(field))
+            .map_err(|_| RepositoryError::CorruptRecord(field))
             .and_then(|value| from_bson_timestamp(*value))
     };
     let optional_timestamp =
@@ -383,22 +383,22 @@ fn from_document(document: Document) -> Result<Operation, RepositoryError> {
             match document.get(field) {
                 None | Some(Bson::Null) => Ok(None),
                 Some(Bson::DateTime(value)) => from_bson_timestamp(*value).map(Some),
-                Some(_) => Err(RepositoryError::CorruptOperation(field)),
+                Some(_) => Err(RepositoryError::CorruptRecord(field)),
             }
         };
     let number = |field: &'static str| -> Result<i64, RepositoryError> {
         document
             .get_i64(field)
-            .map_err(|_| RepositoryError::CorruptOperation(field))
+            .map_err(|_| RepositoryError::CorruptRecord(field))
     };
 
     Operation::restore(PersistedOperation {
         id: OperationId::from_uuid(
             uuid::Uuid::parse_str(&text("_id")?)
-                .map_err(|_| RepositoryError::CorruptOperation("_id"))?,
+                .map_err(|_| RepositoryError::CorruptRecord("_id"))?,
         ),
         schema_version: u32::try_from(number("schemaVersion")?)
-            .map_err(|_| RepositoryError::CorruptOperation("schemaVersion"))?,
+            .map_err(|_| RepositoryError::CorruptRecord("schemaVersion"))?,
         idempotency_key: text("idempotencyKey")?,
         request_hash: text("requestHash")?,
         requested_by: text("requestedBy")?,
@@ -407,15 +407,15 @@ fn from_document(document: Document) -> Result<Operation, RepositoryError> {
         service_instance_id: text("serviceInstanceId")?,
         service_definition_id: text("serviceDefinitionId")?,
         action: OperationAction::parse(&text("action")?)
-            .ok_or(RepositoryError::CorruptOperation("action"))?,
+            .ok_or(RepositoryError::CorruptRecord("action"))?,
         status: OperationStatus::parse(&text("status")?)
-            .ok_or(RepositoryError::CorruptOperation("status"))?,
+            .ok_or(RepositoryError::CorruptRecord("status"))?,
         attempt: u32::try_from(number("attempt")?)
-            .map_err(|_| RepositoryError::CorruptOperation("attempt"))?,
+            .map_err(|_| RepositoryError::CorruptRecord("attempt"))?,
         lease_owner: optional_text("leaseOwner")?,
         lease_expires_at: optional_timestamp("leaseExpiresAt")?,
         fencing_token: u64::try_from(number("fencingToken")?)
-            .map_err(|_| RepositoryError::CorruptOperation("fencingToken"))?,
+            .map_err(|_| RepositoryError::CorruptRecord("fencingToken"))?,
         started_at: optional_timestamp("startedAt")?,
         finished_at: optional_timestamp("finishedAt")?,
         expires_at: timestamp("expiresAt")?,
@@ -423,7 +423,7 @@ fn from_document(document: Document) -> Result<Operation, RepositoryError> {
         redacted_error: optional_text("redactedError")?,
         error_code: optional_text("errorCode")?,
         correlation_id: uuid::Uuid::parse_str(&text("correlationId")?)
-            .map_err(|_| RepositoryError::CorruptOperation("correlationId"))?,
+            .map_err(|_| RepositoryError::CorruptRecord("correlationId"))?,
     })
     .map_err(RepositoryError::Domain)
 }

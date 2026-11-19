@@ -21,6 +21,16 @@ impl DesiredStateDto {
             Self::Stopped => "STOPPED",
         }
     }
+
+    /// Parses the durable wire representation written by [`Self::as_str`].
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "RUNNING" => Some(Self::Running),
+            "STOPPED" => Some(Self::Stopped),
+            _ => None,
+        }
+    }
 }
 
 /// Canonical observed state of a service instance.
@@ -48,6 +58,20 @@ impl ObservedStateDto {
             Self::Unknown => "UNKNOWN",
         }
     }
+
+    /// Parses the durable wire representation written by [`Self::as_str`].
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "STARTING" => Some(Self::Starting),
+            "RUNNING" => Some(Self::Running),
+            "STOPPING" => Some(Self::Stopping),
+            "STOPPED" => Some(Self::Stopped),
+            "FAILED" => Some(Self::Failed),
+            "UNKNOWN" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
 }
 
 /// Canonical readiness of a service instance.
@@ -69,6 +93,18 @@ impl ReadinessDto {
             Self::Degraded => "DEGRADED",
             Self::NotReady => "NOT_READY",
             Self::Unknown => "UNKNOWN",
+        }
+    }
+
+    /// Parses the durable wire representation written by [`Self::as_str`].
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "READY" => Some(Self::Ready),
+            "DEGRADED" => Some(Self::Degraded),
+            "NOT_READY" => Some(Self::NotReady),
+            "UNKNOWN" => Some(Self::Unknown),
+            _ => None,
         }
     }
 }

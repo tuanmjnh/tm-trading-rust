@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
+use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{Operation, OperationError, OperationId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +57,26 @@ pub trait OperationRepository: Send + Sync {
     async fn expire_due(&self, now: DateTime<Utc>) -> Result<usize, RepositoryError>;
 }
 
+/// Persisted service read model described by `docs/migration/data-contract-map.md` section 8.2.
+///
+/// The Agent is authoritative for its own instances: a heartbeat replaces every row it owns,
+/// so an instance the Agent no longer reports cannot linger in the projection.
+#[async_trait]
+pub trait ServiceSnapshotRepository: Send + Sync {
+    async fn replace_agent_snapshots(
+        &self,
+        agent_id: &str,
+        snapshots: Vec<ServiceSnapshot>,
+    ) -> Result<(), RepositoryError>;
+
+    async fn list(&self) -> Result<Vec<ServiceSnapshot>, RepositoryError>;
+
+    async fn get(
+        &self,
+        service_instance_id: &str,
+    ) -> Result<Option<ServiceSnapshot>, RepositoryError>;
+}
+
 #[derive(Debug, Error)]
 pub enum RepositoryError {
     #[error("idempotency key was reused with a different request")]
@@ -73,8 +94,12 @@ pub enum RepositoryError {
     LeaseDurationOutOfRange,
     #[error("operation was modified concurrently")]
     ConcurrentModification,
-    #[error("persisted operation is corrupt: {0}")]
-    CorruptOperation(&'static str),
+    #[error("persisted record is corrupt: {0}")]
+    CorruptRecord(&'static str),
+    #[error("service snapshot belongs to a different agent")]
+    SnapshotAgentMismatch,
+    #[error("service snapshot field '{0}' must not be empty")]
+    EmptySnapshotField(&'static str),
     #[error("MongoDB operation failed")]
     Mongo(#[from] mongodb::error::Error),
     #[error("invalid MongoDB database name")]

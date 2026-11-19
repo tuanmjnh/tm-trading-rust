@@ -10,6 +10,7 @@ chrono.workspace = true
 futures-util.workspace = true
 mongodb.workspace = true
 thiserror.workspace = true
+tm-trading-contracts.workspace = true
 tm-trading-domain.workspace = true
 uuid.workspace = true
 

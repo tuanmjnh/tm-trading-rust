@@ -5,7 +5,9 @@ use std::sync::Arc;
 use tm_trading_config::LogFormat;
 use tm_trading_management_api::{AppState, AuthConfig, router};
 use tm_trading_storage::{
-    InMemoryOperationRepository, MongoConnection, MongoOperationRepository, OperationRepository,
+    InMemoryOperationRepository, InMemoryServiceSnapshotRepository, MongoConnection,
+    MongoOperationRepository, MongoServiceSnapshotRepository, OperationRepository,
+    ServiceSnapshotRepository,
 };
 use tokio::net::TcpListener;
 
@@ -44,7 +46,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| DEFAULT_AGENT_ID.to_owned()),
     };
 
-    let state = AppState::with_repository(auth, operation_store().await?);
+    let (operations, services) = stores().await?;
+    let state = AppState::with_repositories(auth, operations, services);
     let app = router(state);
     let listener = TcpListener::bind(bind).await?;
     tracing::info!(address = %bind, "management api listening");
@@ -54,31 +57,40 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Builds the operation store selected by `TM_TRADING_OPERATION_STORE`.
+/// Builds the operation and service-snapshot stores selected by `TM_TRADING_STORE`.
 ///
-/// Local development defaults to the in-memory store so a developer does not need a
+/// Local development defaults to the in-memory stores so a developer does not need a
 /// database. Production fails closed instead of losing durable operations on restart.
-async fn operation_store() -> Result<Arc<dyn OperationRepository>, Box<dyn std::error::Error>> {
-    let store = std::env::var("TM_TRADING_OPERATION_STORE").unwrap_or_else(|_| "memory".to_owned());
+async fn stores() -> Result<
+    (
+        Arc<dyn OperationRepository>,
+        Arc<dyn ServiceSnapshotRepository>,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let store = std::env::var("TM_TRADING_STORE").unwrap_or_else(|_| "memory".to_owned());
     let environment = std::env::var("TM_ENVIRONMENT").unwrap_or_else(|_| "development".to_owned());
     match store.as_str() {
-        "memory" if environment == "production" => Err(
-            "TM_TRADING_OPERATION_STORE must be 'mongodb' when TM_ENVIRONMENT=production".into(),
-        ),
-        "memory" => Ok(Arc::new(InMemoryOperationRepository::new())),
+        "memory" if environment == "production" => {
+            Err("TM_TRADING_STORE must be 'mongodb' when TM_ENVIRONMENT=production".into())
+        }
+        "memory" => Ok((
+            Arc::new(InMemoryOperationRepository::new()),
+            Arc::new(InMemoryServiceSnapshotRepository::new()),
+        )),
         "mongodb" => {
             let uri = std::env::var("TM_DATABASE_URI")?;
             let database_name =
                 std::env::var("TM_DATABASE_NAME").unwrap_or_else(|_| "tm-trading-rust".to_owned());
             let connection = MongoConnection::connect(&uri, &database_name).await?;
-            Ok(Arc::new(
-                MongoOperationRepository::new(connection.database()).await?,
+            Ok((
+                Arc::new(MongoOperationRepository::new(connection.database()).await?),
+                Arc::new(MongoServiceSnapshotRepository::new(connection.database()).await?),
             ))
         }
-        other => Err(format!(
-            "TM_TRADING_OPERATION_STORE must be 'mongodb' or 'memory', got '{other}'"
-        )
-        .into()),
+        other => {
+            Err(format!("TM_TRADING_STORE must be 'mongodb' or 'memory', got '{other}'").into())
+        }
     }
 }
 

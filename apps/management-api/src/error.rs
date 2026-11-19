@@ -89,8 +89,13 @@ impl From<RepositoryError> for ApiError {
             RepositoryError::ConcurrentModification => {
                 Self::Conflict("operation was modified concurrently".to_owned())
             }
-            RepositoryError::CorruptOperation(_) => {
-                Self::Internal("operation store returned an unreadable record".to_owned())
+            RepositoryError::CorruptRecord(_) => {
+                Self::Internal("store returned an unreadable record".to_owned())
+            }
+            RepositoryError::EmptySnapshotField(_) | RepositoryError::SnapshotAgentMismatch => {
+                Self::UnprocessableEntity(
+                    "heartbeat contains an invalid service snapshot".to_owned(),
+                )
             }
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())

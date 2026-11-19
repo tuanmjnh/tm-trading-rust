@@ -1,6 +1,6 @@
 # Operations Runbooks
 
-> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, and the durable MongoDB operation store, implemented on 2026-11-19<br>
+> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, and durable MongoDB operation and service-snapshot stores, implemented on 2026-11-19<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## Build the Agent and sample worker
@@ -133,15 +133,15 @@ The WebView2 profile lives in `<exe_dir>/data/desktop`. Override it with `TM_TRA
 
 Localized UI strings live in `apps/desktop/src/i18n.rs`. Operation result summaries are produced by the Agent and are returned in English; they are not yet routed through the localization layer.
 
-## Run with a durable operation store
+## Run with durable stores
 
-By default the Management API keeps operations in memory. Set `TM_TRADING_OPERATION_STORE=mongodb` to persist them; the connection must use TLS with certificate validation, and `TM_ENVIRONMENT=production` requires this setting.
+By default the Management API keeps operations and service snapshots in memory. Set `TM_TRADING_STORE=mongodb` to persist both; the connection must use TLS with certificate validation, and `TM_ENVIRONMENT=production` requires this setting.
 
 ```powershell
 $env:TM_TRADING_LOCAL_API_TOKEN = "local-user-token"
 $env:TM_TRADING_AGENT_TOKEN = "local-agent-token"
 $env:TM_TRADING_API_BIND = "127.0.0.1:8787"
-$env:TM_TRADING_OPERATION_STORE = "mongodb"
+$env:TM_TRADING_STORE = "mongodb"
 $env:TM_DATABASE_URI = "mongodb://db-host:27017/?tls=true&tlsCAFile=D:/certs/ca.pem"
 $env:TM_DATABASE_NAME = "tm-trading-rust"
 .\target\debug\tm-trading-management-api.exe
@@ -149,21 +149,30 @@ $env:TM_DATABASE_NAME = "tm-trading-rust"
 
 Expected result:
 
-- startup creates the five indexes from `docs/migration/data-contract-map.md` section 8.1;
+- startup creates the five `operations` indexes from `docs/migration/data-contract-map.md` section 8.1 and the `agentId` index on `service_instances` from section 8.2;
 - restarting the API keeps every operation readable with its terminal status and result summary;
 - replaying the same `Idempotency-Key` after a restart returns the original operation ID;
-- a record that violates the domain invariants is reported as an unreadable record and is never loaded as valid state.
+- restarting the API with the Agent stopped still serves the last reported service snapshot, with its original `updated_at`;
+- a new Agent heartbeat replaces that Agent's rows instead of duplicating them;
+- a document with an unknown schema version, an unparseable enum, or an operation that violates the domain invariants is reported as unreadable and is never served as valid state.
 
 Live MongoDB tests are separate from the default test run. They create and drop a throwaway database per test:
 
 ```powershell
 $env:TM_TRADING_TEST_MONGODB_URI = "mongodb://localhost:27018/?tls=true&tlsCAFile=D:/certs/ca.pem"
 cargo test -p tm-trading-storage --test mongo_repository
+cargo test -p tm-trading-storage --test mongo_services
 ```
 
 The URI must be TLS-enabled and validate against the local trust store or the referenced CA file. Any `mongod` started with `--tlsMode requireTLS --tlsCertificateKeyFile <server.pem> --tlsCAFile <ca.pem> --tlsAllowConnectionsWithoutCertificates` works; the certificate must carry `localhost` as a subject alternative name.
 
 Without `TM_TRADING_TEST_MONGODB_URI` those tests return immediately and print `skipped`, so a green run is not evidence that a store works. The live run above is the evidence.
+
+## Snapshot projection behaviour
+
+The Agent is authoritative for its own service instances. Each heartbeat upserts the reported instances and then deletes rows owned by that Agent that were not reported, so a removed instance disappears instead of lingering. Upserts happen before the delete: an interrupted heartbeat leaves an extra row until the next beat rather than losing state.
+
+A heartbeat carrying a snapshot for a different Agent is rejected with `422`; the API never writes across ownership boundaries. Rows are kept after an Agent stops reporting, because the persisted row is the last known observed state, not proof that the service is alive. Check `updated_at` and `lastHeartbeatAt` before trusting a row.
 
 ## Logs and status
 

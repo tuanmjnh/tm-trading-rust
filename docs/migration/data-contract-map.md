@@ -411,6 +411,8 @@ Claim behavior:
 
 ### 8.2 Proposed `service_instances` collection
 
+> Implemented in `crates/storage/src/mongo_services.rs`. `_id` is `serviceInstanceId`. The current read model persists `agentId`, `serviceDefinitionId`, `desiredState`, `observedState`, `readiness`, `processAlive`, `restartCount`, `lastExitCode`, `retryBlocked`, `lastHeartbeatAt`, `updatedAt`, and `schemaVersion = 1`. `generation`, `pid`, `host`, executable version, readiness-check detail, and the output/error counters listed below are not collected yet.
+
 ```text
 _id / serviceInstanceId
 agentId

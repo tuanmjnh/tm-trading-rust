@@ -5,9 +5,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
+use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{Operation, OperationId};
 
-use crate::{CreateOperationOutcome, OperationRepository, RepositoryError};
+use crate::{
+    CreateOperationOutcome, OperationRepository, RepositoryError, ServiceSnapshotRepository,
+};
 
 #[derive(Default)]
 pub struct InMemoryOperationRepository {
@@ -166,6 +169,67 @@ impl OperationRepository for InMemoryOperationRepository {
     async fn expire_due(&self, now: DateTime<Utc>) -> Result<usize, RepositoryError> {
         let mut state = self.state()?;
         Ok(expire_due_locked(&mut state, now))
+    }
+}
+
+#[derive(Default)]
+pub struct InMemoryServiceSnapshotRepository {
+    snapshots: Mutex<HashMap<String, ServiceSnapshot>>,
+}
+
+impl InMemoryServiceSnapshotRepository {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait]
+impl ServiceSnapshotRepository for InMemoryServiceSnapshotRepository {
+    async fn replace_agent_snapshots(
+        &self,
+        agent_id: &str,
+        snapshots: Vec<ServiceSnapshot>,
+    ) -> Result<(), RepositoryError> {
+        if agent_id.trim().is_empty() {
+            return Err(RepositoryError::EmptySnapshotField("agent_id"));
+        }
+        let mut stored = self
+            .snapshots
+            .lock()
+            .map_err(|_| RepositoryError::LockPoisoned)?;
+        stored.retain(|_, snapshot| snapshot.agent_id != agent_id);
+        for snapshot in snapshots {
+            if snapshot.service_instance_id.trim().is_empty() {
+                return Err(RepositoryError::EmptySnapshotField("service_instance_id"));
+            }
+            if snapshot.agent_id != agent_id {
+                return Err(RepositoryError::SnapshotAgentMismatch);
+            }
+            stored.insert(snapshot.service_instance_id.clone(), snapshot);
+        }
+        Ok(())
+    }
+
+    async fn list(&self) -> Result<Vec<ServiceSnapshot>, RepositoryError> {
+        let stored = self
+            .snapshots
+            .lock()
+            .map_err(|_| RepositoryError::LockPoisoned)?;
+        let mut snapshots: Vec<ServiceSnapshot> = stored.values().cloned().collect();
+        snapshots.sort_by(|left, right| left.service_instance_id.cmp(&right.service_instance_id));
+        Ok(snapshots)
+    }
+
+    async fn get(
+        &self,
+        service_instance_id: &str,
+    ) -> Result<Option<ServiceSnapshot>, RepositoryError> {
+        let stored = self
+            .snapshots
+            .lock()
+            .map_err(|_| RepositoryError::LockPoisoned)?;
+        Ok(stored.get(service_instance_id).cloned())
     }
 }
 
@@ -368,5 +432,69 @@ mod tests {
                 OperationError::LeaseOwnershipMismatch
             ))
         ));
+    }
+}
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+
+    fn snapshot(agent_id: &str, instance: &str) -> ServiceSnapshot {
+        ServiceSnapshot {
+            service_instance_id: instance.to_owned(),
+            service_definition_id: "sample-worker".to_owned(),
+            agent_id: agent_id.to_owned(),
+            desired_state: tm_trading_contracts::DesiredStateDto::Running,
+            observed_state: tm_trading_contracts::ObservedStateDto::Running,
+            readiness: tm_trading_contracts::ReadinessDto::Ready,
+            process_alive: Some(true),
+            restart_count: 0,
+            last_exit_code: None,
+            retry_blocked: false,
+            last_heartbeat_at: None,
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn heartbeat_replaces_only_the_reporting_agent() {
+        let repository = InMemoryServiceSnapshotRepository::new();
+        repository
+            .replace_agent_snapshots("agent-1", vec![snapshot("agent-1", "a@agent-1")])
+            .await
+            .unwrap();
+        repository
+            .replace_agent_snapshots("agent-2", vec![snapshot("agent-2", "b@agent-2")])
+            .await
+            .unwrap();
+        repository
+            .replace_agent_snapshots("agent-1", Vec::new())
+            .await
+            .unwrap();
+
+        let stored = repository.list().await.unwrap();
+
+        assert_eq!(
+            stored
+                .iter()
+                .map(|snapshot| snapshot.service_instance_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b@agent-2"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_foreign_snapshot_is_rejected() {
+        let repository = InMemoryServiceSnapshotRepository::new();
+
+        let result = repository
+            .replace_agent_snapshots("agent-2", vec![snapshot("agent-1", "a@agent-1")])
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(RepositoryError::SnapshotAgentMismatch)
+        ));
+        assert!(repository.list().await.unwrap().is_empty());
     }
 }

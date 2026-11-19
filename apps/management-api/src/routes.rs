@@ -38,11 +38,7 @@ pub async fn list_services(
     auth: AuthContext,
 ) -> Result<Json<Vec<ServiceSnapshot>>, ApiError> {
     auth.require_capability(CAPABILITY_SERVICE_READ)?;
-    Ok(Json(
-        state
-            .list_snapshots()
-            .map_err(|error| ApiError::Internal(error.to_string()))?,
-    ))
+    Ok(Json(state.list_snapshots().await.map_err(ApiError::from)?))
 }
 
 pub async fn get_service(
@@ -53,7 +49,8 @@ pub async fn get_service(
     auth.require_capability(CAPABILITY_SERVICE_READ)?;
     let snapshot = state
         .snapshot(&service_instance_id)
-        .map_err(|error| ApiError::Internal(error.to_string()))?
+        .await
+        .map_err(ApiError::from)?
         .ok_or_else(|| {
             ApiError::NotFound(format!(
                 "service instance '{service_instance_id}' is not known"
@@ -85,7 +82,8 @@ pub async fn create_service_operation(
 
     let snapshot = state
         .snapshot(&service_instance_id)
-        .map_err(|error| ApiError::Internal(error.to_string()))?
+        .await
+        .map_err(ApiError::from)?
         .ok_or_else(|| {
             ApiError::NotFound(format!(
                 "service instance '{service_instance_id}' is not known"
@@ -148,7 +146,8 @@ pub async fn agent_heartbeat(
     auth.require_agent(&request.agent_id)?;
     state
         .replace_agent_snapshots(&request.agent_id, request.services)
-        .map_err(|error| ApiError::Internal(error.to_string()))?;
+        .await
+        .map_err(ApiError::from)?;
     Ok(Json(AgentHeartbeatResponse {
         accepted: true,
         server_time: Utc::now(),
