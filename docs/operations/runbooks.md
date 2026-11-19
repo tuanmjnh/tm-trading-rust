@@ -1,6 +1,6 @@
 # Operations Runbooks
 
-> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, and durable MongoDB operation, service-snapshot, and closed-candle stores, implemented on 2026-11-19<br>
+> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 closed-candle store and public market-data adapters (operation, service-snapshot, and candle MongoDB stores), implemented on 2026-11-19<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## Build the Agent and sample worker
@@ -178,6 +178,15 @@ A heartbeat carrying a snapshot for a different Agent is rejected with `422`; th
 ## Closed-candle store
 
 Closed candles are keyed by `{symbol}:{timeframe}:{openTime}`, so re-recording the same close updates one row instead of adding a duplicate. Forming bars are never written. Rows written by the legacy recorder remain readable: a missing `volume` reads as `0`, a missing `schemaVersion` as `candle.v1`. A row whose `state` is not `closed`, whose `_id` disagrees with its fields, or that carries an unknown schema stamp is reported as unreadable and is never served as a valid bar. No Management API endpoint serves candles yet.
+
+## Public market-data adapters
+
+Binance spot and OKX swap adapters live in `tm-trading-market-providers`; see [`docs/providers/provider-catalog.md`](../providers/provider-catalog.md). They only request public bars and one public health endpoint, they never carry credentials, and they drop a still-forming bar instead of recording it. Their live tests reach the internet and run only when `TM_TRADING_LIVE_PROVIDER_TESTS=1` is set:
+
+```powershell
+$env:TM_TRADING_LIVE_PROVIDER_TESTS = "1"
+cargo test -p tm-trading-market-providers --test live_public
+```
 
 ## Logs and status
 

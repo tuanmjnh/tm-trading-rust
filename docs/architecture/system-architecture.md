@@ -60,6 +60,8 @@ tm-trading-contracts  tm-trading-storage
 
 tm-trading-config -> tm-trading-observability
 
+tm-trading-market-providers -> tm-trading-domain  (read-only public data)
+
 tm-trading-agent-protocol -> tm-trading-supervisor-core -> tm-trading-agent
         |                                      |
         |                                      +-> local locked checkpoint
@@ -71,6 +73,7 @@ Dependency rules:
 - `domain` has no UI, HTTP, MongoDB, or provider dependencies.
 - `contracts` contains public DTOs only and has no BSON models.
 - `storage` implements repository behavior behind traits and translates errors at its boundary.
+- `market-providers` depends only on `domain` and HTTP; it never holds credentials and never reaches a private or order endpoint.
 - `config` owns typed environment parsing and validation.
 - `observability` owns tracing setup and correlation spans.
 - `agent-protocol` owns the versioned worker IPC messages and explicit control commands.
@@ -191,6 +194,7 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Persist durable operations in the MongoDB `operations` collection with atomic idempotency and fenced transitions.
 - [x] Persist service snapshots in the MongoDB `service_instances` projection, replaced per Agent heartbeat.
 - [x] Port the closed-candle domain model and its memory/MongoDB repositories.
+- [x] Implement public Binance spot and OKX swap candle adapters with bounded health checks.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

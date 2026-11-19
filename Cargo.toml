@@ -6,6 +6,7 @@ members = [
     "crates/config",
     "crates/observability",
     "crates/storage",
+    "crates/market-providers",
     "crates/agent-protocol",
     "crates/supervisor-core",
     "crates/api-client",
@@ -45,6 +46,7 @@ tm-trading-api-client = { path = "crates/api-client" }
 tm-trading-config = { path = "crates/config" }
 tm-trading-contracts = { path = "crates/contracts" }
 tm-trading-domain = { path = "crates/domain" }
+tm-trading-market-providers = { path = "crates/market-providers" }
 tm-trading-observability = { path = "crates/observability" }
 tm-trading-storage = { path = "crates/storage" }
 tm-trading-supervisor-core = { path = "crates/supervisor-core" }
