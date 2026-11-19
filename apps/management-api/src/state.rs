@@ -24,8 +24,13 @@ pub struct AppState {
 impl AppState {
     #[must_use]
     pub fn new(auth: AuthConfig) -> Self {
+        Self::with_repository(auth, Arc::new(InMemoryOperationRepository::new()))
+    }
+
+    #[must_use]
+    pub fn with_repository(auth: AuthConfig, operations: Arc<dyn OperationRepository>) -> Self {
         Self {
-            operations: Arc::new(InMemoryOperationRepository::new()),
+            operations,
             auth,
             services: Arc::new(RwLock::new(HashMap::new())),
         }

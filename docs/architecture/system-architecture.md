@@ -23,6 +23,7 @@ Implemented:
 - bounded worker-event batches, receipt-time heartbeat evaluation, persisted restart budgets and deterministic-failure quarantine, monotonic Agent shutdown, and bounded forced-process reaping;
 - a JSON-line sample worker with handshake, readiness, heartbeat, cycle, operation, and graceful-shutdown messages;
 - an Axum Management API that authenticates bearer credentials, enforces exact capabilities, and serves the service read model plus durable operations;
+- a durable MongoDB operation store with atomic idempotency, fenced compare-and-swap transitions, expiry, and startup index creation;
 - an Agent command channel that heartbeats per-Agent service snapshots and executes claimed operations;
 - a typed `api-client` crate that depends only on the versioned public contracts;
 - a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, and EN/VI localization.
@@ -30,7 +31,7 @@ Implemented:
 Not implemented:
 
 - TM Hub token verification and capability enforcement (local bearer credentials are used today);
-- MongoDB operation repository and service snapshot persistence;
+- the persisted `service_instances` snapshot projection;
 - durable Agent credential rotation;
 - TM Hub login, TOTP, and refresh flow in the Desktop client.
 
@@ -120,9 +121,13 @@ The in-memory repository provides deterministic create, idempotency-conflict, le
 
 `MongoConnection` owns MongoDB client creation, database-name validation, and health checks. Connection strings must enable TLS, and configurations that allow invalid certificates are rejected. Certificate validation remains enabled.
 
-The production MongoDB operation repository is not implemented yet. Its first implementation must use the collection and field mapping in [`docs/migration/data-contract-map.md`](../migration/data-contract-map.md), atomic find-and-update claims, lease expiry, and unique idempotency keys. No destructive migration is permitted.
+`MongoOperationRepository` implements `OperationRepository` against the `operations` collection defined in [`docs/migration/data-contract-map.md`](../migration/data-contract-map.md) section 8.1. One document is both the durable operation and the command the Agent claims. The four required non-`_id` indexes are created at startup; the unique `{ requestedBy, idempotencyKey }` index makes idempotency atomic, and every state transition is a compare-and-swap on the fencing token so a stale writer cannot overwrite a newer state. A document that does not satisfy the domain invariants is rejected as corrupt instead of being loaded.
 
-Live collection names, indexes, TTL settings, validators, representative documents, and an actual TLS handshake remain `BLOCKED` until read-only target-environment inspection is available. The current TLS unit tests validate connection-policy parsing only and do not claim a live certificate handshake.
+The store is selected by `TM_TRADING_OPERATION_STORE`: `memory` (local default) or `mongodb`. Production fails closed rather than losing durable operations on restart.
+
+Verified against a TLS-enabled MongoDB 8.2 instance with certificate validation against a local CA: create, restart persistence, idempotent replay, claim/lease/fencing, stale-result rejection, and expiry all pass, and all five expected indexes exist.
+
+Service snapshots are still an in-memory read model. Their persisted projection in `service_instances` is not implemented yet.
 
 ## 6. Configuration and security
 
@@ -141,6 +146,7 @@ Current defaults and variables:
 | `TM_HUB_URL` | `http://127.0.0.1:4000` | TM Hub base URL |
 | `TM_HUB_APP_ID` | unset | Dedicated Rust Hub application ID |
 | `TM_LOG_FORMAT` | `compact` | `compact` or `json` tracing output |
+| `TM_TRADING_OPERATION_STORE` | `memory` | `memory` or `mongodb`; production requires `mongodb` |
 | `TM_TRADING_API_BIND` | `127.0.0.1:8787` | Management API bind; non-loopback is rejected in local mode |
 | `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read` |
 | `TM_TRADING_AGENT_TOKEN` | required | Per-installation Agent-only bearer token; read from the environment, never the command line |
@@ -178,7 +184,8 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Implement the Agent heartbeat and claimed-command channel.
 - [x] Implement the typed `api-client` crate over the public contracts.
 - [x] Implement the Dioxus Desktop Control Center with Start/Stop/Restart operations and EN/VI localization.
-- [ ] Persist operations and service snapshots through the Management API.
+- [x] Persist durable operations in the MongoDB `operations` collection with atomic idempotency and fenced transitions.
+- [ ] Persist service snapshots in the `service_instances` projection.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

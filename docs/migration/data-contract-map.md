@@ -359,6 +359,8 @@ The legacy supervisor stores its state in files and uses a file command inbox. T
 
 ### 8.1 Proposed `operations` collection
 
+> Implemented in `crates/storage/src/mongo_operations.rs` and verified against TLS-enabled MongoDB 8.2. Documents use these field names verbatim; `_id` is the operation UUID string. Timestamps are stored as BSON `DateTime`. Every transition is a compare-and-swap on `fencingToken`.
+
 One document is both the durable operation record and the command/outbox item. This avoids a non-atomic write across separate operation and command collections.
 
 Required fields:

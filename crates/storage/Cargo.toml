@@ -7,13 +7,14 @@ rust-version.workspace = true
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+futures-util.workspace = true
 mongodb.workspace = true
 thiserror.workspace = true
 tm-trading-domain.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
-uuid.workspace = true
 
 [lints]
 workspace = true

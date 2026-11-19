@@ -1,8 +1,12 @@
 use std::net::SocketAddr;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use tm_trading_config::LogFormat;
 use tm_trading_management_api::{AppState, AuthConfig, router};
+use tm_trading_storage::{
+    InMemoryOperationRepository, MongoConnection, MongoOperationRepository, OperationRepository,
+};
 use tokio::net::TcpListener;
 
 const DEFAULT_BIND: &str = "127.0.0.1:8787";
@@ -40,7 +44,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| DEFAULT_AGENT_ID.to_owned()),
     };
 
-    let state = AppState::new(auth);
+    let state = AppState::with_repository(auth, operation_store().await?);
     let app = router(state);
     let listener = TcpListener::bind(bind).await?;
     tracing::info!(address = %bind, "management api listening");
@@ -48,6 +52,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
+}
+
+/// Builds the operation store selected by `TM_TRADING_OPERATION_STORE`.
+///
+/// Local development defaults to the in-memory store so a developer does not need a
+/// database. Production fails closed instead of losing durable operations on restart.
+async fn operation_store() -> Result<Arc<dyn OperationRepository>, Box<dyn std::error::Error>> {
+    let store = std::env::var("TM_TRADING_OPERATION_STORE").unwrap_or_else(|_| "memory".to_owned());
+    let environment = std::env::var("TM_ENVIRONMENT").unwrap_or_else(|_| "development".to_owned());
+    match store.as_str() {
+        "memory" if environment == "production" => Err(
+            "TM_TRADING_OPERATION_STORE must be 'mongodb' when TM_ENVIRONMENT=production".into(),
+        ),
+        "memory" => Ok(Arc::new(InMemoryOperationRepository::new())),
+        "mongodb" => {
+            let uri = std::env::var("TM_DATABASE_URI")?;
+            let database_name =
+                std::env::var("TM_DATABASE_NAME").unwrap_or_else(|_| "tm-trading-rust".to_owned());
+            let connection = MongoConnection::connect(&uri, &database_name).await?;
+            Ok(Arc::new(
+                MongoOperationRepository::new(connection.database()).await?,
+            ))
+        }
+        other => Err(format!(
+            "TM_TRADING_OPERATION_STORE must be 'mongodb' or 'memory', got '{other}'"
+        )
+        .into()),
+    }
 }
 
 fn required_env(name: &str) -> Result<String, Box<dyn std::error::Error>> {

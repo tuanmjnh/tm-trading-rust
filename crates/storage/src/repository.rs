@@ -71,6 +71,10 @@ pub enum RepositoryError {
     InvalidLeaseDuration,
     #[error("operation lease duration is out of range")]
     LeaseDurationOutOfRange,
+    #[error("operation was modified concurrently")]
+    ConcurrentModification,
+    #[error("persisted operation is corrupt: {0}")]
+    CorruptOperation(&'static str),
     #[error("MongoDB operation failed")]
     Mongo(#[from] mongodb::error::Error),
     #[error("invalid MongoDB database name")]

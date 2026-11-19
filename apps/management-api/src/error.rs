@@ -86,6 +86,12 @@ impl From<RepositoryError> for ApiError {
             RepositoryError::LockPoisoned => {
                 Self::Internal("operation repository lock was poisoned".to_owned())
             }
+            RepositoryError::ConcurrentModification => {
+                Self::Conflict("operation was modified concurrently".to_owned())
+            }
+            RepositoryError::CorruptOperation(_) => {
+                Self::Internal("operation store returned an unreadable record".to_owned())
+            }
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())
             }

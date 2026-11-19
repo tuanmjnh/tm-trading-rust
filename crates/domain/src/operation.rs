@@ -52,6 +52,17 @@ impl OperationAction {
             Self::Restart => "RESTART",
         }
     }
+
+    /// Parses the durable wire representation written by [`Self::as_str`].
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "START" => Some(Self::Start),
+            "STOP" => Some(Self::Stop),
+            "RESTART" => Some(Self::Restart),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +99,22 @@ impl OperationStatus {
             Self::Expired => "EXPIRED",
         }
     }
+
+    /// Parses the durable wire representation written by [`Self::as_str`].
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "ACCEPTED" => Some(Self::Accepted),
+            "QUEUED" => Some(Self::Queued),
+            "CLAIMED" => Some(Self::Claimed),
+            "RUNNING" => Some(Self::Running),
+            "SUCCEEDED" => Some(Self::Succeeded),
+            "FAILED" => Some(Self::Failed),
+            "CANCELLED" => Some(Self::Cancelled),
+            "EXPIRED" => Some(Self::Expired),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +128,36 @@ pub struct NewOperation {
     pub service_definition_id: String,
     pub action: OperationAction,
     pub expires_at: DateTime<Utc>,
+    pub correlation_id: Uuid,
+}
+
+/// Complete persisted state of an operation, used to rebuild it from durable storage.
+///
+/// A storage layer must rebuild through [`Operation::restore`] so a drifted or
+/// corrupt record is rejected instead of becoming an invalid in-memory value.
+#[derive(Debug, Clone)]
+pub struct PersistedOperation {
+    pub id: OperationId,
+    pub schema_version: u32,
+    pub idempotency_key: String,
+    pub request_hash: String,
+    pub requested_by: String,
+    pub requested_at: DateTime<Utc>,
+    pub target_agent_id: String,
+    pub service_instance_id: String,
+    pub service_definition_id: String,
+    pub action: OperationAction,
+    pub status: OperationStatus,
+    pub attempt: u32,
+    pub lease_owner: Option<String>,
+    pub lease_expires_at: Option<DateTime<Utc>>,
+    pub fencing_token: u64,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub expires_at: DateTime<Utc>,
+    pub result_summary: Option<String>,
+    pub redacted_error: Option<String>,
+    pub error_code: Option<String>,
     pub correlation_id: Uuid,
 }
 
@@ -171,6 +228,58 @@ impl Operation {
             result_summary: None,
             redacted_error: None,
             error_code: None,
+            correlation_id: input.correlation_id,
+        })
+    }
+
+    /// Rebuilds a persisted operation, rejecting records that would violate an invariant.
+    pub fn restore(input: PersistedOperation) -> Result<Self, OperationError> {
+        if input.schema_version != OPERATION_SCHEMA_VERSION {
+            return Err(OperationError::UnsupportedSchemaVersion {
+                found: input.schema_version,
+            });
+        }
+        for (name, value) in [
+            ("idempotency_key", &input.idempotency_key),
+            ("request_hash", &input.request_hash),
+            ("requested_by", &input.requested_by),
+            ("target_agent_id", &input.target_agent_id),
+            ("service_instance_id", &input.service_instance_id),
+            ("service_definition_id", &input.service_definition_id),
+        ] {
+            if value.trim().is_empty() {
+                return Err(OperationError::EmptyField(name));
+            }
+        }
+        if input.expires_at <= input.requested_at {
+            return Err(OperationError::InvalidExpiry);
+        }
+        if input.lease_owner.is_some() != input.lease_expires_at.is_some() {
+            return Err(OperationError::InconsistentLease);
+        }
+
+        Ok(Self {
+            id: input.id,
+            schema_version: input.schema_version,
+            idempotency_key: input.idempotency_key,
+            request_hash: input.request_hash,
+            requested_by: input.requested_by,
+            requested_at: input.requested_at,
+            target_agent_id: input.target_agent_id,
+            service_instance_id: input.service_instance_id,
+            service_definition_id: input.service_definition_id,
+            action: input.action,
+            status: input.status,
+            attempt: input.attempt,
+            lease_owner: input.lease_owner,
+            lease_expires_at: input.lease_expires_at,
+            fencing_token: input.fencing_token,
+            started_at: input.started_at,
+            finished_at: input.finished_at,
+            expires_at: input.expires_at,
+            result_summary: input.result_summary,
+            redacted_error: input.redacted_error,
+            error_code: input.error_code,
             correlation_id: input.correlation_id,
         })
     }
@@ -480,6 +589,10 @@ pub enum OperationError {
     AttemptOverflow,
     #[error("operation fencing token overflowed")]
     FencingTokenOverflow,
+    #[error("persisted operation uses unsupported schema version {found}")]
+    UnsupportedSchemaVersion { found: u32 },
+    #[error("persisted operation has only one half of a lease")]
+    InconsistentLease,
     #[error("cannot transition operation from {from:?} to {to:?}")]
     InvalidTransition {
         from: OperationStatus,
