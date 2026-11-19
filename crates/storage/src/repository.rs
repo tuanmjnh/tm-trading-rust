@@ -5,7 +5,9 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use tm_trading_contracts::ServiceSnapshot;
-use tm_trading_domain::{Candle, CandleError, Operation, OperationError, OperationId};
+use tm_trading_domain::{
+    Candle, CandleError, Operation, OperationError, OperationId, Watchlist, WatchlistError,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CreateOperationOutcome {
@@ -104,6 +106,35 @@ pub trait CandleRepository: Send + Sync {
     async fn get(&self, candle_id: &str) -> Result<Option<Candle>, RepositoryError>;
 }
 
+/// Owner-scoped store for named symbol lists, matching the `watchlists` contract in
+/// `docs/migration/data-contract-map.md` section 6.5.
+///
+/// Every method takes the owner explicitly: a list is never addressed by name or id
+/// alone, so one owner can never read or write another owner's rows.
+#[async_trait]
+pub trait WatchlistRepository: Send + Sync {
+    async fn list(&self, owner_id: &str) -> Result<Vec<Watchlist>, RepositoryError>;
+
+    /// Creates a list. The first list an owner creates becomes that owner's default.
+    async fn create(
+        &self,
+        owner_id: &str,
+        name: &str,
+        symbols: &[String],
+        now: DateTime<Utc>,
+    ) -> Result<Watchlist, RepositoryError>;
+
+    async fn replace_symbols(
+        &self,
+        owner_id: &str,
+        watchlist_id: &str,
+        symbols: &[String],
+        now: DateTime<Utc>,
+    ) -> Result<Watchlist, RepositoryError>;
+
+    async fn delete(&self, owner_id: &str, watchlist_id: &str) -> Result<(), RepositoryError>;
+}
+
 #[derive(Debug, Error)]
 pub enum RepositoryError {
     #[error("idempotency key was reused with a different request")]
@@ -137,6 +168,12 @@ pub enum RepositoryError {
     InsecureTls,
     #[error(transparent)]
     Candle(#[from] CandleError),
+    #[error(transparent)]
+    Watchlist(#[from] WatchlistError),
+    #[error("a watchlist with this name already exists for the owner")]
+    DuplicateWatchlistName,
+    #[error("watchlist was not found")]
+    WatchlistNotFound,
     #[error(transparent)]
     Domain(#[from] OperationError),
 }

@@ -5,9 +5,9 @@ use std::sync::Arc;
 use tm_trading_config::LogFormat;
 use tm_trading_management_api::{AppState, AuthConfig, router};
 use tm_trading_storage::{
-    InMemoryOperationRepository, InMemoryServiceSnapshotRepository, MongoConnection,
-    MongoOperationRepository, MongoServiceSnapshotRepository, OperationRepository,
-    ServiceSnapshotRepository,
+    InMemoryOperationRepository, InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository,
+    MongoConnection, MongoOperationRepository, MongoServiceSnapshotRepository,
+    MongoWatchlistRepository, OperationRepository, ServiceSnapshotRepository, WatchlistRepository,
 };
 use tokio::net::TcpListener;
 
@@ -46,8 +46,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| DEFAULT_AGENT_ID.to_owned()),
     };
 
-    let (operations, services) = stores().await?;
-    let state = AppState::with_repositories(auth, operations, services);
+    let (operations, services, watchlists) = stores().await?;
+    let state = AppState::with_repositories(auth, operations, services, watchlists);
     let app = router(state);
     let listener = TcpListener::bind(bind).await?;
     tracing::info!(address = %bind, "management api listening");
@@ -65,6 +65,7 @@ async fn stores() -> Result<
     (
         Arc<dyn OperationRepository>,
         Arc<dyn ServiceSnapshotRepository>,
+        Arc<dyn WatchlistRepository>,
     ),
     Box<dyn std::error::Error>,
 > {
@@ -77,6 +78,7 @@ async fn stores() -> Result<
         "memory" => Ok((
             Arc::new(InMemoryOperationRepository::new()),
             Arc::new(InMemoryServiceSnapshotRepository::new()),
+            Arc::new(InMemoryWatchlistRepository::new()),
         )),
         "mongodb" => {
             let uri = std::env::var("TM_DATABASE_URI")?;
@@ -86,6 +88,7 @@ async fn stores() -> Result<
             Ok((
                 Arc::new(MongoOperationRepository::new(connection.database()).await?),
                 Arc::new(MongoServiceSnapshotRepository::new(connection.database()).await?),
+                Arc::new(MongoWatchlistRepository::new(connection.database()).await?),
             ))
         }
         other => {

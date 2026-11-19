@@ -27,6 +27,16 @@ pub(crate) fn number_as_f64(field: &'static str, value: &Bson) -> Result<f64, Re
     }
 }
 
+/// True when MongoDB rejected a write because a unique index was violated.
+pub(crate) fn is_duplicate_key(error: &mongodb::error::Error) -> bool {
+    matches!(
+        *error.kind,
+        mongodb::error::ErrorKind::Write(mongodb::error::WriteFailure::WriteError(
+            mongodb::error::WriteError { code: 11000, .. }
+        ))
+    )
+}
+
 /// Reads an integral numeric field written as `Int32`, `Int64`, or an exact `Double`.
 pub(crate) fn number_as_i64(field: &'static str, value: &Bson) -> Result<i64, RepositoryError> {
     match value {

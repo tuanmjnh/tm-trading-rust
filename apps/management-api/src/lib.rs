@@ -11,7 +11,7 @@ use tm_trading_contracts::ApiDoc;
 
 pub use auth::{
     AuthContext, CAPABILITY_OPERATION_READ, CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ,
-    Principal,
+    CAPABILITY_WATCHLIST_READ, CAPABILITY_WATCHLIST_WRITE, Principal,
 };
 pub use error::ApiError;
 pub use state::{AppState, AuthConfig};
@@ -34,6 +34,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v1/operations/{operation_id}",
             get(routes::get_operation),
+        )
+        .route(
+            "/api/v1/watchlists",
+            get(routes::list_watchlists).post(routes::create_watchlist),
+        )
+        .route(
+            "/api/v1/watchlists/{watchlist_id}",
+            axum::routing::delete(routes::delete_watchlist),
+        )
+        .route(
+            "/api/v1/watchlists/{watchlist_id}/symbols",
+            axum::routing::put(routes::replace_watchlist_symbols),
         )
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(

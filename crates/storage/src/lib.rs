@@ -5,7 +5,9 @@ mod mongo;
 mod mongo_candles;
 mod mongo_operations;
 mod mongo_services;
+mod mongo_watchlists;
 mod repository;
+mod watchlists_memory;
 
 pub use candles_memory::InMemoryCandleRepository;
 pub use memory::{InMemoryOperationRepository, InMemoryServiceSnapshotRepository};
@@ -13,7 +15,9 @@ pub use mongo::MongoConnection;
 pub use mongo_candles::MongoCandleRepository;
 pub use mongo_operations::MongoOperationRepository;
 pub use mongo_services::{MongoServiceSnapshotRepository, SERVICE_SNAPSHOT_SCHEMA_VERSION};
+pub use mongo_watchlists::MongoWatchlistRepository;
 pub use repository::{
     CandleRepository, CandleUpsertOutcome, CreateOperationOutcome, OperationRepository,
-    RepositoryError, ServiceSnapshotRepository,
+    RepositoryError, ServiceSnapshotRepository, WatchlistRepository,
 };
+pub use watchlists_memory::InMemoryWatchlistRepository;

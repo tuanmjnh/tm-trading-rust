@@ -372,3 +372,135 @@ async fn an_operation_requires_an_idempotency_key_and_a_known_service() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn watchlists_are_created_listed_updated_and_deleted() {
+    let app = router(state());
+
+    let created = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/watchlists",
+            Some(USER_TOKEN),
+            Some(json!({ "name": "Core", "symbols": ["btcusdt", "ETHUSDT", "BTCUSDT"] })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created = json_body(created).await;
+    let watchlist_id = created["id"].as_str().expect("id").to_owned();
+    assert_eq!(created["name"], "Core");
+    assert_eq!(created["symbols"], json!(["BTCUSDT", "ETHUSDT"]));
+    assert_eq!(created["is_default"], true);
+
+    let listed = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/watchlists", Some(USER_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(listed.status(), StatusCode::OK);
+    assert_eq!(json_body(listed).await, json!([created]));
+
+    let replaced = app
+        .clone()
+        .oneshot(request(
+            "PUT",
+            &format!("/api/v1/watchlists/{watchlist_id}/symbols"),
+            Some(USER_TOKEN),
+            Some(json!({ "symbols": ["ethusdt"] })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(replaced.status(), StatusCode::OK);
+    assert_eq!(json_body(replaced).await["symbols"], json!(["ETHUSDT"]));
+
+    let deleted = app
+        .clone()
+        .oneshot(request(
+            "DELETE",
+            &format!("/api/v1/watchlists/{watchlist_id}"),
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+
+    let listed = app
+        .oneshot(request("GET", "/api/v1/watchlists", Some(USER_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(json_body(listed).await, json!([]));
+}
+
+#[tokio::test]
+async fn watchlist_errors_map_to_stable_statuses() {
+    let app = router(state());
+
+    let first = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/watchlists",
+            Some(USER_TOKEN),
+            Some(json!({ "name": "Core" })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(first.status(), StatusCode::CREATED);
+
+    let duplicate = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/watchlists",
+            Some(USER_TOKEN),
+            Some(json!({ "name": "core" })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+
+    let invalid = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/watchlists",
+            Some(USER_TOKEN),
+            Some(json!({ "name": "Bad", "symbols": ["BTC USDT"] })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let unknown = app
+        .clone()
+        .oneshot(request(
+            "DELETE",
+            "/api/v1/watchlists/unknown",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    let agent = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/watchlists",
+            Some(AGENT_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    let anonymous = app
+        .oneshot(request("GET", "/api/v1/watchlists", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+}

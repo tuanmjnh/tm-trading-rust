@@ -3,6 +3,7 @@ pub mod openapi;
 mod operation;
 mod service;
 mod system;
+mod watchlist;
 
 pub use error::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
 pub use openapi::ApiDoc;
@@ -16,6 +17,7 @@ pub use service::{
     ServiceSnapshot,
 };
 pub use system::{ApiVersionInfo, HealthResponse, HealthStatus};
+pub use watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, WatchlistDto};
 
 pub const API_PREFIX: &str = "/api/v1";
 pub const API_VERSION: &str = "v1";

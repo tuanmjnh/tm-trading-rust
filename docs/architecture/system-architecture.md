@@ -136,6 +136,8 @@ Verified live: after the Agent process is killed, and again after the Management
 
 `MongoCandleRepository` implements `CandleRepository` against the `candles` collection from section 6.1, behind `InMemoryCandleRepository` for the local default. The natural key `{symbol}:{timeframe}:{openTime}` makes re-recording a closed bar an upsert instead of a duplicate, and the three declared indexes are created at startup. Reads accept the legacy document shape: an absent `volume` becomes `0`, an absent schema stamp is treated as `candle.v1`, and whole numbers may arrive as any BSON numeric type. A row whose `state` is not `closed`, whose `_id` disagrees with its fields, or whose schema stamp is unknown is rejected as corrupt. No API endpoint serves candles yet.
 
+`MongoWatchlistRepository` implements `WatchlistRepository` against the `watchlists` collection from section 6.5, behind `InMemoryWatchlistRepository` for the local default. `_id` remains an `ObjectId` and timestamps remain BSON datetimes so legacy rows stay compatible. The unique `{ownerId, name}` index uses primary-strength collation, and every query includes the owner, so one subject cannot read, replace, or delete another subject's list. The first list an owner creates becomes their default. The Management API serves these rows only through the authenticated subject; the Agent credential is rejected with `403`.
+
 ## 6. Configuration and security
 
 Configuration is read from process environment variables with local development defaults. Production mode fails closed unless an explicit database URI, HTTPS TM Hub URL, and Hub application ID are supplied. Database URIs are redacted from debug output.
@@ -195,6 +197,7 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Persist service snapshots in the MongoDB `service_instances` projection, replaced per Agent heartbeat.
 - [x] Port the closed-candle domain model and its memory/MongoDB repositories.
 - [x] Implement public Binance spot and OKX swap candle adapters with bounded health checks.
+- [x] Port the owner-scoped watchlist model and serve it through the Management API.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

@@ -1,6 +1,6 @@
 # Operations Runbooks
 
-> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 closed-candle store and public market-data adapters (operation, service-snapshot, and candle MongoDB stores), implemented on 2026-11-19<br>
+> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 closed-candle store, public market-data adapters, and owner-scoped watchlists (operation, service-snapshot, candle, and watchlist MongoDB stores), implemented on 2026-11-19<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## Build the Agent and sample worker
@@ -149,7 +149,7 @@ $env:TM_DATABASE_NAME = "tm-trading-rust"
 
 Expected result:
 
-- startup creates the five `operations` indexes from `docs/migration/data-contract-map.md` section 8.1 and the `agentId` index on `service_instances` from section 8.2;
+- startup creates the five `operations` indexes from `docs/migration/data-contract-map.md` section 8.1, the `agentId` index on `service_instances` from section 8.2, the three `candles` indexes, and the two `watchlists` indexes;
 - restarting the API keeps every operation readable with its terminal status and result summary;
 - replaying the same `Idempotency-Key` after a restart returns the original operation ID;
 - restarting the API with the Agent stopped still serves the last reported service snapshot, with its original `updated_at`;
@@ -163,6 +163,7 @@ $env:TM_TRADING_TEST_MONGODB_URI = "mongodb://localhost:27018/?tls=true&tlsCAFil
 cargo test -p tm-trading-storage --test mongo_repository
 cargo test -p tm-trading-storage --test mongo_services
 cargo test -p tm-trading-storage --test mongo_candles
+cargo test -p tm-trading-storage --test mongo_watchlists
 ```
 
 The URI must be TLS-enabled and validate against the local trust store or the referenced CA file. Any `mongod` started with `--tlsMode requireTLS --tlsCertificateKeyFile <server.pem> --tlsCAFile <ca.pem> --tlsAllowConnectionsWithoutCertificates` works; the certificate must carry `localhost` as a subject alternative name.
@@ -178,6 +179,21 @@ A heartbeat carrying a snapshot for a different Agent is rejected with `422`; th
 ## Closed-candle store
 
 Closed candles are keyed by `{symbol}:{timeframe}:{openTime}`, so re-recording the same close updates one row instead of adding a duplicate. Forming bars are never written. Rows written by the legacy recorder remain readable: a missing `volume` reads as `0`, a missing `schemaVersion` as `candle.v1`. A row whose `state` is not `closed`, whose `_id` disagrees with its fields, or that carries an unknown schema stamp is reported as unreadable and is never served as a valid bar. No Management API endpoint serves candles yet.
+
+## Watchlist store
+
+A watchlist is owned by the authenticated subject, never by a caller-supplied owner field. The first list an owner creates becomes that owner's default, and `{ownerId, name}` is unique with case-insensitive collation, so `Core` and `core` collide for one owner but not across owners. Symbols are trimmed, uppercased, de-duplicated, and kept in first-appearance order. Any id belonging to another owner is reported as `404`, not `403`, so the API never confirms that a foreign row exists.
+
+Drive the endpoints with the same user credential:
+
+```powershell
+$headers = @{ Authorization = "Bearer local-user-token" }
+$body = @{ name = "Core"; symbols = @("btcusdt", "ethusdt") } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/api/v1/watchlists -Headers $headers -ContentType "application/json" -Body $body
+Invoke-RestMethod -Uri http://127.0.0.1:8787/api/v1/watchlists -Headers $headers
+```
+
+The store persists to `watchlists` with the legacy field names and `ObjectId` `_id`, so rows written by this service remain readable by the legacy application. The Agent credential cannot use the endpoints: it receives `403` because it holds no user capabilities.
 
 ## Public market-data adapters
 

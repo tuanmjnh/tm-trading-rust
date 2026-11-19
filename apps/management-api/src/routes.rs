@@ -7,14 +7,16 @@ use chrono::{Duration as ChronoDuration, Utc};
 use tm_trading_contracts::{
     AgentCommandDto, AgentHeartbeatRequest, AgentHeartbeatResponse, ApiVersionInfo,
     ClaimCommandRequest, ClaimCommandResponse, CompleteCommandRequest, CompleteCommandResponse,
-    CreateOperationRequest, HealthResponse, HealthStatus, OperationActionDto, OperationResponse,
-    ProgressCommandRequest, ProgressCommandResponse, ServiceSnapshot,
+    CreateOperationRequest, CreateWatchlistRequest, HealthResponse, HealthStatus,
+    OperationActionDto, OperationResponse, ProgressCommandRequest, ProgressCommandResponse,
+    ReplaceWatchlistSymbolsRequest, ServiceSnapshot, WatchlistDto,
 };
 use tm_trading_domain::{NewOperation, Operation, OperationAction, OperationId};
 use uuid::Uuid;
 
 use crate::auth::{
     AuthContext, CAPABILITY_OPERATION_READ, CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ,
+    CAPABILITY_WATCHLIST_READ, CAPABILITY_WATCHLIST_WRITE,
 };
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -251,4 +253,60 @@ fn operation_action(value: OperationActionDto) -> Result<OperationAction, ApiErr
         OperationActionDto::Stop => Ok(OperationAction::Stop),
         OperationActionDto::Restart => Ok(OperationAction::Restart),
     }
+}
+
+pub async fn list_watchlists(
+    State(state): State<AppState>,
+    auth: AuthContext,
+) -> Result<Json<Vec<WatchlistDto>>, ApiError> {
+    auth.require_capability(CAPABILITY_WATCHLIST_READ)?;
+    let lists = state
+        .watchlists
+        .list(auth.subject())
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(lists.into_iter().map(WatchlistDto::from).collect()))
+}
+
+pub async fn create_watchlist(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Json(request): Json<CreateWatchlistRequest>,
+) -> Result<(StatusCode, Json<WatchlistDto>), ApiError> {
+    auth.require_capability(CAPABILITY_WATCHLIST_WRITE)?;
+    let watchlist = state
+        .watchlists
+        .create(auth.subject(), &request.name, &request.symbols, Utc::now())
+        .await
+        .map_err(ApiError::from)?;
+    Ok((StatusCode::CREATED, Json(WatchlistDto::from(watchlist))))
+}
+
+pub async fn replace_watchlist_symbols(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Path(watchlist_id): Path<String>,
+    Json(request): Json<ReplaceWatchlistSymbolsRequest>,
+) -> Result<Json<WatchlistDto>, ApiError> {
+    auth.require_capability(CAPABILITY_WATCHLIST_WRITE)?;
+    let watchlist = state
+        .watchlists
+        .replace_symbols(auth.subject(), &watchlist_id, &request.symbols, Utc::now())
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(WatchlistDto::from(watchlist)))
+}
+
+pub async fn delete_watchlist(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Path(watchlist_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    auth.require_capability(CAPABILITY_WATCHLIST_WRITE)?;
+    state
+        .watchlists
+        .delete(auth.subject(), &watchlist_id)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }

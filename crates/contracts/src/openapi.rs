@@ -8,6 +8,7 @@ use crate::service::{
     ProgressCommandResponse, ServiceSnapshot,
 };
 use crate::system::{ApiVersionInfo, HealthResponse};
+use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, WatchlistDto};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -26,7 +27,11 @@ use crate::system::{ApiVersionInfo, HealthResponse};
         agent_heartbeat,
         agent_claim_command,
         agent_progress_command,
-        agent_complete_command
+        agent_complete_command,
+        list_watchlists,
+        create_watchlist,
+        replace_watchlist_symbols,
+        delete_watchlist
     ),
     components(schemas(
         ApiVersionInfo,
@@ -43,12 +48,16 @@ use crate::system::{ApiVersionInfo, HealthResponse};
         ProgressCommandRequest,
         ProgressCommandResponse,
         CompleteCommandRequest,
-        CompleteCommandResponse
+        CompleteCommandResponse,
+        WatchlistDto,
+        CreateWatchlistRequest,
+        ReplaceWatchlistSymbolsRequest
     )),
     tags(
         (name = "System", description = "Version and health endpoints"),
         (name = "Services", description = "Service read model"),
         (name = "Operations", description = "Durable asynchronous service operations"),
+        (name = "Watchlists", description = "Owner-scoped symbol lists"),
         (name = "Agent", description = "Agent-only heartbeat and command endpoints")
     )
 )]
@@ -196,3 +205,64 @@ pub fn agent_progress_command() {}
     )
 )]
 pub fn agent_complete_command() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/watchlists",
+    tag = "Watchlists",
+    responses(
+        (status = 200, description = "Watchlists owned by the caller", body = Vec<WatchlistDto>),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_watchlists() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/watchlists",
+    tag = "Watchlists",
+    request_body(content = CreateWatchlistRequest),
+    responses(
+        (status = 201, description = "Created watchlist", body = WatchlistDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 409, description = "The owner already has a list with this name", body = ApiErrorResponse),
+        (status = 422, description = "The watchlist failed validation", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn create_watchlist() {}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/watchlists/{watchlist_id}/symbols",
+    tag = "Watchlists",
+    params(("watchlist_id" = String, Path, description = "Watchlist identifier")),
+    request_body(content = ReplaceWatchlistSymbolsRequest),
+    responses(
+        (status = 200, description = "Updated watchlist", body = WatchlistDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown watchlist", body = ApiErrorResponse),
+        (status = 422, description = "The symbol set failed validation", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn replace_watchlist_symbols() {}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/watchlists/{watchlist_id}",
+    tag = "Watchlists",
+    params(("watchlist_id" = String, Path, description = "Watchlist identifier")),
+    responses(
+        (status = 204, description = "Watchlist deleted"),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown watchlist", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn delete_watchlist() {}

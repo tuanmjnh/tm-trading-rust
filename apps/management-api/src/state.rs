@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_storage::{
-    InMemoryOperationRepository, InMemoryServiceSnapshotRepository, OperationRepository,
-    RepositoryError, ServiceSnapshotRepository,
+    InMemoryOperationRepository, InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository,
+    OperationRepository, RepositoryError, ServiceSnapshotRepository, WatchlistRepository,
 };
 
 /// Credentials and capabilities used in local deployment mode.
@@ -20,6 +20,7 @@ pub struct AuthConfig {
 pub struct AppState {
     pub operations: Arc<dyn OperationRepository>,
     pub services: Arc<dyn ServiceSnapshotRepository>,
+    pub watchlists: Arc<dyn WatchlistRepository>,
     pub auth: AuthConfig,
 }
 
@@ -30,6 +31,7 @@ impl AppState {
             auth,
             Arc::new(InMemoryOperationRepository::new()),
             Arc::new(InMemoryServiceSnapshotRepository::new()),
+            Arc::new(InMemoryWatchlistRepository::new()),
         )
     }
 
@@ -38,10 +40,12 @@ impl AppState {
         auth: AuthConfig,
         operations: Arc<dyn OperationRepository>,
         services: Arc<dyn ServiceSnapshotRepository>,
+        watchlists: Arc<dyn WatchlistRepository>,
     ) -> Self {
         Self {
             operations,
             services,
+            watchlists,
             auth,
         }
     }

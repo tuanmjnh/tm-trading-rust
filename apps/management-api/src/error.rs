@@ -100,6 +100,13 @@ impl From<RepositoryError> for ApiError {
             RepositoryError::Candle(_) => {
                 Self::UnprocessableEntity("candle failed validation".to_owned())
             }
+            RepositoryError::DuplicateWatchlistName => {
+                Self::Conflict("a watchlist with this name already exists".to_owned())
+            }
+            RepositoryError::WatchlistNotFound => {
+                Self::NotFound("watchlist was not found".to_owned())
+            }
+            RepositoryError::Watchlist(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())
             }

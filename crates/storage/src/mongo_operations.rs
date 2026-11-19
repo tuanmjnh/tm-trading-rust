@@ -297,12 +297,7 @@ fn indexes() -> Vec<IndexModel> {
 }
 
 fn is_duplicate_key(error: &mongodb::error::Error) -> bool {
-    matches!(
-        *error.kind,
-        mongodb::error::ErrorKind::Write(mongodb::error::WriteFailure::WriteError(
-            mongodb::error::WriteError { code: 11000, .. }
-        ))
-    )
+    crate::bson_support::is_duplicate_key(error)
 }
 
 fn bson_i64(value: u64) -> Result<i64, RepositoryError> {

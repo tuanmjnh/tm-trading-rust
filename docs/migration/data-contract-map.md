@@ -245,6 +245,8 @@ Source: `engine/models/watchlist.mjs`.
 
 Rust must preserve the declared unique index semantics and test tenant isolation.
 
+Implementation: `WatchlistRepository` has an in-memory and a MongoDB adapter. The MongoDB adapter keeps `_id` as an `ObjectId`, stores `createdAt`/`updatedAt` as BSON datetimes, and declares a unique `{ownerId, name}` index with primary-strength collation. The first list an owner creates becomes their default. Every read and write is owner-scoped, so another subject's id returns `404` rather than leaking the row. The Management API exposes the list through `GET/POST /api/v1/watchlists`, `PUT /api/v1/watchlists/{id}/symbols`, and `DELETE /api/v1/watchlists/{id}`; the list is scoped to the authenticated subject, never to a caller-supplied owner.
+
 ### 6.6 `news_items`
 
 Source: `engine/models/newsItem.mjs`.
@@ -502,6 +504,7 @@ Conceptual first traits:
 OperationRepository
 ServiceInstanceRepository
 AgentRepository
+WatchlistRepository
 ```
 
 Later domain traits:
@@ -510,7 +513,6 @@ Later domain traits:
 MarketObservationRepository
 ResearchEventRepository
 EvidenceRepository
-WatchlistRepository
 NewsRepository
 ProviderRepository
 NotificationOutboxRepository

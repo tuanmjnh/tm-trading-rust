@@ -379,6 +379,179 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/watchlists:
+    get:
+      tags:
+      - Watchlists
+      operationId: list_watchlists
+      responses:
+        '200':
+          description: Watchlists owned by the caller
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WatchlistDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    post:
+      tags:
+      - Watchlists
+      operationId: create_watchlist
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWatchlistRequest'
+        required: true
+      responses:
+        '201':
+          description: Created watchlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchlistDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: The owner already has a list with this name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The watchlist failed validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/watchlists/{watchlist_id}:
+    delete:
+      tags:
+      - Watchlists
+      operationId: delete_watchlist
+      parameters:
+      - name: watchlist_id
+        in: path
+        description: Watchlist identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Watchlist deleted
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown watchlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/watchlists/{watchlist_id}/symbols:
+    put:
+      tags:
+      - Watchlists
+      operationId: replace_watchlist_symbols
+      parameters:
+      - name: watchlist_id
+        in: path
+        description: Watchlist identifier
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceWatchlistSymbolsRequest'
+        required: true
+      responses:
+        '200':
+          description: Updated watchlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchlistDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown watchlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The symbol set failed validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 components:
   schemas:
     AgentCommandDto:
@@ -563,6 +736,17 @@ components:
           $ref: '#/components/schemas/OperationActionDto'
         service_instance_id:
           type: string
+    CreateWatchlistRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+        symbols:
+          type: array
+          items:
+            type: string
     DesiredStateDto:
       type: string
       description: Canonical desired state of a service instance.
@@ -725,6 +909,15 @@ components:
       - DEGRADED
       - NOT_READY
       - UNKNOWN
+    ReplaceWatchlistSymbolsRequest:
+      type: object
+      required:
+      - symbols
+      properties:
+        symbols:
+          type: array
+          items:
+            type: string
     ServiceSnapshot:
       type: object
       description: Read model of one service instance as reported by its owning Agent.
@@ -774,6 +967,33 @@ components:
         updated_at:
           type: string
           format: date-time
+    WatchlistDto:
+      type: object
+      description: A named symbol list owned by the authenticated subject.
+      required:
+      - id
+      - name
+      - symbols
+      - is_default
+      - created_at
+      - updated_at
+      properties:
+        created_at:
+          type: string
+          format: date-time
+        id:
+          type: string
+        is_default:
+          type: boolean
+        name:
+          type: string
+        symbols:
+          type: array
+          items:
+            type: string
+        updated_at:
+          type: string
+          format: date-time
 tags:
 - name: System
   description: Version and health endpoints
@@ -781,5 +1001,7 @@ tags:
   description: Service read model
 - name: Operations
   description: Durable asynchronous service operations
+- name: Watchlists
+  description: Owner-scoped symbol lists
 - name: Agent
   description: Agent-only heartbeat and command endpoints
