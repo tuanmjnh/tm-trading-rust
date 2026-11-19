@@ -1,6 +1,6 @@
 # Operations Runbooks
 
-> Status: Phase 3 local Management API and Agent command channel implemented on 2026-11-18<br>
+> Status: Phase 3 local Management API and Agent command channel, and Phase 4 Desktop Control Center, implemented on 2026-11-19<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## Build the Agent and sample worker
@@ -110,11 +110,34 @@ The worker is spawned detached from the Agent console on Windows, so a console c
 
 Agent shutdown preserves the worker's desired `RUNNING` state, pending restart backoff, and restart budget. The next Agent launch reconciles that desired state. Only an explicit service stop persists desired `STOPPED` and cancels a pending automatic restart.
 
+## Run the Desktop Control Center
+
+The Desktop app is a view over the Management API. It needs the API running and a user bearer token; it never talks to the Agent or MongoDB.
+
+```powershell
+$env:TM_TRADING_API_URL = "http://127.0.0.1:8787"
+$env:TM_TRADING_LOCAL_API_TOKEN = "local-user-token"
+.\target\debug\tm-trading-desktop.exe
+```
+
+Expected result:
+
+- the header shows `Connected`;
+- the table lists the Agent's reported instances with desired state, observed state, readiness, restart count, and last exit code;
+- `Start` is disabled while desired state is `RUNNING`, and `Stop`/`Restart` are disabled while it is `STOPPED`;
+- an action shows `Waiting for the Agent to finish…` while the operation is pending and then the terminal operation status with the Agent's result summary;
+- the `EN`/`VI` toggle switches every label, and the choice is remembered for the session;
+- closing the window leaves the Agent and its workers running; the worker is spawned detached and is not a child of the Desktop process.
+
+The WebView2 profile lives in `<exe_dir>/data/desktop`. Override it with `TM_TRADING_DESKTOP_DATA_DIR` when the executable directory is read-only. If the window never appears while `msedgewebview2.exe` crash events with `0x80000003` are logged, the profile directory is the first thing to relocate.
+
+Localized UI strings live in `apps/desktop/src/i18n.rs`. Operation result summaries are produced by the Agent and are returned in English; they are not yet routed through the localization layer.
+
 ## Logs and status
 
 - Agent logs use `tracing`; set `TM_LOG_FORMAT=json` for structured JSON output.
 - The worker protocol is written only to the Agent's stdout pipe. Worker diagnostic logs use stderr and are retained in a bounded 100-line tail.
-- The current CLI does not yet expose the service snapshot over HTTP.
+- Service state is available from the Management API at `GET /api/v1/services` and from the Desktop Control Center. The Desktop shows the last successful refresh time and turns the connection indicator to `Disconnected` when a refresh fails; it keeps the last known rows visible instead of blanking them.
 
 ## Failure handling
 
@@ -132,4 +155,4 @@ Agent shutdown preserves the worker's desired `RUNNING` state, pending restart b
 
 ## Rollback
 
-This slice adds new executables only. Rollback is to stop the Agent, remove the new Agent/sample-worker/Management API artifacts, and roll back the corresponding Git commit. It does not modify legacy services, MongoDB collections, indexes, or documents.
+This slice adds new executables only. Rollback is to stop the Agent, remove the new Agent/sample-worker/Management API/Desktop artifacts, and roll back the corresponding Git commit. It does not modify legacy services, MongoDB collections, indexes, or documents.

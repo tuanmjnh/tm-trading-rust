@@ -1,0 +1,23 @@
+[package]
+name = "tm-trading-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+dioxus = { workspace = true }
+futures-util = "=0.3.34"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+tm-trading-api-client = { workspace = true }
+tm-trading-config = { workspace = true }
+tm-trading-contracts = { workspace = true }
+tm-trading-observability = { workspace = true }
+
+[lints]
+workspace = true

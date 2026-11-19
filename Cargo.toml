@@ -8,8 +8,10 @@ members = [
     "crates/storage",
     "crates/agent-protocol",
     "crates/supervisor-core",
+    "crates/api-client",
     "apps/agent",
     "apps/management-api",
+    "apps/desktop",
     "workers/sample-worker",
 ]
 
@@ -22,6 +24,7 @@ rust-version = "1.99.1"
 async-trait = "=0.1.92"
 axum = "=0.8.9"
 chrono = { version = "=0.4.45", features = ["serde"] }
+dioxus = { version = "=0.7.10", features = ["desktop"] }
 mongodb = { version = "=3.10.1", default-features = false, features = ["compat-3-0-0", "dns-resolver", "rustls-tls-aws-lc"] }
 process-wrap = { version = "=10.0.1", default-features = false, features = ["creation-flags", "job-object", "kill-on-drop", "process-group", "tokio1"] }
 reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls"] }
@@ -37,6 +40,7 @@ uuid = { version = "=1.29.3", features = ["v4"] }
 windows = { version = "=0.62.2", default-features = false, features = ["Win32_System_Threading"] }
 
 tm-trading-agent-protocol = { path = "crates/agent-protocol" }
+tm-trading-api-client = { path = "crates/api-client" }
 tm-trading-config = { path = "crates/config" }
 tm-trading-contracts = { path = "crates/contracts" }
 tm-trading-domain = { path = "crates/domain" }

@@ -50,6 +50,32 @@ impl From<OperationStatus> for OperationStatusDto {
     }
 }
 
+impl OperationStatusDto {
+    /// Wire representation of the operation status.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Queued => "queued",
+            Self::Claimed => "claimed",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Expired => "expired",
+        }
+    }
+
+    /// Whether the operation reached a final state.
+    #[must_use]
+    pub fn is_final(self) -> bool {
+        matches!(
+            self,
+            Self::Succeeded | Self::Failed | Self::Cancelled | Self::Expired
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CreateOperationRequest {
     pub service_instance_id: String,

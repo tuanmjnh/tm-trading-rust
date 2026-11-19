@@ -12,6 +12,17 @@ pub enum DesiredStateDto {
     Stopped,
 }
 
+impl DesiredStateDto {
+    /// Wire representation of the desired state.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "RUNNING",
+            Self::Stopped => "STOPPED",
+        }
+    }
+}
+
 /// Canonical observed state of a service instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -24,6 +35,21 @@ pub enum ObservedStateDto {
     Unknown,
 }
 
+impl ObservedStateDto {
+    /// Wire representation of the observed state.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "STARTING",
+            Self::Running => "RUNNING",
+            Self::Stopping => "STOPPING",
+            Self::Stopped => "STOPPED",
+            Self::Failed => "FAILED",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+}
+
 /// Canonical readiness of a service instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -32,6 +58,19 @@ pub enum ReadinessDto {
     Degraded,
     NotReady,
     Unknown,
+}
+
+impl ReadinessDto {
+    /// Wire representation of the readiness value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "READY",
+            Self::Degraded => "DEGRADED",
+            Self::NotReady => "NOT_READY",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
 }
 
 /// Read model of one service instance as reported by its owning Agent.

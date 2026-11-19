@@ -1,12 +1,12 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation and Phase 2 local Agent/sample-worker runtime implemented and hardened; API persistence not yet complete<br>
-> Last updated: 2026-11-18<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, and Phase 4 Dioxus Desktop shell implemented; MongoDB persistence not yet complete<br>
+> Last updated: 2026-11-19<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## 1. Current scope
 
-The repository currently contains the shared Rust foundation and an independent local Host Agent with one sample worker. It does not yet contain an executable Management API or Desktop client.
+The repository currently contains the shared Rust foundation, an independent local Host Agent with one sample worker, a loopback Management API, and a Dioxus Desktop Control Center that drives that API.
 
 Implemented:
 
@@ -21,15 +21,18 @@ Implemented:
 - an independent Tokio Host Agent that owns allowlisted worker processes, separates liveness from readiness, captures bounded logs, restarts crashed workers, and drains workers explicitly;
 - an exclusive per-installation Agent lock, a recoverable local process checkpoint, worker PID/path/version handshake validation, Windows Job Object containment, and Unix process-group termination;
 - bounded worker-event batches, receipt-time heartbeat evaluation, persisted restart budgets and deterministic-failure quarantine, monotonic Agent shutdown, and bounded forced-process reaping;
-- a JSON-line sample worker with handshake, readiness, heartbeat, cycle, operation, and graceful-shutdown messages.
+- a JSON-line sample worker with handshake, readiness, heartbeat, cycle, operation, and graceful-shutdown messages;
+- an Axum Management API that authenticates bearer credentials, enforces exact capabilities, and serves the service read model plus durable operations;
+- an Agent command channel that heartbeats per-Agent service snapshots and executes claimed operations;
+- a typed `api-client` crate that depends only on the versioned public contracts;
+- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, and EN/VI localization.
 
 Not implemented:
 
-- Axum Management API and HTTP authentication;
-- TM Hub token verification and capability enforcement;
-- Agent-to-Management-API polling and durable Agent credential rotation;
+- TM Hub token verification and capability enforcement (local bearer credentials are used today);
 - MongoDB operation repository and service snapshot persistence;
-- Dioxus Desktop client.
+- durable Agent credential rotation;
+- TM Hub login, TOTP, and refresh flow in the Desktop client.
 
 ## 2. Target runtime and current implementation
 
@@ -46,8 +49,9 @@ tm-trading-domain
   ^                 ^
   |                 |
 tm-trading-contracts  tm-trading-storage
-  ^        ^              ^
-  |        |              |
+  ^        ^     ^        ^
+  |        |     |        |
+  |        |     +-> tm-trading-api-client -> tm-trading-desktop
   |        +-> tm-trading-management-api -> loopback HTTP
   |                     ^
   |                     |
@@ -74,7 +78,13 @@ Dependency rules:
 - `workers/sample-worker` implements the versioned control protocol, performs its capability self-check before readiness, and reports explicit drain status.
 - `apps/management-api` is the local Axum Management API. It binds to loopback only, is a command producer and read-model provider, never spawns a process, and never runs a continuous worker loop. User endpoints require a bearer credential that carries exact `trading.*` capabilities; Agent endpoints require the separate per-installation Agent credential and may only act as the Agent named in the request. Operations are durable and idempotent, and are claimed with an expiring lease and fencing token.
 - `apps/agent` additionally opens an outbound command channel to the Management API: it heartbeats its service read model, claims commands addressed to its own Agent identity, executes them against its own worker registry, and reports the real outcome. The Agent never accepts an executable path or command line from the API.
+- `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, and operation creation/polling.
+- `apps/desktop` is a thin Dioxus view over `api-client`. It connects only to the Management API, never to MongoDB or a worker, and holds no credentials beyond the user bearer token. Every user-facing string comes from `apps/desktop/src/i18n.rs`.
 - Executable processes remain thin composition roots around these crates.
+
+### Desktop WebView2 data directory
+
+The Desktop app stores its WebView2 profile under `<exe_dir>/data/desktop`, overridable with `TM_TRADING_DESKTOP_DATA_DIR`. This mirrors the Agent's `<worker_dir>/data/agent` convention and keeps the profile beside the executable rather than in a per-user temporary directory. On the development host a profile outside the workspace caused `msedgewebview2.exe` to abort with `0x80000003` before the window could paint; the pinned in-workspace path is the verified configuration. Desktop exit never touches Agent or worker processes.
 
 ## 3. Contracts and versioning
 
@@ -131,8 +141,18 @@ Current defaults and variables:
 | `TM_HUB_URL` | `http://127.0.0.1:4000` | TM Hub base URL |
 | `TM_HUB_APP_ID` | unset | Dedicated Rust Hub application ID |
 | `TM_LOG_FORMAT` | `compact` | `compact` or `json` tracing output |
+| `TM_TRADING_API_BIND` | `127.0.0.1:8787` | Management API bind; non-loopback is rejected in local mode |
+| `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read` |
+| `TM_TRADING_AGENT_TOKEN` | required | Per-installation Agent-only bearer token; read from the environment, never the command line |
+| `TM_TRADING_LOCAL_API_SUBJECT` | `local-operator` | Subject recorded on locally authenticated operations |
+| `TM_TRADING_AGENT_ID` | `local-agent` | Agent identity the API expects on Agent endpoints |
+| `TM_TRADING_API_URL` | unset | Management API base URL used by the Agent and Desktop client |
+| `TM_TRADING_DESKTOP_DATA_DIR` | `<exe_dir>/data/desktop` | WebView2 profile directory for the Desktop app |
+| `TM_TRADING_LOCALE` | `en` | Desktop initial locale (`en` or `vi`) |
 
-TM Hub remains authoritative for human identity, sessions, RBAC, routes, and shared configuration. The Rust API must later enforce the exact `trading.*` capabilities documented in the TM Hub integration map.
+TM Hub remains authoritative for human identity, sessions, RBAC, routes, and shared configuration. Until Hub verification is wired, the Management API authenticates two local bearer credentials with an exact-match comparison: a user credential that carries `trading.service.read`, `trading.service.control`, and `trading.operation.read`, and a separate Agent credential that may only act as the Agent named in the request. A missing or invalid credential is `401`; a credential used on an endpoint of the other kind is `403`. The Hub-enforced `trading.*` capability set documented in the TM Hub integration map replaces this local mode without changing the endpoint contracts.
+
+The Desktop client reads its API base URL from `TM_TRADING_API_URL` and its user token from `TM_TRADING_LOCAL_API_TOKEN`. It never stores a token in a document, log, or UI-visible field.
 
 ## 7. Observability
 
@@ -154,6 +174,10 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Implement the independent Host Agent and sample-worker executable.
 - [x] Enforce one Agent owner per installation, Windows Job Object containment and Unix process-group termination, worker identity validation, bounded replacement startup, and local restart reconciliation.
 - [x] Harden local lifecycle behavior with receipt-time heartbeat evaluation, persisted restart budgets and quarantine, bounded event draining and termination, and distinct explicit-stop versus Agent-shutdown semantics.
+- [x] Implement the loopback Management API with exact-capability bearer auth and durable operations.
+- [x] Implement the Agent heartbeat and claimed-command channel.
+- [x] Implement the typed `api-client` crate over the public contracts.
+- [x] Implement the Dioxus Desktop Control Center with Start/Stop/Restart operations and EN/VI localization.
 - [ ] Persist operations and service snapshots through the Management API.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
@@ -182,3 +206,11 @@ New-Item -ItemType Directory -Force target/tmp
 $env:TMP = (Resolve-Path target/tmp).Path
 $env:TEMP = $env:TMP
 ```
+
+If `cl.exe` still fails with `D8050` when Cargo launches it, run Cargo from a Developer Command Prompt environment and disable debug info for the dev profile:
+
+```powershell
+cmd /c '"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >nul && set CARGO_PROFILE_DEV_DEBUG=false && cargo test --workspace --locked'
+```
+
+This affects compilation only; it does not change shipped release builds.
