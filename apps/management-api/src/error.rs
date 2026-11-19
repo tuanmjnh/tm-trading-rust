@@ -97,6 +97,9 @@ impl From<RepositoryError> for ApiError {
                     "heartbeat contains an invalid service snapshot".to_owned(),
                 )
             }
+            RepositoryError::Candle(_) => {
+                Self::UnprocessableEntity("candle failed validation".to_owned())
+            }
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())
             }

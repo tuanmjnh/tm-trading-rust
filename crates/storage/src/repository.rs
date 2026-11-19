@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use tm_trading_contracts::ServiceSnapshot;
-use tm_trading_domain::{Operation, OperationError, OperationId};
+use tm_trading_domain::{Candle, CandleError, Operation, OperationError, OperationId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CreateOperationOutcome {
@@ -77,6 +77,33 @@ pub trait ServiceSnapshotRepository: Send + Sync {
     ) -> Result<Option<ServiceSnapshot>, RepositoryError>;
 }
 
+/// How many of a batch were new rows versus re-recorded rows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CandleUpsertOutcome {
+    pub inserted: usize,
+    pub existing: usize,
+}
+
+/// Durable store for closed candles, matching the `candles` contract in
+/// `docs/migration/data-contract-map.md` section 6.1.
+#[async_trait]
+pub trait CandleRepository: Send + Sync {
+    async fn upsert_closed(
+        &self,
+        candles: &[Candle],
+    ) -> Result<CandleUpsertOutcome, RepositoryError>;
+
+    /// Most recent closed bars for a symbol and timeframe, newest first.
+    async fn recent(
+        &self,
+        symbol: &str,
+        timeframe: &str,
+        limit: usize,
+    ) -> Result<Vec<Candle>, RepositoryError>;
+
+    async fn get(&self, candle_id: &str) -> Result<Option<Candle>, RepositoryError>;
+}
+
 #[derive(Debug, Error)]
 pub enum RepositoryError {
     #[error("idempotency key was reused with a different request")]
@@ -108,6 +135,8 @@ pub enum RepositoryError {
     TlsRequired,
     #[error("MongoDB connections must validate TLS certificates")]
     InsecureTls,
+    #[error(transparent)]
+    Candle(#[from] CandleError),
     #[error(transparent)]
     Domain(#[from] OperationError),
 }

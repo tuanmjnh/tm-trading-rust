@@ -131,6 +131,8 @@ Verified against a TLS-enabled MongoDB 8.2 instance with certificate validation 
 
 Verified live: after the Agent process is killed, and again after the Management API restarts, `GET /api/v1/services` still returns the last reported instance with its original `updated_at`; a fresh Agent heartbeat replaces that row instead of duplicating it. The `service_instances` collection carries only the subset of section 8.2 fields the current read model exposes (`generation`, `pid`, `host`, and the readiness-check list are not collected yet), plus `schemaVersion = 1`; a document with an unknown schema version or an unparseable enum is rejected as corrupt.
 
+`MongoCandleRepository` implements `CandleRepository` against the `candles` collection from section 6.1, behind `InMemoryCandleRepository` for the local default. The natural key `{symbol}:{timeframe}:{openTime}` makes re-recording a closed bar an upsert instead of a duplicate, and the three declared indexes are created at startup. Reads accept the legacy document shape: an absent `volume` becomes `0`, an absent schema stamp is treated as `candle.v1`, and whole numbers may arrive as any BSON numeric type. A row whose `state` is not `closed`, whose `_id` disagrees with its fields, or whose schema stamp is unknown is rejected as corrupt. No API endpoint serves candles yet.
+
 ## 6. Configuration and security
 
 Configuration is read from process environment variables with local development defaults. Production mode fails closed unless an explicit database URI, HTTPS TM Hub URL, and Hub application ID are supplied. Database URIs are redacted from debug output.
@@ -188,6 +190,7 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Implement the Dioxus Desktop Control Center with Start/Stop/Restart operations and EN/VI localization.
 - [x] Persist durable operations in the MongoDB `operations` collection with atomic idempotency and fenced transitions.
 - [x] Persist service snapshots in the MongoDB `service_instances` projection, replaced per Agent heartbeat.
+- [x] Port the closed-candle domain model and its memory/MongoDB repositories.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

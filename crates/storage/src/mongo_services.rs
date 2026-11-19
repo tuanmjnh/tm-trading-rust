@@ -1,10 +1,11 @@
 use async_trait::async_trait;
-use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, Document, doc};
 use mongodb::options::IndexOptions;
 use mongodb::{Collection, Database, IndexModel};
 
 use tm_trading_contracts::{DesiredStateDto, ObservedStateDto, ReadinessDto, ServiceSnapshot};
 
+use crate::bson_support::{from_timestamp, timestamp};
 use crate::{RepositoryError, ServiceSnapshotRepository};
 
 /// Schema version of the persisted service snapshot described by
@@ -114,7 +115,7 @@ fn to_document(snapshot: &ServiceSnapshot) -> Result<Document, RepositoryError> 
         "readiness": snapshot.readiness.as_str(),
         "restartCount": i64::from(snapshot.restart_count),
         "retryBlocked": snapshot.retry_blocked,
-        "updatedAt": bson_timestamp(snapshot.updated_at),
+        "updatedAt": timestamp(snapshot.updated_at),
         "schemaVersion": i64::from(SERVICE_SNAPSHOT_SCHEMA_VERSION),
     };
     if let Some(value) = snapshot.process_alive {
@@ -124,7 +125,7 @@ fn to_document(snapshot: &ServiceSnapshot) -> Result<Document, RepositoryError> 
         document.insert("lastExitCode", i64::from(value));
     }
     if let Some(value) = snapshot.last_heartbeat_at {
-        document.insert("lastHeartbeatAt", bson_timestamp(value));
+        document.insert("lastHeartbeatAt", timestamp(value));
     }
     Ok(document)
 }
@@ -179,26 +180,12 @@ fn from_document(document: Document) -> Result<ServiceSnapshot, RepositoryError>
             .map_err(|_| RepositoryError::CorruptRecord("retryBlocked"))?,
         last_heartbeat_at: match document.get("lastHeartbeatAt") {
             None | Some(Bson::Null) => None,
-            Some(Bson::DateTime(value)) => Some(from_bson_timestamp(*value)?),
+            Some(Bson::DateTime(value)) => Some(from_timestamp(*value)?),
             Some(_) => return Err(RepositoryError::CorruptRecord("lastHeartbeatAt")),
         },
         updated_at: document
             .get_datetime("updatedAt")
             .map_err(|_| RepositoryError::CorruptRecord("updatedAt"))
-            .and_then(|value| from_bson_timestamp(*value))?,
+            .and_then(|value| from_timestamp(*value))?,
     })
-}
-
-fn bson_timestamp(value: chrono::DateTime<chrono::Utc>) -> BsonDateTime {
-    BsonDateTime::from_millis(value.timestamp_millis())
-}
-
-fn from_bson_timestamp(
-    value: BsonDateTime,
-) -> Result<chrono::DateTime<chrono::Utc>, RepositoryError> {
-    use chrono::TimeZone;
-    chrono::Utc
-        .timestamp_millis_opt(value.timestamp_millis())
-        .single()
-        .ok_or(RepositoryError::CorruptRecord("invalid timestamp"))
 }

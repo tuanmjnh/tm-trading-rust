@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
-use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, Document, doc};
 use mongodb::options::IndexOptions;
 use mongodb::{Collection, Database, IndexModel};
 
@@ -11,6 +11,7 @@ use tm_trading_domain::{
     Operation, OperationAction, OperationError, OperationId, OperationStatus, PersistedOperation,
 };
 
+use crate::bson_support::{from_timestamp, timestamp};
 use crate::{CreateOperationOutcome, OperationRepository, RepositoryError};
 
 /// Durable operation store described by `docs/migration/data-contract-map.md` section 8.1.
@@ -149,10 +150,10 @@ impl OperationRepository for MongoOperationRepository {
                 .find_one(doc! {
                     "agentId": agent_id,
                     "status": { "$nin": terminal_statuses() },
-                    "expiresAt": { "$gt": bson_timestamp(now)? },
+                    "expiresAt": { "$gt": timestamp(now) },
                     "$or": [
                         { "leaseExpiresAt": Bson::Null },
-                        { "leaseExpiresAt": { "$lte": bson_timestamp(now)? } },
+                        { "leaseExpiresAt": { "$lte": timestamp(now) } },
                     ],
                 })
                 .sort(doc! { "requestedAt": 1 })
@@ -228,7 +229,7 @@ impl OperationRepository for MongoOperationRepository {
             .collection
             .find(doc! {
                 "status": { "$nin": terminal_statuses() },
-                "expiresAt": { "$lte": bson_timestamp(now)? },
+                "expiresAt": { "$lte": timestamp(now) },
             })
             .await?;
         let mut expired = 0;
@@ -304,18 +305,8 @@ fn is_duplicate_key(error: &mongodb::error::Error) -> bool {
     )
 }
 
-fn bson_timestamp(value: DateTime<Utc>) -> Result<BsonDateTime, RepositoryError> {
-    Ok(BsonDateTime::from_millis(value.timestamp_millis()))
-}
-
 fn bson_i64(value: u64) -> Result<i64, RepositoryError> {
     i64::try_from(value).map_err(|_| RepositoryError::CorruptRecord("fencing token overflow"))
-}
-
-fn from_bson_timestamp(value: BsonDateTime) -> Result<DateTime<Utc>, RepositoryError> {
-    Utc.timestamp_millis_opt(value.timestamp_millis())
-        .single()
-        .ok_or(RepositoryError::CorruptRecord("invalid timestamp"))
 }
 
 fn to_document(operation: &Operation) -> Result<Document, RepositoryError> {
@@ -325,7 +316,7 @@ fn to_document(operation: &Operation) -> Result<Document, RepositoryError> {
         "idempotencyKey": operation.idempotency_key(),
         "requestHash": operation.request_hash(),
         "requestedBy": operation.requested_by(),
-        "requestedAt": bson_timestamp(operation.requested_at())?,
+        "requestedAt": timestamp(operation.requested_at()),
         "agentId": operation.target_agent_id(),
         "serviceInstanceId": operation.service_instance_id(),
         "serviceDefinitionId": operation.service_definition_id(),
@@ -333,7 +324,7 @@ fn to_document(operation: &Operation) -> Result<Document, RepositoryError> {
         "status": operation.status().as_str(),
         "attempt": i64::from(operation.attempt()),
         "fencingToken": bson_i64(operation.fencing_token())?,
-        "expiresAt": bson_timestamp(operation.expires_at())?,
+        "expiresAt": timestamp(operation.expires_at()),
         "correlationId": operation.correlation_id().to_string(),
     };
     for (field, value) in [
@@ -347,13 +338,13 @@ fn to_document(operation: &Operation) -> Result<Document, RepositoryError> {
         }
     }
     if let Some(value) = operation.lease_expires_at() {
-        document.insert("leaseExpiresAt", bson_timestamp(value)?);
+        document.insert("leaseExpiresAt", timestamp(value));
     }
     if let Some(value) = operation.started_at() {
-        document.insert("startedAt", bson_timestamp(value)?);
+        document.insert("startedAt", timestamp(value));
     }
     if let Some(value) = operation.finished_at() {
-        document.insert("finishedAt", bson_timestamp(value)?);
+        document.insert("finishedAt", timestamp(value));
     }
     Ok(document)
 }
@@ -376,13 +367,13 @@ fn from_document(document: Document) -> Result<Operation, RepositoryError> {
         document
             .get_datetime(field)
             .map_err(|_| RepositoryError::CorruptRecord(field))
-            .and_then(|value| from_bson_timestamp(*value))
+            .and_then(|value| from_timestamp(*value))
     };
     let optional_timestamp =
         |field: &'static str| -> Result<Option<DateTime<Utc>>, RepositoryError> {
             match document.get(field) {
                 None | Some(Bson::Null) => Ok(None),
-                Some(Bson::DateTime(value)) => from_bson_timestamp(*value).map(Some),
+                Some(Bson::DateTime(value)) => from_timestamp(*value).map(Some),
                 Some(_) => Err(RepositoryError::CorruptRecord(field)),
             }
         };

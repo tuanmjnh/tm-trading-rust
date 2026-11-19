@@ -180,7 +180,9 @@ Source: `engine/models/candle.mjs`.
 | `ingestTime` | Epoch milliseconds/null | No | Arrival observation |
 | `schemaVersion` | String | No | Keep default/version stamp |
 
-Declared indexes: `{ symbol, timeframe, openTime }`, `{ openTime }`, `{ source, openTime }`. Live index existence is `BLOCKED`.
+Declared indexes: `{ symbol, timeframe, openTime }`, `{ openTime }`, `{ source, openTime }`. Live index existence in the legacy database is `BLOCKED`.
+
+Rust implementation: `tm_trading_domain::Candle` (`crates/domain/src/candle.rs`) and `CandleRepository` (`crates/storage`) with in-memory and MongoDB implementations. The repository creates the three declared indexes at startup and writes `state = 'closed'` plus `schemaVersion = 'candle.v1'`. Reads tolerate the legacy shape: a missing `volume` becomes `0`, a missing `schemaVersion` is treated as `candle.v1`, and numbers may be any BSON numeric type. A non-`closed` state, an `_id` that disagrees with the row's fields, or an unknown schema version is rejected instead of served.
 
 ### 6.2 `intel`
 
