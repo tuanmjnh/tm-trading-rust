@@ -1,6 +1,6 @@
 # Operations Runbooks
 
-> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, and durable MongoDB operation and service-snapshot stores, implemented on 2026-11-19<br>
+> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, and durable MongoDB operation, service-snapshot, and closed-candle stores, implemented on 2026-11-19<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## Build the Agent and sample worker
@@ -112,7 +112,7 @@ Agent shutdown preserves the worker's desired `RUNNING` state, pending restart b
 
 ## Run the Desktop Control Center
 
-The Desktop app is a view over the Management API. It needs the API running and a user bearer token; it never talks to the Agent or MongoDB.
+The Desktop app is a view over the Management API. It needs the API running and a user bearer token; it never talks to the Agent or MongoDB. A release build is a Windows GUI binary, so launching it opens only the window, with no console attached; debug builds keep the console for startup logs.
 
 ```powershell
 $env:TM_TRADING_API_URL = "http://127.0.0.1:8787"
@@ -162,6 +162,7 @@ Live MongoDB tests are separate from the default test run. They create and drop 
 $env:TM_TRADING_TEST_MONGODB_URI = "mongodb://localhost:27018/?tls=true&tlsCAFile=D:/certs/ca.pem"
 cargo test -p tm-trading-storage --test mongo_repository
 cargo test -p tm-trading-storage --test mongo_services
+cargo test -p tm-trading-storage --test mongo_candles
 ```
 
 The URI must be TLS-enabled and validate against the local trust store or the referenced CA file. Any `mongod` started with `--tlsMode requireTLS --tlsCertificateKeyFile <server.pem> --tlsCAFile <ca.pem> --tlsAllowConnectionsWithoutCertificates` works; the certificate must carry `localhost` as a subject alternative name.
@@ -173,6 +174,10 @@ Without `TM_TRADING_TEST_MONGODB_URI` those tests return immediately and print `
 The Agent is authoritative for its own service instances. Each heartbeat upserts the reported instances and then deletes rows owned by that Agent that were not reported, so a removed instance disappears instead of lingering. Upserts happen before the delete: an interrupted heartbeat leaves an extra row until the next beat rather than losing state.
 
 A heartbeat carrying a snapshot for a different Agent is rejected with `422`; the API never writes across ownership boundaries. Rows are kept after an Agent stops reporting, because the persisted row is the last known observed state, not proof that the service is alive. Check `updated_at` and `lastHeartbeatAt` before trusting a row.
+
+## Closed-candle store
+
+Closed candles are keyed by `{symbol}:{timeframe}:{openTime}`, so re-recording the same close updates one row instead of adding a duplicate. Forming bars are never written. Rows written by the legacy recorder remain readable: a missing `volume` reads as `0`, a missing `schemaVersion` as `candle.v1`. A row whose `state` is not `closed`, whose `_id` disagrees with its fields, or that carries an unknown schema stamp is reported as unreadable and is never served as a valid bar. No Management API endpoint serves candles yet.
 
 ## Logs and status
 

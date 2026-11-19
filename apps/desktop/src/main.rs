@@ -1,3 +1,7 @@
+// A release build is a Windows GUI application: opening it must not allocate a console
+// window. Debug builds keep the console so startup logs stay visible.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod i18n;
 
 use std::path::PathBuf;
