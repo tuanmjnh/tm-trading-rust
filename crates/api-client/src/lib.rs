@@ -3,7 +3,8 @@ use std::time::Duration;
 use reqwest::Client;
 use thiserror::Error;
 use tm_trading_contracts::{
-    CreateOperationRequest, HealthResponse, OperationActionDto, OperationResponse, ServiceSnapshot,
+    CreateOperationRequest, CreateWatchlistRequest, HealthResponse, OperationActionDto,
+    OperationResponse, ReplaceWatchlistSymbolsRequest, ServiceSnapshot, WatchlistDto,
 };
 
 /// Typed client for the versioned Management API contract.
@@ -117,6 +118,92 @@ impl ManagementApiClient {
                 message: error.to_string(),
             })?;
         Self::decode(response, &path).await
+    }
+
+    pub async fn list_watchlists(&self) -> Result<Vec<WatchlistDto>, ApiClientError> {
+        let path = "/api/v1/watchlists";
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn create_watchlist(
+        &self,
+        name: &str,
+        symbols: &[String],
+    ) -> Result<WatchlistDto, ApiClientError> {
+        let path = "/api/v1/watchlists";
+        let body = CreateWatchlistRequest {
+            name: name.to_owned(),
+            symbols: symbols.to_vec(),
+        };
+        let response = self
+            .http
+            .post(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn replace_watchlist_symbols(
+        &self,
+        watchlist_id: &str,
+        symbols: &[String],
+    ) -> Result<WatchlistDto, ApiClientError> {
+        let path = format!("/api/v1/watchlists/{watchlist_id}/symbols");
+        let body = ReplaceWatchlistSymbolsRequest {
+            symbols: symbols.to_vec(),
+        };
+        let response = self
+            .http
+            .put(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, &path).await
+    }
+
+    pub async fn delete_watchlist(&self, watchlist_id: &str) -> Result<(), ApiClientError> {
+        let path = format!("/api/v1/watchlists/{watchlist_id}");
+        let response = self
+            .http
+            .delete(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(ApiClientError::Status {
+                path,
+                status: status.as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
     }
 
     async fn decode<TResponse>(

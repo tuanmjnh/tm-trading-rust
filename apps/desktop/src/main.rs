@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use futures_util::StreamExt;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
-    OperationActionDto, OperationResponse, OperationStatusDto, ServiceSnapshot,
+    OperationActionDto, OperationResponse, OperationStatusDto, ServiceSnapshot, WatchlistDto,
 };
 
 use i18n::{Locale, UiStrings};
@@ -67,6 +67,22 @@ enum UiAction {
         service_instance_id: String,
         action: OperationActionDto,
     },
+    Watchlist(WatchlistAction),
+}
+
+#[derive(Clone)]
+enum WatchlistAction {
+    Create {
+        name: String,
+        symbols: Vec<String>,
+    },
+    ReplaceSymbols {
+        watchlist_id: String,
+        symbols: Vec<String>,
+    },
+    Delete {
+        watchlist_id: String,
+    },
 }
 
 #[derive(Clone, PartialEq)]
@@ -99,6 +115,9 @@ fn App() -> Element {
     let command_error = use_signal(|| Option::<String>::None);
     let refreshed_at = use_signal(|| Option::<String>::None);
     let pending_operation = use_signal(|| Option::<String>::None);
+    let watchlists = use_signal(Vec::<WatchlistDto>::new);
+    let mut new_list_name = use_signal(String::new);
+    let watchlist_error = use_signal(|| Option::<String>::None);
 
     let client_task = client.clone();
     let actions = use_coroutine(move |mut actions: UnboundedReceiver<UiAction>| {
@@ -107,6 +126,7 @@ fn App() -> Element {
         let (mut services, mut connection) = (services, connection);
         let (mut operation, mut command_error) = (operation, command_error);
         let (mut refreshed_at, mut pending_operation) = (refreshed_at, pending_operation);
+        let (mut watchlists, mut watchlist_error) = (watchlists, watchlist_error);
         async move {
             loop {
                 tokio::select! {
@@ -127,6 +147,36 @@ fn App() -> Element {
                                     Err(error) => command_error.set(Some(error.to_string())),
                                 }
                             }
+                            Some(UiAction::Watchlist(action)) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                let result = match action {
+                                    WatchlistAction::Create { name, symbols } => client
+                                        .create_watchlist(&name, &symbols)
+                                        .await
+                                        .map(|_| ()),
+                                    WatchlistAction::ReplaceSymbols {
+                                        watchlist_id,
+                                        symbols,
+                                    } => client
+                                        .replace_watchlist_symbols(&watchlist_id, &symbols)
+                                        .await
+                                        .map(|_| ()),
+                                    WatchlistAction::Delete { watchlist_id } => {
+                                        client.delete_watchlist(&watchlist_id).await
+                                    }
+                                };
+                                match result {
+                                    Ok(()) => {
+                                        watchlist_error.set(None);
+                                        if let Ok(list) = client.list_watchlists().await {
+                                            watchlists.set(list);
+                                        }
+                                    }
+                                    Err(error) => watchlist_error.set(Some(error.to_string())),
+                                }
+                            }
                             None => break,
                         }
                     }
@@ -145,6 +195,10 @@ fn App() -> Element {
                 }
                 refreshed_at.set(Some(chrono::Local::now().format("%H:%M:%S").to_string()));
 
+                if let Ok(list) = client.list_watchlists().await {
+                    watchlists.set(list);
+                }
+
                 if let Some(operation_id) = pending_operation() {
                     match client.get_operation(&operation_id).await {
                         Ok(current) => {
@@ -162,6 +216,10 @@ fn App() -> Element {
     });
 
     let rows = services();
+    let lists = watchlists();
+    let watchlist_error_message = watchlist_error();
+    let name_value = new_list_name();
+    let list_sender = actions;
     let refreshed_label = format!(
         "{} {}",
         strings().refreshed_at,
@@ -289,6 +347,79 @@ fn App() -> Element {
                         p { class: "muted", "{strings().operation_none}" }
                     }
                 }
+                section { class: "panel watchlists-panel",
+                    div { class: "panel-head",
+                        h2 { "{strings().watchlists}" }
+                        span { class: "panel-meta", "{lists.len()}" }
+                    }
+                    if let Some(error) = watchlist_error_message.as_ref() {
+                        div { class: "banner error", role: "alert", "{error}" }
+                    }
+                    div { class: "watchlist-create",
+                        input {
+                            class: "text-input",
+                            value: "{name_value}",
+                            placeholder: "{strings().watchlist_new_placeholder}",
+                            aria_label: "{strings().watchlist_new_placeholder}",
+                            oninput: move |event| new_list_name.set(event.value()),
+                        }
+                        button {
+                            class: "button primary",
+                            onclick: move |_| {
+                                let name = new_list_name().trim().to_owned();
+                                if name.is_empty() {
+                                    return;
+                                }
+                                list_sender.send(UiAction::Watchlist(WatchlistAction::Create {
+                                    name,
+                                    symbols: Vec::new(),
+                                }));
+                                new_list_name.set(String::new());
+                            },
+                            "{strings().watchlist_add}"
+                        }
+                    }
+                    if lists.is_empty() {
+                        div { class: "empty",
+                            p { class: "empty-title", "{strings().watchlist_empty}" }
+                            p { "{strings().watchlist_empty_hint}" }
+                        }
+                    } else {
+                        div { class: "watchlist-grid",
+                            for list in lists.iter() {
+                                {
+                                    let watchlist = list.clone();
+                                    let replace_id = watchlist.id.clone();
+                                    let delete_id = watchlist.id.clone();
+                                    let replace_sender = list_sender;
+                                    let delete_sender = list_sender;
+                                    rsx! {
+                                        WatchlistCard {
+                                            key: "{watchlist.id}",
+                                            watchlist,
+                                            strings: strings(),
+                                            on_replace: move |symbols| {
+                                                replace_sender.send(UiAction::Watchlist(
+                                                    WatchlistAction::ReplaceSymbols {
+                                                        watchlist_id: replace_id.clone(),
+                                                        symbols,
+                                                    },
+                                                ));
+                                            },
+                                            on_delete: move |_| {
+                                                delete_sender.send(UiAction::Watchlist(
+                                                    WatchlistAction::Delete {
+                                                        watchlist_id: delete_id.clone(),
+                                                    },
+                                                ));
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -353,6 +484,67 @@ fn ServiceRow(
     }
 }
 
+#[component]
+fn WatchlistCard(
+    watchlist: WatchlistDto,
+    strings: UiStrings,
+    on_replace: EventHandler<Vec<String>>,
+    on_delete: EventHandler<()>,
+) -> Element {
+    let mut draft = use_signal(|| watchlist.symbols.join(", "));
+    let name = watchlist.name.clone();
+    let symbols = watchlist.symbols.clone();
+    let count = symbols.len();
+    let is_default = watchlist.is_default;
+
+    rsx! {
+        article { class: "watchlist-card",
+            header { class: "watchlist-card-head",
+                h3 { "{name}" }
+                div { class: "watchlist-card-meta",
+                    if is_default {
+                        span { class: "pill state-running", "{strings.watchlist_default}" }
+                    }
+                    span { class: "muted", "{count} {strings.watchlist_symbols_count}" }
+                }
+            }
+            div { class: "chips",
+                for symbol in symbols.iter() {
+                    span { class: "chip", "{symbol}" }
+                }
+            }
+            input {
+                class: "text-input",
+                value: "{draft}",
+                placeholder: "{strings.watchlist_symbols_placeholder}",
+                aria_label: "{strings.watchlist_symbols_placeholder}",
+                oninput: move |event| draft.set(event.value()),
+            }
+            div { class: "watchlist-card-actions",
+                button {
+                    class: "button primary",
+                    onclick: move |_| on_replace.call(parse_symbols(&draft())),
+                    "{strings.watchlist_save}"
+                }
+                button {
+                    class: "button",
+                    onclick: move |_| on_delete.call(()),
+                    "{strings.watchlist_delete}"
+                }
+            }
+        }
+    }
+}
+
+/// Splits a comma-separated symbol field; the server does the real validation.
+fn parse_symbols(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 fn connection_label(state: &ConnectionState, strings: &UiStrings) -> String {
     match state {
         ConnectionState::Connecting => strings.connecting.to_owned(),
@@ -375,5 +567,16 @@ fn operation_status_class(status: OperationStatusDto) -> &'static str {
         OperationStatusDto::Failed | OperationStatusDto::Expired => "status-failed",
         OperationStatusDto::Cancelled => "status-cancelled",
         _ => "status-progress",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_symbols;
+
+    #[test]
+    fn splits_and_trims_symbols() {
+        assert_eq!(parse_symbols(" btcusdt, ,ETHUSDT "), ["btcusdt", "ETHUSDT"]);
+        assert!(parse_symbols("  ").is_empty());
     }
 }

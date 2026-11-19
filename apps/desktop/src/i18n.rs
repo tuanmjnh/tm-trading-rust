@@ -56,6 +56,16 @@ pub struct UiStrings {
     pub refreshed_at: &'static str,
     pub language: &'static str,
     pub worker_instance: &'static str,
+    pub watchlists: &'static str,
+    pub watchlist_new_placeholder: &'static str,
+    pub watchlist_add: &'static str,
+    pub watchlist_default: &'static str,
+    pub watchlist_symbols_placeholder: &'static str,
+    pub watchlist_save: &'static str,
+    pub watchlist_delete: &'static str,
+    pub watchlist_empty: &'static str,
+    pub watchlist_empty_hint: &'static str,
+    pub watchlist_symbols_count: &'static str,
 }
 
 impl UiStrings {
@@ -95,6 +105,16 @@ impl UiStrings {
             refreshed_at: "Refreshed",
             language: "Language",
             worker_instance: "Instance",
+            watchlists: "Watchlists",
+            watchlist_new_placeholder: "New list name",
+            watchlist_add: "Add list",
+            watchlist_default: "Default",
+            watchlist_symbols_placeholder: "BTCUSDT, ETHUSDT",
+            watchlist_save: "Save symbols",
+            watchlist_delete: "Delete",
+            watchlist_empty: "No watchlists yet",
+            watchlist_empty_hint: "Create a list to keep the instruments you follow.",
+            watchlist_symbols_count: "symbols",
         }
     }
 
@@ -126,6 +146,16 @@ impl UiStrings {
             refreshed_at: "Cập nhật lúc",
             language: "Ngôn ngữ",
             worker_instance: "Phiên bản",
+            watchlists: "Danh sách theo dõi",
+            watchlist_new_placeholder: "Tên danh sách mới",
+            watchlist_add: "Thêm danh sách",
+            watchlist_default: "Mặc định",
+            watchlist_symbols_placeholder: "BTCUSDT, ETHUSDT",
+            watchlist_save: "Lưu mã",
+            watchlist_delete: "Xoá",
+            watchlist_empty: "Chưa có danh sách nào",
+            watchlist_empty_hint: "Tạo danh sách để lưu các mã bạn theo dõi.",
+            watchlist_symbols_count: "mã",
         }
     }
 }

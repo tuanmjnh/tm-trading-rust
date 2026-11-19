@@ -435,3 +435,88 @@ td.numeric {
   background: rgba(248, 81, 73, 0.1);
   border: 1px solid rgba(248, 81, 73, 0.3);
 }
+
+.watchlists-panel {
+  padding-bottom: 18px;
+}
+
+.watchlist-create {
+  display: flex;
+  gap: 8px;
+  padding: 14px 18px 0;
+}
+
+.text-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.text-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.watchlist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  padding: 14px 18px 0;
+}
+
+.watchlist-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.watchlist-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.watchlist-card-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.watchlist-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 22px;
+}
+
+.chip {
+  padding: 2px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.watchlist-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

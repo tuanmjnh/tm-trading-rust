@@ -127,6 +127,7 @@ Expected result:
 - `Start` is disabled while desired state is `RUNNING`, and `Stop`/`Restart` are disabled while it is `STOPPED`;
 - an action shows `Waiting for the Agent to finish…` while the operation is pending and then the terminal operation status with the Agent's result summary;
 - the `EN`/`VI` toggle switches every label, and the choice is remembered for the session;
+- the Watchlists panel lists the authenticated subject's lists, marks the default one, and lets you create a list, replace its symbols with a comma-separated field, and delete it; the server normalizes symbols, so `btcusdt` is stored as `BTCUSDT` and duplicates collapse;
 - closing the window leaves the Agent and its workers running; the worker is spawned detached and is not a child of the Desktop process.
 
 The WebView2 profile lives in `<exe_dir>/data/desktop`. Override it with `TM_TRADING_DESKTOP_DATA_DIR` when the executable directory is read-only. If the window never appears while `msedgewebview2.exe` crash events with `0x80000003` are logged, the profile directory is the first thing to relocate.

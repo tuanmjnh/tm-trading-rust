@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, and Phase 4 Dioxus Desktop shell implemented; MongoDB persistence not yet complete<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, and Phase 5 market data plus watchlists implemented; remaining Phase 5 panels and workers not started<br>
 > Last updated: 2026-11-19<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -27,7 +27,7 @@ Implemented:
 - a durable `service_instances` read model replaced per Agent heartbeat, so the Desktop keeps showing the last reported state across an API restart;
 - an Agent command channel that heartbeats per-Agent service snapshots and executes claimed operations;
 - a typed `api-client` crate that depends only on the versioned public contracts;
-- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, and EN/VI localization.
+- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, an owner-scoped watchlist editor, and EN/VI localization.
 
 Not implemented:
 
