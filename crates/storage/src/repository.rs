@@ -6,13 +6,19 @@ use thiserror::Error;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{
-    Candle, CandleError, Operation, OperationError, OperationId, Watchlist, WatchlistError,
+    Candle, CandleError, Operation, OperationError, OperationId, ProviderInstance,
+    ProviderInstanceError, Watchlist, WatchlistError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CreateOperationOutcome {
     Created(Operation),
     Existing(Operation),
+}
+
+/// 24 hex characters, the shape of a MongoDB `ObjectId` in string form.
+pub(crate) fn memory_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()[..24].to_owned()
 }
 
 #[async_trait]
@@ -135,6 +141,44 @@ pub trait WatchlistRepository: Send + Sync {
     async fn delete(&self, owner_id: &str, watchlist_id: &str) -> Result<(), RepositoryError>;
 }
 
+/// Configured provider instances, separate from the static adapter catalog.
+///
+/// Every method records configuration or observed health; the repository never calls a
+/// provider itself, so a slow network cannot block a store write.
+#[async_trait]
+pub trait ProviderInstanceRepository: Send + Sync {
+    async fn list(&self) -> Result<Vec<ProviderInstance>, RepositoryError>;
+
+    async fn get(
+        &self,
+        provider_instance_id: &str,
+    ) -> Result<Option<ProviderInstance>, RepositoryError>;
+
+    async fn create(
+        &self,
+        provider_definition_id: &str,
+        display_name: &str,
+        base_url: &str,
+        timeout_ms: u64,
+        now: DateTime<Utc>,
+    ) -> Result<ProviderInstance, RepositoryError>;
+
+    async fn update(&self, instance: ProviderInstance)
+    -> Result<ProviderInstance, RepositoryError>;
+
+    /// Writes only the health fields, leaving the operator's configuration untouched.
+    async fn record_health(
+        &self,
+        provider_instance_id: &str,
+        observed_at: DateTime<Utc>,
+        healthy: bool,
+        latency_ms: Option<u64>,
+        error_code: Option<&str>,
+    ) -> Result<ProviderInstance, RepositoryError>;
+
+    async fn delete(&self, provider_instance_id: &str) -> Result<(), RepositoryError>;
+}
+
 #[derive(Debug, Error)]
 pub enum RepositoryError {
     #[error("idempotency key was reused with a different request")]
@@ -174,6 +218,10 @@ pub enum RepositoryError {
     DuplicateWatchlistName,
     #[error("watchlist was not found")]
     WatchlistNotFound,
+    #[error("provider instance was not found")]
+    ProviderInstanceNotFound,
+    #[error(transparent)]
+    ProviderInstance(#[from] ProviderInstanceError),
     #[error(transparent)]
     Domain(#[from] OperationError),
 }

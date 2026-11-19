@@ -1,6 +1,7 @@
 mod error;
 pub mod openapi;
 mod operation;
+mod provider;
 mod service;
 mod system;
 mod watchlist;
@@ -9,6 +10,10 @@ pub use error::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
 pub use openapi::ApiDoc;
 pub use operation::{
     CreateOperationRequest, OperationActionDto, OperationResponse, OperationStatusDto,
+};
+pub use provider::{
+    CreateProviderInstanceRequest, ProviderDefinitionDto, ProviderHealthStateDto,
+    ProviderInstanceDto, UpdateProviderInstanceRequest,
 };
 pub use service::{
     AgentCommandDto, AgentHeartbeatRequest, AgentHeartbeatResponse, ClaimCommandRequest,

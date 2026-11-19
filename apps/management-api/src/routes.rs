@@ -7,22 +7,25 @@ use chrono::{Duration as ChronoDuration, Utc};
 use tm_trading_contracts::{
     AgentCommandDto, AgentHeartbeatRequest, AgentHeartbeatResponse, ApiVersionInfo,
     ClaimCommandRequest, ClaimCommandResponse, CompleteCommandRequest, CompleteCommandResponse,
-    CreateOperationRequest, CreateWatchlistRequest, HealthResponse, HealthStatus,
-    OperationActionDto, OperationResponse, ProgressCommandRequest, ProgressCommandResponse,
-    ReplaceWatchlistSymbolsRequest, ServiceSnapshot, WatchlistDto,
+    CreateOperationRequest, CreateProviderInstanceRequest, CreateWatchlistRequest, HealthResponse,
+    HealthStatus, OperationActionDto, OperationResponse, ProgressCommandRequest,
+    ProgressCommandResponse, ProviderDefinitionDto, ProviderInstanceDto,
+    ReplaceWatchlistSymbolsRequest, ServiceSnapshot, UpdateProviderInstanceRequest, WatchlistDto,
 };
 use tm_trading_domain::{NewOperation, Operation, OperationAction, OperationId};
 use uuid::Uuid;
 
 use crate::auth::{
-    AuthContext, CAPABILITY_OPERATION_READ, CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ,
-    CAPABILITY_WATCHLIST_READ, CAPABILITY_WATCHLIST_WRITE,
+    AuthContext, CAPABILITY_OPERATION_READ, CAPABILITY_PROVIDER_READ, CAPABILITY_PROVIDER_WRITE,
+    CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ, CAPABILITY_WATCHLIST_READ,
+    CAPABILITY_WATCHLIST_WRITE,
 };
 use crate::error::ApiError;
 use crate::state::AppState;
 
 const OPERATION_TTL_MINUTES: i64 = 10;
 const COMMAND_LEASE_SECONDS: u64 = 60;
+const DEFAULT_PROVIDER_TIMEOUT_MS: u64 = 5_000;
 
 pub async fn version() -> Json<ApiVersionInfo> {
     Json(ApiVersionInfo::current())
@@ -309,4 +312,189 @@ pub async fn delete_watchlist(
         .await
         .map_err(ApiError::from)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn list_provider_catalog(
+    auth: AuthContext,
+) -> Result<Json<Vec<ProviderDefinitionDto>>, ApiError> {
+    auth.require_capability(CAPABILITY_PROVIDER_READ)?;
+    Ok(Json(
+        tm_trading_market_providers::PROVIDER_DEFINITIONS
+            .iter()
+            .map(|definition| ProviderDefinitionDto {
+                id: definition.id.to_owned(),
+                display_name: definition.display_name.to_owned(),
+                default_base_url: definition.default_base_url.to_owned(),
+                timeframes: definition
+                    .timeframes
+                    .iter()
+                    .map(|value| (*value).to_owned())
+                    .collect(),
+            })
+            .collect(),
+    ))
+}
+
+pub async fn list_provider_instances(
+    State(state): State<AppState>,
+    auth: AuthContext,
+) -> Result<Json<Vec<ProviderInstanceDto>>, ApiError> {
+    auth.require_capability(CAPABILITY_PROVIDER_READ)?;
+    let instances = state.providers.list().await.map_err(ApiError::from)?;
+    Ok(Json(
+        instances
+            .into_iter()
+            .map(ProviderInstanceDto::from)
+            .collect(),
+    ))
+}
+
+pub async fn create_provider_instance(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Json(request): Json<CreateProviderInstanceRequest>,
+) -> Result<(StatusCode, Json<ProviderInstanceDto>), ApiError> {
+    auth.require_capability(CAPABILITY_PROVIDER_WRITE)?;
+    let definition =
+        tm_trading_market_providers::provider_definition(&request.provider_definition_id)
+            .ok_or_else(|| {
+                ApiError::UnprocessableEntity(format!(
+                    "provider definition '{}' is not in the catalog",
+                    request.provider_definition_id
+                ))
+            })?;
+    let base_url = request
+        .base_url
+        .unwrap_or_else(|| definition.default_base_url.to_owned());
+    let instance = state
+        .providers
+        .create(
+            &request.provider_definition_id,
+            &request.display_name,
+            &base_url,
+            request.timeout_ms.unwrap_or(DEFAULT_PROVIDER_TIMEOUT_MS),
+            Utc::now(),
+        )
+        .await
+        .map_err(ApiError::from)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(ProviderInstanceDto::from(instance)),
+    ))
+}
+
+pub async fn get_provider_instance(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Path(provider_instance_id): Path<String>,
+) -> Result<Json<ProviderInstanceDto>, ApiError> {
+    auth.require_capability(CAPABILITY_PROVIDER_READ)?;
+    let instance = state
+        .providers
+        .get(&provider_instance_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| provider_not_found(&provider_instance_id))?;
+    Ok(Json(ProviderInstanceDto::from(instance)))
+}
+
+pub async fn update_provider_instance(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Path(provider_instance_id): Path<String>,
+    Json(request): Json<UpdateProviderInstanceRequest>,
+) -> Result<Json<ProviderInstanceDto>, ApiError> {
+    auth.require_capability(CAPABILITY_PROVIDER_WRITE)?;
+    let current = state
+        .providers
+        .get(&provider_instance_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| provider_not_found(&provider_instance_id))?;
+    let display_name = request
+        .display_name
+        .unwrap_or_else(|| current.display_name().to_owned());
+    let base_url = request
+        .base_url
+        .unwrap_or_else(|| current.base_url().to_owned());
+    let timeout_ms = request.timeout_ms.unwrap_or(current.timeout_ms());
+    let enabled = request.enabled.unwrap_or(current.enabled());
+    let updated = current
+        .with_settings(&display_name, &base_url, timeout_ms, enabled, Utc::now())
+        .map_err(|error| ApiError::UnprocessableEntity(error.to_string()))?;
+    let updated = state
+        .providers
+        .update(updated)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(ProviderInstanceDto::from(updated)))
+}
+
+pub async fn delete_provider_instance(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Path(provider_instance_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    auth.require_capability(CAPABILITY_PROVIDER_WRITE)?;
+    state
+        .providers
+        .delete(&provider_instance_id)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Runs one bounded public health request and records its outcome on the instance.
+///
+/// A provider that fails the probe still returns `200`: the observation is the result,
+/// and `healthState`/`lastErrorCode` carry the verdict. Only an unknown definition or an
+/// impossible adapter configuration is a `422`.
+pub async fn test_provider_instance(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Path(provider_instance_id): Path<String>,
+) -> Result<Json<ProviderInstanceDto>, ApiError> {
+    auth.require_capability(CAPABILITY_PROVIDER_WRITE)?;
+    let instance = state
+        .providers
+        .get(&provider_instance_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| provider_not_found(&provider_instance_id))?;
+    let provider = tm_trading_market_providers::build_provider(
+        instance.provider_definition_id(),
+        instance.base_url(),
+        Duration::from_millis(instance.timeout_ms()),
+    )
+    .map_err(|error| ApiError::UnprocessableEntity(error.to_string()))?;
+
+    let observed_at = Utc::now();
+    let updated = match provider.health().await {
+        Ok(health) => {
+            state
+                .providers
+                .record_health(
+                    instance.id(),
+                    observed_at,
+                    true,
+                    Some(health.latency_ms),
+                    None,
+                )
+                .await
+        }
+        Err(error) => {
+            state
+                .providers
+                .record_health(instance.id(), observed_at, false, None, Some(error.code()))
+                .await
+        }
+    }
+    .map_err(ApiError::from)?;
+    Ok(Json(ProviderInstanceDto::from(updated)))
+}
+
+fn provider_not_found(provider_instance_id: &str) -> ApiError {
+    ApiError::NotFound(format!(
+        "provider instance '{provider_instance_id}' is not known"
+    ))
 }

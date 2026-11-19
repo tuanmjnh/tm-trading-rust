@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, and Phase 5 market data plus watchlists implemented; remaining Phase 5 panels and workers not started<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, and Phase 5 market data, watchlists, and provider configuration implemented; the Market Worker and the remaining Phase 5 panels are not started<br>
 > Last updated: 2026-11-19<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -27,7 +27,8 @@ Implemented:
 - a durable `service_instances` read model replaced per Agent heartbeat, so the Desktop keeps showing the last reported state across an API restart;
 - an Agent command channel that heartbeats per-Agent service snapshots and executes claimed operations;
 - a typed `api-client` crate that depends only on the versioned public contracts;
-- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, an owner-scoped watchlist editor, and EN/VI localization.
+- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, an owner-scoped watchlist editor, and EN/VI localization;
+- a provider catalog and provider instance configuration with bounded, read-only health probes.
 
 Not implemented:
 
@@ -61,6 +62,8 @@ tm-trading-contracts  tm-trading-storage
 tm-trading-config -> tm-trading-observability
 
 tm-trading-market-providers -> tm-trading-domain  (read-only public data)
+        |
+        +-> tm-trading-management-api  (provider catalog and bounded health probe)
 
 tm-trading-agent-protocol -> tm-trading-supervisor-core -> tm-trading-agent
         |                                      |
@@ -82,7 +85,7 @@ Dependency rules:
 - `workers/sample-worker` implements the versioned control protocol, performs its capability self-check before readiness, and reports explicit drain status.
 - `apps/management-api` is the local Axum Management API. It binds to loopback only, is a command producer and read-model provider, never spawns a process, and never runs a continuous worker loop. User endpoints require a bearer credential that carries exact `trading.*` capabilities; Agent endpoints require the separate per-installation Agent credential and may only act as the Agent named in the request. Operations are durable and idempotent, and are claimed with an expiring lease and fencing token.
 - `apps/agent` additionally opens an outbound command channel to the Management API: it heartbeats its service read model, claims commands addressed to its own Agent identity, executes them against its own worker registry, and reports the real outcome. The Agent never accepts an executable path or command line from the API.
-- `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, and operation creation/polling.
+- `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, operation creation/polling, watchlists, and provider instances.
 - `apps/desktop` is a thin Dioxus view over `api-client`. It connects only to the Management API, never to MongoDB or a worker, and holds no credentials beyond the user bearer token. Every user-facing string comes from `apps/desktop/src/i18n.rs`.
 - Executable processes remain thin composition roots around these crates.
 
@@ -98,7 +101,7 @@ The Desktop app stores its WebView2 profile under `<exe_dir>/data/desktop`, over
 - API errors use stable typed codes and include a correlation ID.
 - The generated contract snapshot is [`docs/api/openapi.yaml`](../api/openapi.yaml).
 
-The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
+The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, the watchlist endpoints, the provider catalog and instance endpoints, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
 
 ## 4. Service and operation model
 
@@ -138,6 +141,8 @@ Verified live: after the Agent process is killed, and again after the Management
 
 `MongoWatchlistRepository` implements `WatchlistRepository` against the `watchlists` collection from section 6.5, behind `InMemoryWatchlistRepository` for the local default. `_id` remains an `ObjectId` and timestamps remain BSON datetimes so legacy rows stay compatible. The unique `{ownerId, name}` index uses primary-strength collation, and every query includes the owner, so one subject cannot read, replace, or delete another subject's list. The first list an owner creates becomes their default. The Management API serves these rows only through the authenticated subject; the Agent credential is rejected with `403`.
 
+`MongoProviderInstanceRepository` implements `ProviderInstanceRepository` against the `provider_instances` collection from section 6.6, behind `InMemoryProviderInstanceRepository` for the local default. This collection is new to the Rust service, so it carries no legacy shape. Configuration fields and observed health fields are separate: a configuration edit rewrites the whole document, while a health probe updates only `healthState`, `lastHealthCheckAt`, `lastSuccessAt`, `lastLatencyMs`, and `lastErrorCode`, so a probe can never overwrite the operator's settings.
+
 ## 6. Configuration and security
 
 Configuration is read from process environment variables with local development defaults. Production mode fails closed unless an explicit database URI, HTTPS TM Hub URL, and Hub application ID are supplied. Database URIs are redacted from debug output.
@@ -157,7 +162,7 @@ Current defaults and variables:
 | `TM_LOG_FORMAT` | `compact` | `compact` or `json` tracing output |
 | `TM_TRADING_STORE` | `memory` | `memory` or `mongodb` for operations and service snapshots; production requires `mongodb` |
 | `TM_TRADING_API_BIND` | `127.0.0.1:8787` | Management API bind; non-loopback is rejected in local mode |
-| `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read` |
+| `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read`, `trading.watchlist.read`, `trading.watchlist.write`, `trading.provider.read`, `trading.provider.write` |
 | `TM_TRADING_AGENT_TOKEN` | required | Per-installation Agent-only bearer token; read from the environment, never the command line |
 | `TM_TRADING_LOCAL_API_SUBJECT` | `local-operator` | Subject recorded on locally authenticated operations |
 | `TM_TRADING_AGENT_ID` | `local-agent` | Agent identity the API expects on Agent endpoints |

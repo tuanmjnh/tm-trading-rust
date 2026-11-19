@@ -205,6 +205,33 @@ $env:TM_TRADING_LIVE_PROVIDER_TESTS = "1"
 cargo test -p tm-trading-market-providers --test live_public
 ```
 
+## Provider instances
+
+A provider instance is the operator's configuration for one catalog adapter. The catalog is
+compiled into the service and listed at `GET /api/v1/providers/catalog`; instances live at
+`GET /api/v1/providers`.
+
+```powershell
+$headers = @{ Authorization = "Bearer local-user-token" }
+$body = @{ provider_definition_id = "binance"; display_name = "Binance Public" } | ConvertTo-Json
+$instance = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/api/v1/providers -Headers $headers -ContentType "application/json" -Body $body
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8787/api/v1/providers/$($instance.id)/test" -Headers $headers
+```
+
+The probe sends exactly one small public request through the instance's own base URL and
+timeout, then records the outcome on the instance. A provider that fails the probe still
+returns `200`; read `health_state` and `last_error_code` for the verdict. The sanitized
+error classes are `configuration`, `unavailable`, `timeout`, `http_status`,
+`invalid_payload`, and `unsupported_capability`.
+
+A base URL must use `https`, except for a loopback host. A URL with credentials in it, a
+query, or a fragment is rejected with `422`. The probe timeout must be between 500 ms and
+30 s. Configuration and observation are separate: editing an instance never claims a fresh
+probe, and a probe never changes the operator's settings.
+
+The Agent credential cannot use these endpoints: it receives `403` because it holds no user
+capabilities.
+
 ## Logs and status
 
 - Agent logs use `tracing`; set `TM_LOG_FORMAT=json` for structured JSON output.

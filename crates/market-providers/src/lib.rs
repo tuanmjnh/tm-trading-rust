@@ -16,6 +16,57 @@ use async_trait::async_trait;
 use thiserror::Error;
 use tm_trading_domain::{Candle, CandleError};
 
+/// Bar lengths every public adapter in this crate accepts.
+pub const SUPPORTED_TIMEFRAMES: &[&str] = &["1m", "5m", "15m", "1h", "4h", "1d", "1w"];
+
+/// Static metadata for one provider adapter, independent of any configured instance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderDefinition {
+    pub id: &'static str,
+    pub display_name: &'static str,
+    pub default_base_url: &'static str,
+    pub timeframes: &'static [&'static str],
+}
+
+/// The adapters compiled into this build.
+pub const PROVIDER_DEFINITIONS: &[ProviderDefinition] = &[
+    ProviderDefinition {
+        id: "binance",
+        display_name: "Binance Public",
+        default_base_url: BINANCE_SPOT_BASE_URL,
+        timeframes: SUPPORTED_TIMEFRAMES,
+    },
+    ProviderDefinition {
+        id: "okx",
+        display_name: "OKX Public",
+        default_base_url: OKX_BASE_URL,
+        timeframes: SUPPORTED_TIMEFRAMES,
+    },
+];
+
+#[must_use]
+pub fn provider_definition(id: &str) -> Option<&'static ProviderDefinition> {
+    PROVIDER_DEFINITIONS
+        .iter()
+        .find(|definition| definition.id == id)
+}
+
+/// Builds the adapter named by `definition_id`.
+///
+/// `base_url` and `timeout` come from the configured instance, so a test probe uses the
+/// operator's settings instead of a hardcoded default.
+pub fn build_provider(
+    definition_id: &str,
+    base_url: &str,
+    timeout: Duration,
+) -> Result<Box<dyn MarketDataProvider>, ProviderError> {
+    match definition_id {
+        "binance" => Ok(Box::new(BinanceProvider::new(base_url, timeout)?)),
+        "okx" => Ok(Box::new(OkxProvider::new(base_url, timeout)?)),
+        other => Err(ProviderError::UnknownDefinition(other.to_owned())),
+    }
+}
+
 /// Catalog identity of a public market-data provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderId {
@@ -72,6 +123,10 @@ pub enum ProviderError {
         provider: &'static str,
         message: String,
     },
+    #[error("{provider} request timed out")]
+    Timeout { provider: &'static str },
+    #[error("unknown provider definition '{0}'")]
+    UnknownDefinition(String),
     #[error("{provider} returned HTTP {status}")]
     Status { provider: &'static str, status: u16 },
     #[error("{provider} returned an unexpected payload: {what}")]
@@ -83,6 +138,32 @@ pub enum ProviderError {
     Timeframe(String),
     #[error(transparent)]
     Candle(#[from] CandleError),
+}
+
+impl ProviderError {
+    /// Stable, sanitized class recorded with a provider health result.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Client { .. } | Self::UnknownDefinition(_) => "configuration",
+            Self::Request { .. } => "unavailable",
+            Self::Timeout { .. } => "timeout",
+            Self::Status { .. } => "http_status",
+            Self::Payload { .. } | Self::Candle(_) => "invalid_payload",
+            Self::Timeframe(_) => "unsupported_capability",
+        }
+    }
+}
+
+pub(crate) fn request_error(provider: &'static str, error: reqwest::Error) -> ProviderError {
+    if error.is_timeout() {
+        ProviderError::Timeout { provider }
+    } else {
+        ProviderError::Request {
+            provider,
+            message: error.to_string(),
+        }
+    }
 }
 
 /// Bar length in milliseconds for a canonical timeframe such as `1m` or `4h`.
@@ -138,6 +219,28 @@ mod tests {
         assert_eq!(timeframe_millis("1m").unwrap(), 60_000);
         assert_eq!(timeframe_millis("4h").unwrap(), 14_400_000);
         assert_eq!(timeframe_millis("1D").unwrap(), 86_400_000);
+    }
+
+    #[test]
+    fn the_catalog_lists_every_compiled_adapter() {
+        assert_eq!(
+            provider_definition("binance").unwrap().default_base_url,
+            BINANCE_SPOT_BASE_URL
+        );
+        assert_eq!(
+            provider_definition("okx").unwrap().default_base_url,
+            OKX_BASE_URL
+        );
+        assert!(provider_definition("unknown").is_none());
+    }
+
+    #[test]
+    fn an_unknown_definition_is_a_configuration_error() {
+        let error = build_provider("unknown", "https://example.com", Duration::from_secs(1))
+            .err()
+            .expect("unknown definition fails");
+
+        assert_eq!(error.code(), "configuration");
     }
 
     #[test]

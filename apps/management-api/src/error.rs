@@ -107,6 +107,12 @@ impl From<RepositoryError> for ApiError {
                 Self::NotFound("watchlist was not found".to_owned())
             }
             RepositoryError::Watchlist(error) => Self::UnprocessableEntity(error.to_string()),
+            RepositoryError::ProviderInstanceNotFound => {
+                Self::NotFound("provider instance was not found".to_owned())
+            }
+            RepositoryError::ProviderInstance(error) => {
+                Self::UnprocessableEntity(error.to_string())
+            }
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())
             }

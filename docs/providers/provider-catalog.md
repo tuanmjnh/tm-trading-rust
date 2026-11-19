@@ -1,6 +1,6 @@
 # Market Provider Catalog
 
-> Status: Binance spot and OKX swap public REST adapters implemented on 2026-11-19. WebSocket streaming, provider instances, and UI configuration are not implemented yet.
+> Status: Binance spot and OKX swap public REST adapters plus provider catalog/instance configuration with bounded health tests implemented on 2026-11-19. WebSocket streaming, the Market Worker, and the Control Center provider panel are not implemented yet.
 
 ## 1. Scope
 
@@ -43,18 +43,64 @@ A stored bar is a fact, so an adapter must never hand out a forming bar.
 
 ## 5. Failure and health semantics
 
-- `ProviderError::Status` carries the HTTP status; `Payload` names the unreadable field; `Request` carries the transport message.
+- `ProviderError::Status` carries the HTTP status; `Payload` names the unreadable field; `Request` carries the transport message; `Timeout` marks a request that ran out of time.
 - Health is a single request per call. `ProviderHealth { provider, latency_ms }` is returned only when the request succeeded; no result is cached, and a successful health check says nothing about bar data being fresh.
 - No secret is ever part of a URL, log line, or error message, because no adapter has one.
 
-## 6. Not implemented yet
+## 6. Provider definitions and instances
 
-- Provider instance configuration (enablement, priority, fallback group, timeouts, rate-limit policy) from the roadmap's provider instance model.
-- Persistent provider health/history records and the Control Center Market Providers section.
+A provider definition is adapter code compiled into the service; a provider instance is the
+operator's configuration for one definition. The catalog is static and exposed at
+`GET /api/v1/providers/catalog`:
+
+| Catalog id | Display name | Default base URL | Timeframes |
+|---|---|---|---|
+| `binance` | Binance Public | `https://api.binance.com` | `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w` |
+| `okx` | OKX Public | `https://www.okx.com` | `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w` |
+
+An instance stores its definition id, display name, enabled flag, base URL, bounded probe
+timeout, and the result of the last health probe. Configuration and observation stay
+separate: `updatedAt` changes only when the operator edits the instance, while
+`lastHealthCheckAt`, `lastSuccessAt`, `lastLatencyMs`, and `lastErrorCode` describe the
+newest probe. A failure clears the latency and keeps the last successful probe time.
+
+Base URL rules, enforced by the domain model:
+
+- the scheme must be `https`, or `http` for a loopback host only, so a local proxy or test
+  server can be used while a remote provider always requires TLS;
+- the URL must not carry credentials, a query, or a fragment;
+- the probe timeout must be between 500 ms and 30 s.
+
+The Management API owns these instances:
+
+```text
+GET    /api/v1/providers/catalog
+GET    /api/v1/providers
+POST   /api/v1/providers
+GET    /api/v1/providers/{providerInstanceId}
+PATCH  /api/v1/providers/{providerInstanceId}
+DELETE /api/v1/providers/{providerInstanceId}
+POST   /api/v1/providers/{providerInstanceId}/test
+```
+
+`POST .../test` runs exactly one bounded public request through the instance's own base
+URL and timeout. A provider that fails the probe still answers `200`: the observation is
+the result, and `healthState` plus `lastErrorCode` carry the verdict. Only an unknown
+definition or an unusable configuration is a `422`.
+
+Health failures are reported as sanitized classes, never as raw provider text:
+`configuration`, `unavailable`, `timeout`, `http_status`, `invalid_payload`, and
+`unsupported_capability`.
+
+## 7. Not implemented yet
+
+- Persistent provider health history and the Control Center Market Providers section.
 - WebSocket trade/ticker/depth streams and the Market Worker that records bars into the `candles` collection.
 - Bybit and other adapters.
+- Provider fields from the roadmap that no public market adapter uses yet: priority, fallback
+  group, maximum concurrency, rate-limit policy, and secret reference.
 
-## 7. Verification
+## 8. Verification
 
 Unit tests cover payload parsing, forming-bar filtering, ordering, timeframe mapping, and domain rejection without touching the network.
 

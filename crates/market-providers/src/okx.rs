@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use tm_trading_domain::{Candle, NewCandle};
 
-use crate::{MarketDataProvider, ProviderError, ProviderHealth, ProviderId, http_client};
+use crate::{
+    MarketDataProvider, ProviderError, ProviderHealth, ProviderId, http_client, request_error,
+};
 
 pub const OKX_BASE_URL: &str = "https://www.okx.com";
 
@@ -72,10 +74,7 @@ impl MarketDataProvider for OkxProvider {
             ])
             .send()
             .await
-            .map_err(|error| ProviderError::Request {
-                provider: PROVIDER,
-                message: error.to_string(),
-            })?;
+            .map_err(|error| request_error(PROVIDER, error))?;
         if !response.status().is_success() {
             return Err(ProviderError::Status {
                 provider: PROVIDER,
@@ -105,10 +104,7 @@ impl MarketDataProvider for OkxProvider {
             .get(format!("{}/api/v5/public/time", self.base_url))
             .send()
             .await
-            .map_err(|error| ProviderError::Request {
-                provider: PROVIDER,
-                message: error.to_string(),
-            })?;
+            .map_err(|error| request_error(PROVIDER, error))?;
         if !response.status().is_success() {
             return Err(ProviderError::Status {
                 provider: PROVIDER,

@@ -3,8 +3,9 @@ use std::time::Duration;
 use reqwest::Client;
 use thiserror::Error;
 use tm_trading_contracts::{
-    CreateOperationRequest, CreateWatchlistRequest, HealthResponse, OperationActionDto,
-    OperationResponse, ReplaceWatchlistSymbolsRequest, ServiceSnapshot, WatchlistDto,
+    CreateOperationRequest, CreateProviderInstanceRequest, CreateWatchlistRequest, HealthResponse,
+    OperationActionDto, OperationResponse, ProviderDefinitionDto, ProviderInstanceDto,
+    ReplaceWatchlistSymbolsRequest, ServiceSnapshot, UpdateProviderInstanceRequest, WatchlistDto,
 };
 
 /// Typed client for the versioned Management API contract.
@@ -204,6 +205,128 @@ impl ManagementApiClient {
                 message: response.text().await.unwrap_or_default(),
             })
         }
+    }
+
+    pub async fn list_provider_catalog(
+        &self,
+    ) -> Result<Vec<ProviderDefinitionDto>, ApiClientError> {
+        let path = "/api/v1/providers/catalog";
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn list_providers(&self) -> Result<Vec<ProviderInstanceDto>, ApiClientError> {
+        let path = "/api/v1/providers";
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn create_provider(
+        &self,
+        provider_definition_id: &str,
+        display_name: &str,
+        base_url: Option<&str>,
+        timeout_ms: Option<u64>,
+    ) -> Result<ProviderInstanceDto, ApiClientError> {
+        let path = "/api/v1/providers";
+        let body = CreateProviderInstanceRequest {
+            provider_definition_id: provider_definition_id.to_owned(),
+            display_name: display_name.to_owned(),
+            base_url: base_url.map(str::to_owned),
+            timeout_ms,
+        };
+        let response = self
+            .http
+            .post(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn update_provider(
+        &self,
+        provider_instance_id: &str,
+        request: UpdateProviderInstanceRequest,
+    ) -> Result<ProviderInstanceDto, ApiClientError> {
+        let path = format!("/api/v1/providers/{provider_instance_id}");
+        let response = self
+            .http
+            .patch(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, &path).await
+    }
+
+    pub async fn delete_provider(&self, provider_instance_id: &str) -> Result<(), ApiClientError> {
+        let path = format!("/api/v1/providers/{provider_instance_id}");
+        let response = self
+            .http
+            .delete(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(ApiClientError::Status {
+                path,
+                status: status.as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
+    }
+
+    pub async fn test_provider(
+        &self,
+        provider_instance_id: &str,
+    ) -> Result<ProviderInstanceDto, ApiClientError> {
+        let path = format!("/api/v1/providers/{provider_instance_id}/test");
+        let response = self
+            .http
+            .post(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, &path).await
     }
 
     async fn decode<TResponse>(

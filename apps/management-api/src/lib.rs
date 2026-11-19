@@ -10,8 +10,9 @@ use utoipa::OpenApi;
 use tm_trading_contracts::ApiDoc;
 
 pub use auth::{
-    AuthContext, CAPABILITY_OPERATION_READ, CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ,
-    CAPABILITY_WATCHLIST_READ, CAPABILITY_WATCHLIST_WRITE, Principal,
+    AuthContext, CAPABILITY_OPERATION_READ, CAPABILITY_PROVIDER_READ, CAPABILITY_PROVIDER_WRITE,
+    CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ, CAPABILITY_WATCHLIST_READ,
+    CAPABILITY_WATCHLIST_WRITE, Principal,
 };
 pub use error::ApiError;
 pub use state::{AppState, AuthConfig};
@@ -46,6 +47,24 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v1/watchlists/{watchlist_id}/symbols",
             axum::routing::put(routes::replace_watchlist_symbols),
+        )
+        .route(
+            "/api/v1/providers/catalog",
+            get(routes::list_provider_catalog),
+        )
+        .route(
+            "/api/v1/providers",
+            get(routes::list_provider_instances).post(routes::create_provider_instance),
+        )
+        .route(
+            "/api/v1/providers/{provider_instance_id}",
+            get(routes::get_provider_instance)
+                .patch(routes::update_provider_instance)
+                .delete(routes::delete_provider_instance),
+        )
+        .route(
+            "/api/v1/providers/{provider_instance_id}/test",
+            post(routes::test_provider_instance),
         )
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(

@@ -3,10 +3,10 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 
 use tm_trading_domain::Watchlist;
 
+use crate::repository::memory_id;
 use crate::{RepositoryError, WatchlistRepository};
 
 #[derive(Default)]
@@ -111,11 +111,6 @@ pub(crate) fn sort_lists(lists: &mut [Watchlist]) {
             .cmp(&left.is_default())
             .then_with(|| right.updated_at().cmp(&left.updated_at()))
     });
-}
-
-/// 24 hex characters, the same shape as a MongoDB `ObjectId` in string form.
-fn memory_id() -> String {
-    Uuid::new_v4().simple().to_string()[..24].to_owned()
 }
 
 #[cfg(test)]

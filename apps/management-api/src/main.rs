@@ -5,9 +5,11 @@ use std::sync::Arc;
 use tm_trading_config::LogFormat;
 use tm_trading_management_api::{AppState, AuthConfig, router};
 use tm_trading_storage::{
-    InMemoryOperationRepository, InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository,
-    MongoConnection, MongoOperationRepository, MongoServiceSnapshotRepository,
-    MongoWatchlistRepository, OperationRepository, ServiceSnapshotRepository, WatchlistRepository,
+    InMemoryOperationRepository, InMemoryProviderInstanceRepository,
+    InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository, MongoConnection,
+    MongoOperationRepository, MongoProviderInstanceRepository, MongoServiceSnapshotRepository,
+    MongoWatchlistRepository, OperationRepository, ProviderInstanceRepository,
+    ServiceSnapshotRepository, WatchlistRepository,
 };
 use tokio::net::TcpListener;
 
@@ -46,8 +48,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| DEFAULT_AGENT_ID.to_owned()),
     };
 
-    let (operations, services, watchlists) = stores().await?;
-    let state = AppState::with_repositories(auth, operations, services, watchlists);
+    let (operations, services, watchlists, providers) = stores().await?;
+    let state = AppState::with_repositories(auth, operations, services, watchlists, providers);
     let app = router(state);
     let listener = TcpListener::bind(bind).await?;
     tracing::info!(address = %bind, "management api listening");
@@ -66,6 +68,7 @@ async fn stores() -> Result<
         Arc<dyn OperationRepository>,
         Arc<dyn ServiceSnapshotRepository>,
         Arc<dyn WatchlistRepository>,
+        Arc<dyn ProviderInstanceRepository>,
     ),
     Box<dyn std::error::Error>,
 > {
@@ -79,6 +82,7 @@ async fn stores() -> Result<
             Arc::new(InMemoryOperationRepository::new()),
             Arc::new(InMemoryServiceSnapshotRepository::new()),
             Arc::new(InMemoryWatchlistRepository::new()),
+            Arc::new(InMemoryProviderInstanceRepository::new()),
         )),
         "mongodb" => {
             let uri = std::env::var("TM_DATABASE_URI")?;
@@ -89,6 +93,7 @@ async fn stores() -> Result<
                 Arc::new(MongoOperationRepository::new(connection.database()).await?),
                 Arc::new(MongoServiceSnapshotRepository::new(connection.database()).await?),
                 Arc::new(MongoWatchlistRepository::new(connection.database()).await?),
+                Arc::new(MongoProviderInstanceRepository::new(connection.database()).await?),
             ))
         }
         other => {

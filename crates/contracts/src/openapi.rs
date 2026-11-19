@@ -2,6 +2,10 @@ use utoipa::OpenApi;
 
 use crate::error::ApiErrorResponse;
 use crate::operation::{CreateOperationRequest, OperationResponse};
+use crate::provider::{
+    CreateProviderInstanceRequest, ProviderDefinitionDto, ProviderHealthStateDto,
+    ProviderInstanceDto, UpdateProviderInstanceRequest,
+};
 use crate::service::{
     AgentCommandDto, AgentHeartbeatRequest, AgentHeartbeatResponse, ClaimCommandRequest,
     ClaimCommandResponse, CompleteCommandRequest, CompleteCommandResponse, ProgressCommandRequest,
@@ -31,7 +35,14 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         list_watchlists,
         create_watchlist,
         replace_watchlist_symbols,
-        delete_watchlist
+        delete_watchlist,
+        list_provider_catalog,
+        list_provider_instances,
+        create_provider_instance,
+        get_provider_instance,
+        update_provider_instance,
+        delete_provider_instance,
+        test_provider_instance
     ),
     components(schemas(
         ApiVersionInfo,
@@ -51,13 +62,19 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         CompleteCommandResponse,
         WatchlistDto,
         CreateWatchlistRequest,
-        ReplaceWatchlistSymbolsRequest
+        ReplaceWatchlistSymbolsRequest,
+        ProviderDefinitionDto,
+        ProviderInstanceDto,
+        ProviderHealthStateDto,
+        CreateProviderInstanceRequest,
+        UpdateProviderInstanceRequest
     )),
     tags(
         (name = "System", description = "Version and health endpoints"),
         (name = "Services", description = "Service read model"),
         (name = "Operations", description = "Durable asynchronous service operations"),
         (name = "Watchlists", description = "Owner-scoped symbol lists"),
+        (name = "Providers", description = "Provider catalog and configured instances"),
         (name = "Agent", description = "Agent-only heartbeat and command endpoints")
     )
 )]
@@ -266,3 +283,107 @@ pub fn replace_watchlist_symbols() {}
     )
 )]
 pub fn delete_watchlist() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/providers/catalog",
+    tag = "Providers",
+    responses(
+        (status = 200, description = "Provider adapters compiled into this service", body = Vec<ProviderDefinitionDto>),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_provider_catalog() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/providers",
+    tag = "Providers",
+    responses(
+        (status = 200, description = "Configured provider instances", body = Vec<ProviderInstanceDto>),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_provider_instances() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/providers",
+    tag = "Providers",
+    request_body(content = CreateProviderInstanceRequest),
+    responses(
+        (status = 201, description = "Created provider instance", body = ProviderInstanceDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 422, description = "Unknown definition or invalid configuration", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn create_provider_instance() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/providers/{provider_instance_id}",
+    tag = "Providers",
+    params(("provider_instance_id" = String, Path, description = "Provider instance identifier")),
+    responses(
+        (status = 200, description = "Configured provider instance", body = ProviderInstanceDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown provider instance", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn get_provider_instance() {}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/providers/{provider_instance_id}",
+    tag = "Providers",
+    params(("provider_instance_id" = String, Path, description = "Provider instance identifier")),
+    request_body(content = UpdateProviderInstanceRequest),
+    responses(
+        (status = 200, description = "Updated provider instance", body = ProviderInstanceDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown provider instance", body = ApiErrorResponse),
+        (status = 422, description = "Invalid configuration", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn update_provider_instance() {}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/providers/{provider_instance_id}",
+    tag = "Providers",
+    params(("provider_instance_id" = String, Path, description = "Provider instance identifier")),
+    responses(
+        (status = 204, description = "Provider instance deleted"),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown provider instance", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn delete_provider_instance() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/providers/{provider_instance_id}/test",
+    tag = "Providers",
+    params(("provider_instance_id" = String, Path, description = "Provider instance identifier")),
+    responses(
+        (status = 200, description = "Bounded health probe recorded on the instance", body = ProviderInstanceDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown provider instance", body = ApiErrorResponse),
+        (status = 422, description = "The instance cannot build an adapter", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn test_provider_instance() {}

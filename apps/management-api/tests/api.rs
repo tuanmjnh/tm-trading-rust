@@ -504,3 +504,247 @@ async fn watchlist_errors_map_to_stable_statuses() {
         .expect("response");
     assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
 }
+
+async fn spawn_ping_server() -> (String, tokio::task::JoinHandle<()>) {
+    let app = axum::Router::new().route(
+        "/api/v3/ping",
+        axum::routing::get(|| async { StatusCode::OK }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind the test server");
+    let address = listener.local_addr().expect("read the test address");
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("serve the test API");
+    });
+    (format!("http://{address}"), handle)
+}
+
+#[tokio::test]
+async fn providers_are_configured_probed_and_removed() {
+    let (base_url, server) = spawn_ping_server().await;
+    let app = router(state());
+
+    let catalog = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/providers/catalog",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(catalog.status(), StatusCode::OK);
+    let catalog = json_body(catalog).await;
+    let definitions = catalog.as_array().expect("catalog list");
+    assert_eq!(definitions.len(), 2);
+    assert_eq!(definitions[0]["id"], "binance");
+    assert_eq!(
+        definitions[0]["default_base_url"],
+        "https://api.binance.com"
+    );
+    assert_eq!(definitions[1]["id"], "okx");
+
+    let created = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/providers",
+            Some(USER_TOKEN),
+            Some(json!({
+                "provider_definition_id": "binance",
+                "display_name": "Local Binance",
+                "base_url": base_url,
+                "timeout_ms": 2_000
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created = json_body(created).await;
+    let provider_id = created["id"].as_str().expect("id").to_owned();
+    assert_eq!(created["enabled"], true);
+    assert_eq!(created["health_state"], "UNKNOWN");
+    assert_eq!(created["last_health_check_at"], json!(null));
+
+    let probed = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/providers/{provider_id}/test"),
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(probed.status(), StatusCode::OK);
+    let probed = json_body(probed).await;
+    assert_eq!(probed["health_state"], "HEALTHY");
+    assert_eq!(probed["last_error_code"], json!(null));
+    assert!(probed["last_latency_ms"].is_number());
+    assert!(probed["last_success_at"].is_string());
+
+    let patched = app
+        .clone()
+        .oneshot(request(
+            "PATCH",
+            &format!("/api/v1/providers/{provider_id}"),
+            Some(USER_TOKEN),
+            Some(json!({ "display_name": "Renamed", "enabled": false })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(patched.status(), StatusCode::OK);
+    let patched = json_body(patched).await;
+    assert_eq!(patched["display_name"], "Renamed");
+    assert_eq!(patched["enabled"], false);
+    assert_eq!(patched["health_state"], "HEALTHY");
+    assert_eq!(patched["base_url"], base_url);
+
+    let listed = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/providers", Some(USER_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(json_body(listed).await, json!([patched]));
+
+    let deleted = app
+        .clone()
+        .oneshot(request(
+            "DELETE",
+            &format!("/api/v1/providers/{provider_id}"),
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+
+    let listed = app
+        .oneshot(request("GET", "/api/v1/providers", Some(USER_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(json_body(listed).await, json!([]));
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_failing_probe_is_recorded_instead_of_failing_the_request() {
+    // Bind and drop a listener so the probe targets a port that just became free.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let address = listener.local_addr().expect("address");
+    drop(listener);
+
+    let app = router(state());
+    let created = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/providers",
+            Some(USER_TOKEN),
+            Some(json!({
+                "provider_definition_id": "okx",
+                "display_name": "Unreachable OKX",
+                "base_url": format!("http://{address}"),
+                "timeout_ms": 500
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let provider_id = json_body(created).await["id"]
+        .as_str()
+        .expect("id")
+        .to_owned();
+
+    let probed = app
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/providers/{provider_id}/test"),
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+
+    assert_eq!(probed.status(), StatusCode::OK);
+    let probed = json_body(probed).await;
+    assert_eq!(probed["health_state"], "UNHEALTHY");
+    assert!(probed["last_error_code"].is_string());
+    assert_eq!(probed["last_latency_ms"], json!(null));
+}
+
+#[tokio::test]
+async fn provider_errors_map_to_stable_statuses() {
+    let app = router(state());
+
+    for body in [
+        json!({ "provider_definition_id": "unknown", "display_name": "Unknown" }),
+        json!({
+            "provider_definition_id": "binance",
+            "display_name": "Insecure",
+            "base_url": "http://api.binance.com"
+        }),
+        json!({
+            "provider_definition_id": "binance",
+            "display_name": "Secret",
+            "base_url": "https://user:secret@api.binance.com"
+        }),
+        json!({ "provider_definition_id": "binance" }),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/api/v1/providers",
+                Some(USER_TOKEN),
+                Some(body),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    let unknown = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/providers/missing",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    let unknown = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/providers/missing/test",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    let agent = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/providers", Some(AGENT_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    let anonymous = app
+        .oneshot(request("GET", "/api/v1/providers", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+}

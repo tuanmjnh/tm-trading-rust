@@ -136,9 +136,9 @@ Create these only when their owning slice begins:
 | `server/api/v1/health.get.ts` | `apps/management-api` | Recreate | Health reflects API, DB, Agent, and actual service states |
 | `server/api/v1/operations/**` | `apps/management-api` + `crates/storage` | Recreate | `202 Accepted`, operation ID, correlation ID, idempotency |
 | `server/api/v1/watchlists/**` | `apps/management-api` + `crates/storage` | Recreate done | Owner scope and per-owner unique names |
+| `server/api/v1/market-sources/health.get.ts` | `apps/management-api` + `crates/market-providers` | Recreate done for public market providers | Bounded public probe; liveness and freshness remain separate; no credentials |
 | `server/api/v1/news/**` | API + news worker | Recreate later | Publication/ingestion times and canonical/origin URLs |
 | `server/api/v1/ai/providers/**` | API + provider core | Recreate later | Secrets masked and never returned |
-| `server/api/v1/market-sources/health.get.ts` | Provider core/API | Recreate later | Provider liveness and freshness remain separate |
 | `app/composables/useHub.ts` | `crates/api-client` + `crates/auth` | Reimplement | Same Hub identity source; no browser-only assumptions |
 | `app/components/dashboard/**` | `crates/ui-components` + `apps/desktop` | Rebuild | Single Dashboard with independent panel states |
 | `app/components/**` overlays | `crates/ui-components` | Rebuild later | Modal/Slideover behavior and accessibility |

@@ -247,7 +247,27 @@ Rust must preserve the declared unique index semantics and test tenant isolation
 
 Implementation: `WatchlistRepository` has an in-memory and a MongoDB adapter. The MongoDB adapter keeps `_id` as an `ObjectId`, stores `createdAt`/`updatedAt` as BSON datetimes, and declares a unique `{ownerId, name}` index with primary-strength collation. The first list an owner creates becomes their default. Every read and write is owner-scoped, so another subject's id returns `404` rather than leaking the row. The Management API exposes the list through `GET/POST /api/v1/watchlists`, `PUT /api/v1/watchlists/{id}/symbols`, and `DELETE /api/v1/watchlists/{id}`; the list is scoped to the authenticated subject, never to a caller-supplied owner.
 
-### 6.6 `news_items`
+### 6.6 `provider_instances` (new in Rust)
+
+There is no legacy market-provider instance collection, so this contract is new and carries no
+migration obligation.
+
+- `providerDefinitionId` points at a catalog entry (`binance`, `okx`); the definition itself
+  is adapter code and is never stored.
+- `displayName`, `enabled`, `baseUrl`, and `timeoutMs` are the operator's configuration.
+- `healthState`, `lastHealthCheckAt`, `lastSuccessAt`, `lastLatencyMs`, and `lastErrorCode`
+  are the observed result of the last bounded health probe and are never written by a
+  configuration edit.
+- `schemaVersion` is `provider-instance.v1`; `_id` is an `ObjectId` and timestamps are BSON
+  datetimes.
+
+Implementation: `ProviderInstanceRepository` has an in-memory and a MongoDB adapter over the
+`provider_instances` collection. A health probe writes only the health fields, so a probe can
+never overwrite an operator's configuration. The Management API exposes the catalog and the
+instances under `/api/v1/providers`, and the probe under
+`POST /api/v1/providers/{id}/test`; see [`docs/providers/provider-catalog.md`](../providers/provider-catalog.md).
+
+### 6.7 `news_items`
 
 Source: `engine/models/newsItem.mjs`.
 
@@ -268,7 +288,7 @@ Rules:
 - A material update first appends `news_item_revisions` and then updates the envelope.
 - `ingestedAt` remains frozen on re-ingest and is the declared TTL base.
 
-### 6.7 `news_market_events`
+### 6.8 `news_market_events`
 
 Source: `engine/models/marketEvent.mjs`.
 
@@ -278,7 +298,7 @@ Source: `engine/models/marketEvent.mjs`.
 - Corroboration and source items retain provenance.
 - `lastSeenAt` is an observation timestamp, not a publication timestamp.
 
-### 6.8 `news_market_outlooks`
+### 6.9 `news_market_outlooks`
 
 Source: `engine/models/marketOutlook.mjs`.
 
@@ -287,7 +307,7 @@ Source: `engine/models/marketOutlook.mjs`.
 - Evidence references point to event/item IDs and retain URLs where available.
 - Expired or invalidated outlooks remain readable but must be rendered stale/invalidated.
 
-### 6.9 `notification_outbox` and `notification_logs`
+### 6.10 `notification_outbox` and `notification_logs`
 
 Source: `engine/models/notificationOutbox.mjs` and `notificationLog.mjs`.
 
@@ -300,7 +320,7 @@ The two collections intentionally have different jobs:
 
 The outbox `_id` is `${notifyId}:${channel}`. The log `_id` is `${notifyId}:${at}`. Rust must preserve this separation so retries do not rewrite the delivery ledger.
 
-### 6.10 `ai_provider_connections` and `ai_provider_models`
+### 6.11 `ai_provider_connections` and `ai_provider_models`
 
 Source: `engine/models/aiProviderConnection.mjs` and `aiProviderModel.mjs`.
 
@@ -498,18 +518,21 @@ MongoDB remains the target for durable operation and service-snapshot persistenc
 
 The Rust repository layer should expose narrow domain traits rather than leaking BSON into contracts.
 
-Conceptual first traits:
+Implemented traits:
 
 ```text
 OperationRepository
-ServiceInstanceRepository
-AgentRepository
+ServiceSnapshotRepository
+CandleRepository
 WatchlistRepository
+ProviderInstanceRepository
 ```
 
-Later domain traits:
+Planned traits:
 
 ```text
+ServiceInstanceRepository
+AgentRepository
 MarketObservationRepository
 ResearchEventRepository
 EvidenceRepository

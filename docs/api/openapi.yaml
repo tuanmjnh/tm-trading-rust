@@ -225,6 +225,295 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/providers:
+    get:
+      tags:
+      - Providers
+      operationId: list_provider_instances
+      responses:
+        '200':
+          description: Configured provider instances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderInstanceDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    post:
+      tags:
+      - Providers
+      operationId: create_provider_instance
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProviderInstanceRequest'
+        required: true
+      responses:
+        '201':
+          description: Created provider instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderInstanceDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Unknown definition or invalid configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/providers/catalog:
+    get:
+      tags:
+      - Providers
+      operationId: list_provider_catalog
+      responses:
+        '200':
+          description: Provider adapters compiled into this service
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderDefinitionDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/providers/{provider_instance_id}:
+    get:
+      tags:
+      - Providers
+      operationId: get_provider_instance
+      parameters:
+      - name: provider_instance_id
+        in: path
+        description: Provider instance identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Configured provider instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderInstanceDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown provider instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      tags:
+      - Providers
+      operationId: delete_provider_instance
+      parameters:
+      - name: provider_instance_id
+        in: path
+        description: Provider instance identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Provider instance deleted
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown provider instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    patch:
+      tags:
+      - Providers
+      operationId: update_provider_instance
+      parameters:
+      - name: provider_instance_id
+        in: path
+        description: Provider instance identifier
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProviderInstanceRequest'
+        required: true
+      responses:
+        '200':
+          description: Updated provider instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderInstanceDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown provider instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Invalid configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/providers/{provider_instance_id}/test:
+    post:
+      tags:
+      - Providers
+      operationId: test_provider_instance
+      parameters:
+      - name: provider_instance_id
+        in: path
+        description: Provider instance identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Bounded health probe recorded on the instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderInstanceDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown provider instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The instance cannot build an adapter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/services:
     get:
       tags:
@@ -736,6 +1025,28 @@ components:
           $ref: '#/components/schemas/OperationActionDto'
         service_instance_id:
           type: string
+    CreateProviderInstanceRequest:
+      type: object
+      required:
+      - provider_definition_id
+      - display_name
+      properties:
+        base_url:
+          type:
+          - string
+          - 'null'
+          description: Defaults to the definition's public base URL when omitted.
+        display_name:
+          type: string
+        provider_definition_id:
+          type: string
+        timeout_ms:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Defaults to the service's probe timeout when omitted.
+          minimum: 0
     CreateWatchlistRequest:
       type: object
       required:
@@ -901,6 +1212,88 @@ components:
       properties:
         accepted:
           type: boolean
+    ProviderDefinitionDto:
+      type: object
+      description: One adapter compiled into the running service.
+      required:
+      - id
+      - display_name
+      - default_base_url
+      - timeframes
+      properties:
+        default_base_url:
+          type: string
+        display_name:
+          type: string
+        id:
+          type: string
+        timeframes:
+          type: array
+          items:
+            type: string
+    ProviderHealthStateDto:
+      type: string
+      description: Last recorded health of a configured provider instance.
+      enum:
+      - UNKNOWN
+      - HEALTHY
+      - UNHEALTHY
+    ProviderInstanceDto:
+      type: object
+      description: A configured instance of a provider definition.
+      required:
+      - id
+      - provider_definition_id
+      - display_name
+      - enabled
+      - base_url
+      - timeout_ms
+      - health_state
+      - created_at
+      - updated_at
+      properties:
+        base_url:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        display_name:
+          type: string
+        enabled:
+          type: boolean
+        health_state:
+          $ref: '#/components/schemas/ProviderHealthStateDto'
+        id:
+          type: string
+        last_error_code:
+          type:
+          - string
+          - 'null'
+        last_health_check_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_latency_ms:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        last_success_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        provider_definition_id:
+          type: string
+        timeout_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        updated_at:
+          type: string
+          format: date-time
     ReadinessDto:
       type: string
       description: Canonical readiness of a service instance.
@@ -967,6 +1360,28 @@ components:
         updated_at:
           type: string
           format: date-time
+    UpdateProviderInstanceRequest:
+      type: object
+      description: Fields left out are unchanged.
+      properties:
+        base_url:
+          type:
+          - string
+          - 'null'
+        display_name:
+          type:
+          - string
+          - 'null'
+        enabled:
+          type:
+          - boolean
+          - 'null'
+        timeout_ms:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
     WatchlistDto:
       type: object
       description: A named symbol list owned by the authenticated subject.
@@ -1003,5 +1418,7 @@ tags:
   description: Durable asynchronous service operations
 - name: Watchlists
   description: Owner-scoped symbol lists
+- name: Providers
+  description: Provider catalog and configured instances
 - name: Agent
   description: Agent-only heartbeat and command endpoints

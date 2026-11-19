@@ -5629,6 +5629,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "thiserror 2.0.21",
+ "url",
  "uuid",
 ]
 
@@ -5645,6 +5646,7 @@ dependencies = [
  "tm-trading-config",
  "tm-trading-contracts",
  "tm-trading-domain",
+ "tm-trading-market-providers",
  "tm-trading-observability",
  "tm-trading-storage",
  "tokio",
