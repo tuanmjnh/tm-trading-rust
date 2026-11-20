@@ -277,6 +277,13 @@ fn App() -> Element {
                     Ok(list) => news.write().sources_loaded(list),
                     Err(error) => news.write().sources_failed(error.to_string()),
                 }
+                match client
+                    .list_news_clusters(&tm_trading_contracts::NewsClusterQueryDto::default())
+                    .await
+                {
+                    Ok(list) => news.write().clusters_loaded(list),
+                    Err(error) => news.write().clusters_failed(error.to_string()),
+                }
                 let selected_news_id = news.read().selected_id.clone();
                 if let Some(news_id) = selected_news_id {
                     match client.get_news_item(&news_id).await {

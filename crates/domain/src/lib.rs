@@ -1,6 +1,7 @@
 mod candle;
 mod lifecycle;
 mod news;
+mod news_cluster;
 mod news_item;
 mod operation;
 mod provider;
@@ -14,6 +15,12 @@ pub use news::{
     NEWS_SOURCE_SCHEMA_VERSION, NewNewsSource, NewsHealthState, NewsLicenseGate, NewsLicenseStatus,
     NewsRights, NewsSource, NewsSourceError, NewsSourceHealth, NewsTransport, NewsTrustTier,
     StoredNewsSource, is_safe_news_feed_url, sanitize_news_fetch_error,
+};
+pub use news_cluster::{
+    DEFAULT_NEWS_CLUSTER_MARKET_GROUP, MAX_NEWS_CLUSTER_ITEMS, NEWS_CLUSTER_ID_PREFIX,
+    NEWS_CLUSTER_JACCARD_THRESHOLD, NEWS_CLUSTER_SCHEMA_VERSION, NewNewsCluster, NewsCluster,
+    NewsClusterError, StoredNewsCluster, news_cluster_id_for, news_cluster_jaccard,
+    significant_tokens,
 };
 pub use news_item::{
     DEFAULT_NEWS_ITEM_LANGUAGE, DEFAULT_NEWS_ITEM_MARKET_GROUP, NEWS_EXCERPT_MAX_CHARS,

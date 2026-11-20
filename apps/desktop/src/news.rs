@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use tm_trading_contracts::{
-    NewsDirectionDto, NewsFreshnessDto, NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto,
-    NewsSourceDto, NewsSourceListDto,
+    NewsClusterDto, NewsClusterListDto, NewsDirectionDto, NewsFreshnessDto, NewsHealthStateDto,
+    NewsItemDto, NewsLevelDto, NewsListDto, NewsSourceDto, NewsSourceListDto,
 };
 
 use crate::i18n::UiStrings;
@@ -16,6 +16,8 @@ pub struct NewsPanelState {
     pub stale_after_seconds: i64,
     pub sources: Option<Vec<NewsSourceDto>>,
     pub sources_error: Option<String>,
+    pub clusters: Option<Vec<NewsClusterDto>>,
+    pub clusters_error: Option<String>,
     pub selected_id: Option<String>,
     pub detail: Option<NewsItemDto>,
     pub detail_error: Option<String>,
@@ -39,6 +41,15 @@ impl NewsPanelState {
 
     pub fn sources_failed(&mut self, error: String) {
         self.sources_error = Some(error);
+    }
+
+    pub fn clusters_loaded(&mut self, list: NewsClusterListDto) {
+        self.clusters = Some(list.clusters);
+        self.clusters_error = None;
+    }
+
+    pub fn clusters_failed(&mut self, error: String) {
+        self.clusters_error = Some(error);
     }
 
     pub fn open(&mut self, news_id: String) {
@@ -236,6 +247,64 @@ pub fn NewsPanel(
                                         td { class: "signal-source-method",
                                             "{source.last_error.clone().unwrap_or_else(|| strings.news_no_error.to_owned())}"
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "panel-head news-sources-head",
+                div {
+                    h3 { "{strings.news_clusters}" }
+                    p { class: "panel-subtitle", "{strings.news_clusters_hint}" }
+                }
+            }
+            if let Some(error) = state.clusters_error.as_ref() {
+                div { class: "banner error", role: "alert", "{error}" }
+            }
+            match state.clusters.as_ref() {
+                None if state.clusters_error.is_some() => rsx! {
+                    div { class: "empty",
+                        p { class: "empty-title", "{strings.news_unavailable}" }
+                        p { "{strings.news_clusters_empty_hint}" }
+                    }
+                },
+                None => rsx! {
+                    div { class: "empty loading-state", role: "status",
+                        p { class: "empty-title", "{strings.news_clusters_loading}" }
+                    }
+                },
+                Some(clusters) if clusters.is_empty() => rsx! {
+                    div { class: "empty",
+                        p { class: "empty-title", "{strings.news_clusters_empty}" }
+                        p { "{strings.news_clusters_empty_hint}" }
+                    }
+                },
+                Some(clusters) => rsx! {
+                    div { class: "table-wrap",
+                        table { class: "services news-clusters-table",
+                            thead {
+                                tr {
+                                    th { "Cluster" }
+                                    th { "Items" }
+                                    th { "Topics" }
+                                    th { "Last seen" }
+                                }
+                            }
+                            tbody {
+                                for cluster in clusters.iter() {
+                                    tr {
+                                        td { span { class: "timeframe-chip", "{cluster.id}" } }
+                                        td { "{cluster.item_count}" }
+                                        td {
+                                            div { class: "chips",
+                                                for token in cluster.tokens.iter() {
+                                                    span { class: "chip", "{token}" }
+                                                }
+                                            }
+                                        }
+                                        td { class: "signal-time", "{format_timestamp(cluster.last_seen_at)}" }
                                     }
                                 }
                             }

@@ -6,9 +6,10 @@ use thiserror::Error;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{
-    Candle, CandleError, NewNewsSource, NewsItem, NewsItemError, NewsLevel, NewsSource,
-    NewsSourceError, Operation, OperationError, OperationId, ProviderInstance,
-    ProviderInstanceError, ResearchEvent, ResearchEventError, Watchlist, WatchlistError,
+    Candle, CandleError, NewNewsSource, NewsCluster, NewsClusterError, NewsItem, NewsItemError,
+    NewsLevel, NewsSource, NewsSourceError, Operation, OperationError, OperationId,
+    ProviderInstance, ProviderInstanceError, ResearchEvent, ResearchEventError, Watchlist,
+    WatchlistError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -328,6 +329,53 @@ pub trait NewsItemRepository: Send + Sync {
     async fn get(&self, item_id: &str) -> Result<Option<NewsItem>, RepositoryError>;
 }
 
+/// Filter of a news cluster read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewsClusterQuery {
+    pub market_group: Option<String>,
+    /// Only clusters whose last observation is at or after this instant.
+    pub since: Option<DateTime<Utc>>,
+    /// Maximum number of clusters to return.
+    pub limit: usize,
+}
+
+/// Default number of news clusters a read returns.
+pub const DEFAULT_NEWS_CLUSTER_LIMIT: usize = 50;
+
+impl Default for NewsClusterQuery {
+    fn default() -> Self {
+        Self {
+            market_group: None,
+            since: None,
+            limit: DEFAULT_NEWS_CLUSTER_LIMIT,
+        }
+    }
+}
+
+impl NewsClusterQuery {
+    /// Whether one cluster satisfies the filter.
+    #[must_use]
+    pub fn matches(&self, cluster: &NewsCluster) -> bool {
+        self.market_group
+            .as_ref()
+            .is_none_or(|group| group == cluster.market_group())
+            && self
+                .since
+                .is_none_or(|since| cluster.last_seen_at() >= since)
+    }
+}
+
+/// Durable store for news event clusters.
+#[async_trait]
+pub trait NewsClusterRepository: Send + Sync {
+    async fn upsert(&self, cluster: &NewsCluster) -> Result<(), RepositoryError>;
+
+    /// Newest clusters first, ordered by last observation.
+    async fn list(&self, query: &NewsClusterQuery) -> Result<Vec<NewsCluster>, RepositoryError>;
+
+    async fn get(&self, cluster_id: &str) -> Result<Option<NewsCluster>, RepositoryError>;
+}
+
 /// Configured provider instances, separate from the static adapter catalog.
 ///
 /// Every method records configuration or observed health; the repository never calls a
@@ -415,6 +463,8 @@ pub enum RepositoryError {
     NewsSource(#[from] NewsSourceError),
     #[error(transparent)]
     NewsItem(#[from] NewsItemError),
+    #[error(transparent)]
+    NewsCluster(#[from] NewsClusterError),
     #[error(transparent)]
     ProviderInstance(#[from] ProviderInstanceError),
     #[error(transparent)]

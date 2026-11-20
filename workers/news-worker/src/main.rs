@@ -13,7 +13,7 @@ use tm_trading_news_worker::{
     CycleResult, NewsWorker, NewsWorkerConfig, NewsWorkerError, run_news_cycle,
 };
 use tm_trading_storage::{
-    MongoConnection, MongoNewsItemRepository, MongoNewsSourceRepository, RepositoryError,
+    MongoConnection, MongoNewsClusterRepository, MongoNewsItemRepository, MongoNewsSourceRepository, RepositoryError,
 };
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -65,6 +65,7 @@ async fn run() -> Result<(), RunError> {
         .map_err(classify_repository_error)?;
     let sources = Arc::new(MongoNewsSourceRepository::new(connection.database()).await?);
     let items = Arc::new(MongoNewsItemRepository::new(connection.database()).await?);
+    let clusters = Arc::new(MongoNewsClusterRepository::new(connection.database()).await?);
     let fetcher = Arc::new(
         HttpFeedFetcher::new(config.cycle_timeout)
             .map_err(|error| RunError::Configuration(error.to_string()))?,
@@ -99,6 +100,7 @@ async fn run() -> Result<(), RunError> {
                     worker.config(),
                     Arc::clone(&sources),
                     Arc::clone(&items),
+                    Arc::clone(&clusters),
                     Arc::clone(&fetcher),
                     operation_id,
                     cycle_result_tx.clone(),
@@ -195,6 +197,7 @@ fn spawn_cycle(
     config: &NewsWorkerConfig,
     sources: Arc<MongoNewsSourceRepository>,
     items: Arc<MongoNewsItemRepository>,
+    clusters: Arc<MongoNewsClusterRepository>,
     fetcher: Arc<HttpFeedFetcher>,
     operation_id: Option<String>,
     result_tx: mpsc::UnboundedSender<(Option<String>, CycleResult)>,
@@ -207,6 +210,7 @@ fn spawn_cycle(
             run_news_cycle(
                 sources.as_ref(),
                 items.as_ref(),
+                clusters.as_ref(),
                 fetcher.as_ref(),
                 &config,
                 Utc::now(),

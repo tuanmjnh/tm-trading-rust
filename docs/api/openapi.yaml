@@ -368,6 +368,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/news/clusters:
+    get:
+      tags:
+      - News
+      operationId: list_news_clusters
+      parameters:
+      - name: market_group
+        in: query
+        description: Exact market group filter
+        required: false
+        schema:
+          type: string
+      - name: since
+        in: query
+        description: Only clusters whose last observation is at or after this RFC 3339 instant
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        description: Maximum number of clusters, 1 to 200, default 50
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+      responses:
+        '200':
+          description: News event clusters, newest observation first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewsClusterListDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The requested limit is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/news/sources:
     get:
       tags:
@@ -1594,6 +1650,77 @@ components:
           - number
           - 'null'
           format: double
+    NewsClusterDto:
+      type: object
+      description: One cluster of stories that describe the same event.
+      required:
+      - id
+      - item_ids
+      - item_count
+      - tokens
+      - market_group
+      - first_seen_at
+      - last_seen_at
+      properties:
+        first_seen_at:
+          type: string
+          format: date-time
+        id:
+          type: string
+        item_count:
+          type: integer
+          minimum: 0
+        item_ids:
+          type: array
+          items:
+            type: string
+        last_seen_at:
+          type: string
+          format: date-time
+        market_group:
+          type: string
+        tokens:
+          type: array
+          items:
+            type: string
+    NewsClusterListDto:
+      type: object
+      description: A bounded list of news event clusters.
+      required:
+      - generated_at
+      - count
+      - clusters
+      properties:
+        clusters:
+          type: array
+          items:
+            $ref: '#/components/schemas/NewsClusterDto'
+        count:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+    NewsClusterQueryDto:
+      type: object
+      description: Optional filters for a news cluster list request.
+      properties:
+        limit:
+          type:
+          - integer
+          - 'null'
+          description: Maximum number of clusters to return.
+          minimum: 0
+        market_group:
+          type:
+          - string
+          - 'null'
+        since:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: Only clusters whose last observation is at or after this instant.
     NewsDirectionDto:
       type: string
       description: Direction the story is read as having for the market.

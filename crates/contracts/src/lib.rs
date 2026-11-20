@@ -14,8 +14,9 @@ pub use market::{
     MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
 };
 pub use news::{
-    NewsDirectionDto, NewsFreshnessDto, NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto,
-    NewsQueryDto, NewsSourceDto, NewsSourceListDto,
+    NewsClusterDto, NewsClusterListDto, NewsClusterQueryDto, NewsDirectionDto, NewsFreshnessDto,
+    NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto, NewsQueryDto, NewsSourceDto,
+    NewsSourceListDto,
 };
 pub use openapi::ApiDoc;
 pub use operation::{

@@ -5,8 +5,9 @@ use crate::market::{
     MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
 };
 use crate::news::{
-    NewsDirectionDto, NewsFreshnessDto, NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto,
-    NewsQueryDto, NewsSourceDto, NewsSourceListDto,
+    NewsClusterDto, NewsClusterListDto, NewsClusterQueryDto, NewsDirectionDto, NewsFreshnessDto,
+    NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto, NewsQueryDto, NewsSourceDto,
+    NewsSourceListDto,
 };
 use crate::operation::{CreateOperationRequest, OperationResponse};
 use crate::provider::{
@@ -60,7 +61,8 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         get_research_event,
         list_news,
         get_news_item,
-        list_news_sources
+        list_news_sources,
+        list_news_clusters
     ),
     components(schemas(
         ApiVersionInfo,
@@ -102,9 +104,12 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         NewsLevelDto,
         NewsDirectionDto,
         NewsFreshnessDto,
-        NewsSourceDto,
+                NewsSourceDto,
         NewsSourceListDto,
-        NewsHealthStateDto
+        NewsHealthStateDto,
+        NewsClusterDto,
+        NewsClusterListDto,
+        NewsClusterQueryDto
     )),
     tags(
         (name = "System", description = "Version and health endpoints"),
@@ -550,3 +555,22 @@ pub fn get_news_item() {}
     )
 )]
 pub fn list_news_sources() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/news/clusters",
+    tag = "News",
+    params(
+        ("market_group" = Option<String>, Query, description = "Exact market group filter"),
+        ("since" = Option<String>, Query, description = "Only clusters whose last observation is at or after this RFC 3339 instant"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of clusters, 1 to 200, default 50")
+    ),
+    responses(
+        (status = 200, description = "News event clusters, newest observation first", body = NewsClusterListDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 422, description = "The requested limit is invalid", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_news_clusters() {}

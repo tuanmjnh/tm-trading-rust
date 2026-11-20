@@ -2,11 +2,14 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::{DateTime, Utc};
 use tm_trading_contracts::{
-    NewsDirectionDto, NewsFreshnessDto, NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto,
-    NewsQueryDto, NewsSourceDto, NewsSourceListDto,
+    NewsClusterDto, NewsClusterListDto, NewsClusterQueryDto, NewsDirectionDto, NewsFreshnessDto,
+    NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto, NewsQueryDto, NewsSourceDto,
+    NewsSourceListDto,
 };
-use tm_trading_domain::{NewsDirection, NewsHealthState, NewsItem, NewsLevel, NewsSource};
-use tm_trading_storage::NewsItemQuery;
+use tm_trading_domain::{
+    NewsDirection, NewsHealthState, NewsItem, NewsLevel, NewsSource,
+};
+use tm_trading_storage::{NewsClusterQuery, NewsItemQuery};
 
 use crate::auth::CAPABILITY_NEWS_READ;
 use crate::error::ApiError;
@@ -86,6 +89,48 @@ pub async fn list_news_sources(
         generated_at: now,
         count: sources.len(),
         sources,
+    }))
+}
+
+/// Lists the observed news event clusters, newest observation first.
+pub async fn list_news_clusters(
+    State(state): State<AppState>,
+    auth: crate::auth::AuthContext,
+    Query(query): Query<NewsClusterQueryDto>,
+) -> Result<Json<NewsClusterListDto>, ApiError> {
+    auth.require_capability(CAPABILITY_NEWS_READ)?;
+    let limit = query.limit.unwrap_or(50);
+    if limit == 0 || limit > MAX_LIMIT {
+        return Err(ApiError::UnprocessableEntity(format!(
+            "limit must be between 1 and {MAX_LIMIT}"
+        )));
+    }
+    let clusters = state
+        .news_clusters
+        .list(&NewsClusterQuery {
+            market_group: clean_filter(query.market_group),
+            since: query.since,
+            limit,
+        })
+        .await
+        .map_err(ApiError::from)?;
+    let now = Utc::now();
+    let clusters: Vec<NewsClusterDto> = clusters
+        .iter()
+        .map(|cluster| NewsClusterDto {
+            id: cluster.cluster_id().to_owned(),
+            item_ids: cluster.item_ids().to_vec(),
+            item_count: cluster.item_ids().len(),
+            tokens: cluster.tokens().to_vec(),
+            market_group: cluster.market_group().to_owned(),
+            first_seen_at: cluster.first_seen_at(),
+            last_seen_at: cluster.last_seen_at(),
+        })
+        .collect();
+    Ok(Json(NewsClusterListDto {
+        generated_at: now,
+        count: clusters.len(),
+        clusters,
     }))
 }
 

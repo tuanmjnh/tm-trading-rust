@@ -5,9 +5,9 @@ use std::sync::Arc;
 use tm_trading_config::LogFormat;
 use tm_trading_management_api::{AppState, AuthConfig, Repositories, router};
 use tm_trading_storage::{
-    MongoCandleRepository, MongoConnection, MongoNewsItemRepository, MongoNewsSourceRepository,
-    MongoOperationRepository, MongoProviderInstanceRepository, MongoResearchEventRepository,
-    MongoServiceSnapshotRepository, MongoWatchlistRepository,
+    MongoCandleRepository, MongoConnection, MongoNewsClusterRepository, MongoNewsItemRepository,
+    MongoNewsSourceRepository, MongoOperationRepository, MongoProviderInstanceRepository,
+    MongoResearchEventRepository, MongoServiceSnapshotRepository, MongoWatchlistRepository,
 };
 use tokio::net::TcpListener;
 
@@ -91,6 +91,9 @@ async fn stores() -> Result<Repositories, Box<dyn std::error::Error>> {
                     MongoNewsSourceRepository::new(connection.database()).await?,
                 ),
                 news_items: Arc::new(MongoNewsItemRepository::new(connection.database()).await?),
+                news_clusters: Arc::new(
+                    MongoNewsClusterRepository::new(connection.database()).await?,
+                ),
             })
         }
         other => {

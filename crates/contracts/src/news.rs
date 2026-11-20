@@ -118,3 +118,33 @@ pub struct NewsSourceListDto {
     pub count: usize,
     pub sources: Vec<NewsSourceDto>,
 }
+
+/// One cluster of stories that describe the same event.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct NewsClusterDto {
+    pub id: String,
+    pub item_ids: Vec<String>,
+    pub item_count: usize,
+    pub tokens: Vec<String>,
+    pub market_group: String,
+    pub first_seen_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+}
+
+/// A bounded list of news event clusters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct NewsClusterListDto {
+    pub generated_at: DateTime<Utc>,
+    pub count: usize,
+    pub clusters: Vec<NewsClusterDto>,
+}
+
+/// Optional filters for a news cluster list request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct NewsClusterQueryDto {
+    pub market_group: Option<String>,
+    /// Only clusters whose last observation is at or after this instant.
+    pub since: Option<DateTime<Utc>>,
+    /// Maximum number of clusters to return.
+    pub limit: Option<usize>,
+}

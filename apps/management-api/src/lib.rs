@@ -82,6 +82,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/news", get(news::list_news))
         .route("/api/v1/news/sources", get(news::list_news_sources))
+        .route("/api/v1/news/clusters", get(news::list_news_clusters))
         .route("/api/v1/news/{news_id}", get(news::get_news_item))
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(

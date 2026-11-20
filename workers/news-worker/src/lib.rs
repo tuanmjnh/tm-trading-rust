@@ -12,10 +12,12 @@ use thiserror::Error;
 use tm_trading_agent_protocol::{WORKER_SCHEMA_VERSION, WorkerEvidence, WorkerMessage};
 use tm_trading_domain::{
     NewNewsItem, NewsDirection, NewsItem, NewsItemError, NewsItemRights, NewsLevel,
-    NewsLicenseGate, NewsSource, NewsTransport,
+    NewsLicenseGate, NewsSource, NewsTransport, significant_tokens,
 };
 use tm_trading_news_providers::{NewsFeedFetcher, RawFeedItem};
-use tm_trading_storage::{NewsItemRepository, NewsSourceRepository, RepositoryError};
+use tm_trading_storage::{
+    NewsClusterRepository, NewsItemRepository, NewsSourceRepository, RepositoryError,
+};
 
 /// Default number of items kept from one source and cycle.
 pub const DEFAULT_MAX_ITEMS_PER_SOURCE: usize = 40;
@@ -179,6 +181,8 @@ pub enum NewsWorkerError {
     Storage(#[from] RepositoryError),
     #[error(transparent)]
     Item(#[from] NewsItemError),
+    #[error(transparent)]
+    Cluster(#[from] tm_trading_domain::NewsClusterError),
     #[error("the news worker is not the source of truth for news writes")]
     WriteAuthorityDisabled,
     #[error("the news source registry is empty")]
@@ -454,6 +458,7 @@ impl NewsWorker {
 pub async fn run_news_cycle(
     source_repository: &dyn NewsSourceRepository,
     item_repository: &dyn NewsItemRepository,
+    cluster_repository: &dyn NewsClusterRepository,
     fetcher: &dyn NewsFeedFetcher,
     config: &NewsWorkerConfig,
     now: DateTime<Utc>,
@@ -499,6 +504,43 @@ pub async fn run_news_cycle(
                 outcome.inserted += upsert.inserted;
                 outcome.updated += upsert.updated;
                 outcome.unchanged += upsert.unchanged;
+
+                // Group the freshly stored stories into event clusters so the
+                // read side can present one event instead of many near-duplicate
+                // headlines. Only recently observed clusters are loaded so the
+                // assignment stays bounded.
+                let recent_clusters = cluster_repository
+                    .list(&tm_trading_storage::NewsClusterQuery {
+                        limit: 200,
+                        ..tm_trading_storage::NewsClusterQuery::default()
+                    })
+                    .await?;
+                for item in &items {
+                    let tokens = significant_tokens(item.title());
+                    if tokens.is_empty() {
+                        continue;
+                    }
+                    let market_group = Some(item.market_group().to_owned());
+                    if let Some(mut cluster) = recent_clusters
+                        .iter()
+                        .find(|cluster| cluster.matches_tokens(&tokens))
+                        .cloned()
+                    {
+                        cluster.add_item(item.item_id(), now);
+                        cluster_repository.upsert(&cluster).await?;
+                    } else {
+                        let cluster = tm_trading_domain::NewsCluster::new(
+                            tm_trading_domain::NewNewsCluster {
+                                tokens,
+                                item_id: item.item_id().to_owned(),
+                                market_group,
+                                observed_at: now,
+                            },
+                        )
+                        .map_err(NewsWorkerError::Cluster)?;
+                        cluster_repository.upsert(&cluster).await?;
+                    }
+                }
                 source_repository
                     .record_health(source.source_id(), now, items.len() as u32, None)
                     .await?;
@@ -572,7 +614,8 @@ mod tests {
     use tm_trading_domain::{NewNewsSource, NewsLicenseStatus, NewsRights, NewsTrustTier};
     use tm_trading_news_providers::NewsFetchError;
     use tm_trading_storage::{
-        InMemoryNewsItemRepository, InMemoryNewsSourceRepository, NewsItemQuery,
+        InMemoryNewsClusterRepository, InMemoryNewsItemRepository, InMemoryNewsSourceRepository,
+        NewsItemQuery,
     };
 
     fn at() -> DateTime<Utc> {
@@ -651,11 +694,12 @@ mod tests {
             .await
             .unwrap();
         let items = InMemoryNewsItemRepository::new();
+        let clusters = InMemoryNewsClusterRepository::new();
         let fetcher = StubFetcher {
             result: Ok(vec![raw_item("https://example.com/story")]),
         };
 
-        let outcome = run_news_cycle(&sources, &items, &fetcher, &config(), at())
+        let outcome = run_news_cycle(&sources, &items, &clusters, &fetcher, &config(), at())
             .await
             .expect("cycle");
 
@@ -681,6 +725,7 @@ mod tests {
             .await
             .unwrap();
         let items = InMemoryNewsItemRepository::new();
+        let clusters = InMemoryNewsClusterRepository::new();
         let fetcher = StubFetcher {
             result: Ok(vec![raw_item("https://example.com/story")]),
         };
@@ -688,6 +733,7 @@ mod tests {
         let error = run_news_cycle(
             &sources,
             &items,
+            &clusters,
             &fetcher,
             &config(),
             at() + chrono::Duration::seconds(30),
@@ -704,7 +750,7 @@ mod tests {
                 .is_empty()
         );
         let later = at() + chrono::Duration::seconds(600);
-        let outcome = run_news_cycle(&sources, &items, &fetcher, &config(), later)
+        let outcome = run_news_cycle(&sources, &items, &clusters, &fetcher, &config(), later)
             .await
             .expect("cycle after the interval");
         assert_eq!(outcome.sources_fetched, 1);
@@ -718,11 +764,12 @@ mod tests {
             .await
             .unwrap();
         let items = InMemoryNewsItemRepository::new();
+        let clusters = InMemoryNewsClusterRepository::new();
         let fetcher = StubFetcher {
             result: Err(NewsFetchError::Status { status: 429 }),
         };
 
-        let error = run_news_cycle(&sources, &items, &fetcher, &config(), at())
+        let error = run_news_cycle(&sources, &items, &clusters, &fetcher, &config(), at())
             .await
             .expect_err("all sources failed");
 
@@ -749,11 +796,12 @@ mod tests {
             .await
             .unwrap();
         let items = InMemoryNewsItemRepository::new();
+        let clusters = InMemoryNewsClusterRepository::new();
         let fetcher = StubFetcher {
             result: Ok(vec![raw_item("https://example.com/story")]),
         };
 
-        let error = run_news_cycle(&sources, &items, &fetcher, &config(), at())
+        let error = run_news_cycle(&sources, &items, &clusters, &fetcher, &config(), at())
             .await
             .expect_err("gated source is never polled");
 
@@ -775,13 +823,14 @@ mod tests {
             .await
             .unwrap();
         let items = InMemoryNewsItemRepository::new();
+        let clusters = InMemoryNewsClusterRepository::new();
         let fetcher = StubFetcher {
             result: Ok(vec![raw_item("https://example.com/story")]),
         };
         let mut disabled = config();
         disabled.source_of_truth = false;
 
-        let error = run_news_cycle(&sources, &items, &fetcher, &disabled, at())
+        let error = run_news_cycle(&sources, &items, &clusters, &fetcher, &disabled, at())
             .await
             .expect_err("write authority is required");
 

@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_storage::{
-    CandleRepository, InMemoryCandleRepository, InMemoryNewsItemRepository,
-    InMemoryNewsSourceRepository, InMemoryOperationRepository, InMemoryProviderInstanceRepository,
-    InMemoryResearchEventRepository, InMemoryServiceSnapshotRepository,
-    InMemoryWatchlistRepository, NewsItemRepository, NewsSourceRepository, OperationRepository,
-    ProviderInstanceRepository, RepositoryError, ResearchEventRepository,
-    ServiceSnapshotRepository, WatchlistRepository,
+    CandleRepository, InMemoryCandleRepository, InMemoryNewsClusterRepository,
+    InMemoryNewsItemRepository, InMemoryNewsSourceRepository, InMemoryOperationRepository,
+    InMemoryProviderInstanceRepository, InMemoryResearchEventRepository,
+    InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository, NewsClusterRepository,
+    NewsItemRepository, NewsSourceRepository, OperationRepository, ProviderInstanceRepository,
+    RepositoryError, ResearchEventRepository, ServiceSnapshotRepository, WatchlistRepository,
 };
 
 /// Credentials and capabilities used in local deployment mode.
@@ -29,6 +29,7 @@ pub struct Repositories {
     pub research_events: Arc<dyn ResearchEventRepository>,
     pub news_sources: Arc<dyn NewsSourceRepository>,
     pub news_items: Arc<dyn NewsItemRepository>,
+    pub news_clusters: Arc<dyn NewsClusterRepository>,
 }
 
 impl Repositories {
@@ -44,6 +45,7 @@ impl Repositories {
             research_events: Arc::new(InMemoryResearchEventRepository::new()),
             news_sources: Arc::new(InMemoryNewsSourceRepository::new()),
             news_items: Arc::new(InMemoryNewsItemRepository::new()),
+            news_clusters: Arc::new(InMemoryNewsClusterRepository::new()),
         }
     }
 }
@@ -59,6 +61,7 @@ pub struct AppState {
     pub research_events: Arc<dyn ResearchEventRepository>,
     pub news_sources: Arc<dyn NewsSourceRepository>,
     pub news_items: Arc<dyn NewsItemRepository>,
+    pub news_clusters: Arc<dyn NewsClusterRepository>,
     pub auth: AuthConfig,
 }
 
@@ -79,6 +82,7 @@ impl AppState {
             research_events: repositories.research_events,
             news_sources: repositories.news_sources,
             news_items: repositories.news_items,
+            news_clusters: repositories.news_clusters,
             auth,
         }
     }
