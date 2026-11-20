@@ -335,6 +335,36 @@ curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
 - Both endpoints require `trading.market.read`; the Agent credential is rejected with `403`.
 - The Desktop Market Overview and Market Pulse panels call the same two endpoints and show the symbol state beside each row.
 
+## Research event read model
+
+The Management API serves the events written by the Research Worker:
+
+```powershell
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/research/events?symbol=BTCUSDT&timeframe=1m&limit=50"
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/research/events/rev1_..."
+```
+
+- `symbol`, `timeframe`, `event_type`, and `since` are optional filters; `limit` is 1-200 and defaults to 50.
+- The owner scope is never a request parameter: it is the authenticated subject, and a foreign event ID is `404` rather than `403`.
+- Both endpoints require the exact `trading.research.read` capability; the Agent credential is rejected with `403`.
+- `freshness` and `age_seconds` are computed at read time from `detected_at`: an event is `FRESH` up to half the timeframe, with a one-minute floor. An unknown timeframe fails closed as `STALE`.
+- Each event returns the full evidence: source, provider method, input snapshot, producer and schema versions, quality state and reasons, evidence values, context, and the observation, detection, and ingestion times.
+
+The Desktop Signal Center panel reads the list every refresh cycle and shows one row per event with asset, event type, direction label, score, timeframe, context, quality, detected time, source, and freshness, plus an event and fresh count in the panel header. It has independent loading, empty, error, and stale states, so an API failure shows its own banner and keeps the last loaded rows instead of blanking the Dashboard.
+
+Selecting an asset opens the research-event detail Slideover, which fetches that event by ID and shows:
+
+- the event, direction, quality, freshness, score, age, and detection time;
+- full provenance: event ID, owner scope, method and version, source, provider method, input snapshot, producer, schema, observed time, and ingested time;
+- the numeric evidence and string context maps;
+- the quality reasons.
+
+The Slideover declares `role="dialog"`, `aria-modal`, and a labelled title, focuses its close button, and closes with that button, the backdrop, or `Escape`. Only one overlay is open at a time, and the detail request is re-issued by the same refresh cycle while it stays open, so an aging observation re-renders as `STALE` instead of keeping an old freshness label.
+
+If the list request fails, the panel keeps the error banner and its last good rows. If the detail request fails, the Slideover shows a localized message with the sanitized API error instead of inventing event values.
+
 ## Logs and status
 
 - Agent logs use `tracing`; set `TM_LOG_FORMAT=json` for structured JSON output.

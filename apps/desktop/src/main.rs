@@ -3,6 +3,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod i18n;
+mod signal_center;
+mod slideover;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -12,10 +14,12 @@ use futures_util::StreamExt;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
     MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
-    OperationActionDto, OperationResponse, OperationStatusDto, ServiceSnapshot, WatchlistDto,
+    OperationActionDto, OperationResponse, OperationStatusDto, ResearchEventQueryDto,
+    ServiceSnapshot, WatchlistDto,
 };
 
 use i18n::{Locale, UiStrings};
+use signal_center::{ResearchEventSlideover, ResearchPanelState, SignalCenterPanel};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const DEFAULT_API_URL: &str = "http://127.0.0.1:8787";
@@ -69,6 +73,10 @@ enum UiAction {
         action: OperationActionDto,
     },
     Watchlist(WatchlistAction),
+    OpenResearchEvent {
+        event_id: String,
+    },
+    CloseResearchEvent,
 }
 
 #[derive(Clone)]
@@ -122,6 +130,7 @@ fn App() -> Element {
     let market_overview = use_signal(|| Option::<MarketOverviewDto>::None);
     let market_pulse = use_signal(|| Option::<MarketPulseDto>::None);
     let market_error = use_signal(|| Option::<String>::None);
+    let research = use_signal(ResearchPanelState::default);
 
     let client_task = client.clone();
     let actions = use_coroutine(move |mut actions: UnboundedReceiver<UiAction>| {
@@ -133,6 +142,7 @@ fn App() -> Element {
         let (mut watchlists, mut watchlist_error) = (watchlists, watchlist_error);
         let (mut market_overview, mut market_pulse, mut market_error) =
             (market_overview, market_pulse, market_error);
+        let mut research = research;
         async move {
             loop {
                 tokio::select! {
@@ -183,6 +193,12 @@ fn App() -> Element {
                                     Err(error) => watchlist_error.set(Some(error.to_string())),
                                 }
                             }
+                            Some(UiAction::OpenResearchEvent { event_id }) => {
+                                research.write().open(event_id);
+                            }
+                            Some(UiAction::CloseResearchEvent) => {
+                                research.write().close();
+                            }
                             None => break,
                         }
                     }
@@ -215,6 +231,22 @@ fn App() -> Element {
                 }
                 if let Ok(pulse) = client.market_pulse(&[], "1m", 60).await {
                     market_pulse.set(Some(pulse));
+                }
+
+                let research_query = ResearchEventQueryDto {
+                    limit: Some(50),
+                    ..ResearchEventQueryDto::default()
+                };
+                match client.list_research_events(&research_query).await {
+                    Ok(list) => research.write().list_loaded(list.events),
+                    Err(error) => research.write().list_failed(error.to_string()),
+                }
+                let selected_research_id = research.read().selected_id.clone();
+                if let Some(event_id) = selected_research_id {
+                    match client.get_research_event(&event_id).await {
+                        Ok(event) => research.write().detail_loaded(event),
+                        Err(error) => research.write().detail_failed(&event_id, error.to_string()),
+                    }
                 }
 
                 if let Some(operation_id) = pending_operation() {
@@ -250,6 +282,9 @@ fn App() -> Element {
     let current_operation = operation();
     let pending = pending_operation().is_some();
     let action_sender = actions;
+    let research_state = research();
+    let research_open_sender = actions;
+    let research_close_sender = actions;
     let status_class = current_operation
         .as_ref()
         .map(|current| operation_status_class(current.status))
@@ -527,6 +562,22 @@ fn App() -> Element {
                             }
                         }
                     }
+                }
+                SignalCenterPanel {
+                    state: research_state.clone(),
+                    strings: strings(),
+                    on_open: move |event_id| {
+                        research_open_sender.send(UiAction::OpenResearchEvent { event_id });
+                    },
+                }
+            }
+            if research_state.selected_id.is_some() {
+                ResearchEventSlideover {
+                    state: research_state,
+                    strings: strings(),
+                    on_close: move |_| {
+                        research_close_sender.send(UiAction::CloseResearchEvent);
+                    },
                 }
             }
         }

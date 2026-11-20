@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, and the opt-in Research Worker runtime; the Desktop Signal Center remains<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover<br>
 > Last updated: 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -27,13 +27,13 @@ Implemented:
 - a durable `service_instances` read model replaced per Agent heartbeat, so the Desktop keeps showing the last reported state across an API restart;
 - an Agent command channel that heartbeats per-Agent service snapshots and executes claimed operations;
 - a typed `api-client` crate that depends only on the versioned public contracts;
-- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, an owner-scoped watchlist editor, Market Overview and Market Pulse panels, and EN/VI localization;
+- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, an owner-scoped watchlist editor, Market Overview, Market Pulse, and Signal Center panels, a research-event detail Slideover with evidence and provenance, and EN/VI localization;
 - a provider catalog and provider instance configuration with bounded, read-only health probes;
 - an opt-in Market Worker that collects closed public bars from one provider definition, records the provider health it observed, and writes each multi-candle batch in one majority-write-concern transaction;
 - a dual-writer guard: the Market Worker refuses to start unless `TM_TRADING_MARKET_SOURCE_OF_TRUTH` is explicitly enabled, exiting with code `78` before any provider or candle access;
 - bounded provider fallback of at most three instances of one definition, ordered by health, with each attempt's observed health recorded;
 - a closed-candle Management API read model at `GET /api/v1/market/overview` and `GET /api/v1/market/pulse`, with explicit `OK`, `PARTIAL`, `STALE`, and `EMPTY` states, bounded symbol and bar counts, and the owner's default watchlist as the implicit symbol set;
-- Desktop Market Overview and Market Pulse panels reading that API through `api-client`, with EN/VI localization;
+- Desktop Market Overview, Market Pulse, and Signal Center panels reading that API through `api-client`, with EN/VI localization;
 - a pure `research-engine` crate with legacy-matched technical-analysis primitives, the canonical indicator catalog, and the VSA/Wyckoff method (method 0), compared against committed golden fixtures;
 - a `ResearchEvent` domain contract and memory/MongoDB repositories that preserve owner scope, method and producer versions, input snapshot identity, observation/detection/ingestion times, quality state and reasons, evidence, and context;
 - owner-scoped research event reads at `GET /api/v1/research/events` and `GET /api/v1/research/events/{event_id}`, with bounded filters, computed freshness, and the exact `trading.research.read` capability;
@@ -43,10 +43,10 @@ Not implemented:
 
 - WebSocket trade/ticker/depth streams;
 - Bybit and other provider adapters;
-- TM Hub token verification and capability enforcement (local bearer credentials are used today);
+- TM Hub token verification and permission mapping; local bearer credentials use an explicit local capability set;
 - durable Agent credential rotation;
 - TM Hub login, TOTP, and refresh flow in the Desktop client;
-- the Desktop Signal Center and research-event detail Slideover.
+- reusable data-backed panels beyond Market Overview, Market Pulse, and Signal Center.
 
 ## 2. Target runtime and current implementation
 
@@ -183,9 +183,9 @@ Current defaults and variables:
 | `TM_HUB_URL` | `http://127.0.0.1:4000` | TM Hub base URL |
 | `TM_HUB_APP_ID` | unset | Dedicated Rust Hub application ID |
 | `TM_LOG_FORMAT` | `compact` | `compact` or `json` tracing output |
-| `TM_TRADING_STORE` | `memory` | `memory` or `mongodb` for operations, service snapshots, watchlists, providers, and candles; production requires `mongodb` |
+| `TM_TRADING_STORE` | `memory` | `memory` or `mongodb` for operations, service snapshots, watchlists, providers, candles, and research events; production requires `mongodb` |
 | `TM_TRADING_API_BIND` | `127.0.0.1:8787` | Management API bind; non-loopback is rejected in local mode |
-| `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read`, `trading.watchlist.read`, `trading.watchlist.write`, `trading.provider.read`, `trading.provider.write`, `trading.market.read` |
+| `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read`, `trading.watchlist.read`, `trading.watchlist.write`, `trading.provider.read`, `trading.provider.write`, `trading.market.read`, and `trading.research.read` |
 | `TM_TRADING_AGENT_TOKEN` | required | Per-installation Agent-only bearer token; read from the environment, never the command line |
 | `TM_TRADING_LOCAL_API_SUBJECT` | `local-operator` | Subject recorded on locally authenticated operations |
 | `TM_TRADING_AGENT_ID` | `local-agent` | Agent identity the API expects on Agent endpoints |
@@ -254,6 +254,8 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Define the research event contract and preserve schema, producer, input, source, and quality provenance.
 - [x] Add the memory/MongoDB research event repositories and owner-scoped research event API reads.
 - [x] Implement the opt-in Research Worker with write-authority gating, bounded scans, stale-input rejection, provenance-preserving upserts, and success-only readiness.
+- [x] Build the Desktop Signal Center from the owner-scoped research event API, with independent loading, empty, error, and stale states.
+- [x] Add the research-event detail Slideover with computed freshness, direction, quality reasons, evidence, and full source/producer/schema/input provenance.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification
