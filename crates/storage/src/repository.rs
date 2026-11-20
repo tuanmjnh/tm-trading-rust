@@ -7,7 +7,7 @@ use thiserror::Error;
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{
     Candle, CandleError, Operation, OperationError, OperationId, ProviderInstance,
-    ProviderInstanceError, Watchlist, WatchlistError,
+    ProviderInstanceError, ResearchEvent, ResearchEventError, Watchlist, WatchlistError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +90,85 @@ pub trait ServiceSnapshotRepository: Send + Sync {
 pub struct CandleUpsertOutcome {
     pub inserted: usize,
     pub existing: usize,
+}
+
+/// How many of a batch were new rows versus re-recorded rows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResearchEventUpsertOutcome {
+    pub inserted: usize,
+    pub existing: usize,
+}
+
+/// Filter of a research event read.
+///
+/// Every field is optional; an empty filter returns the newest events.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResearchEventQuery {
+    pub owner_scope: Option<String>,
+    pub symbol: Option<String>,
+    pub timeframe: Option<String>,
+    pub event_type: Option<String>,
+    /// Only events detected at or after this instant.
+    pub since: Option<DateTime<Utc>>,
+    /// Maximum number of events to return.
+    pub limit: usize,
+}
+
+/// Default number of events a read returns.
+pub const DEFAULT_RESEARCH_EVENT_LIMIT: usize = 50;
+
+impl Default for ResearchEventQuery {
+    fn default() -> Self {
+        Self {
+            owner_scope: None,
+            symbol: None,
+            timeframe: None,
+            event_type: None,
+            since: None,
+            limit: DEFAULT_RESEARCH_EVENT_LIMIT,
+        }
+    }
+}
+
+impl ResearchEventQuery {
+    /// Whether one event satisfies the filter.
+    #[must_use]
+    pub fn matches(&self, event: &ResearchEvent) -> bool {
+        self.owner_scope
+            .as_ref()
+            .is_none_or(|owner| owner == event.owner_scope())
+            && self
+                .symbol
+                .as_ref()
+                .is_none_or(|symbol| symbol == event.symbol())
+            && self
+                .timeframe
+                .as_ref()
+                .is_none_or(|timeframe| timeframe == event.timeframe())
+            && self
+                .event_type
+                .as_ref()
+                .is_none_or(|event_type| event_type == event.event_type())
+            && self.since.is_none_or(|since| event.detected_at() >= since)
+    }
+}
+
+/// Durable store for research events.
+///
+/// Events are append-only observations: the same observation is written again
+/// without creating a second row, so a worker can replay a window safely.
+#[async_trait]
+pub trait ResearchEventRepository: Send + Sync {
+    async fn upsert(
+        &self,
+        events: &[ResearchEvent],
+    ) -> Result<ResearchEventUpsertOutcome, RepositoryError>;
+
+    /// Newest events first.
+    async fn list(&self, query: &ResearchEventQuery)
+    -> Result<Vec<ResearchEvent>, RepositoryError>;
+
+    async fn get(&self, event_id: &str) -> Result<Option<ResearchEvent>, RepositoryError>;
 }
 
 /// Durable store for closed candles, matching the `candles` contract in
@@ -214,6 +293,8 @@ pub enum RepositoryError {
     Candle(#[from] CandleError),
     #[error(transparent)]
     Watchlist(#[from] WatchlistError),
+    #[error(transparent)]
+    ResearchEvent(#[from] ResearchEventError),
     #[error("a watchlist with this name already exists for the owner")]
     DuplicateWatchlistName,
     #[error("watchlist was not found")]
