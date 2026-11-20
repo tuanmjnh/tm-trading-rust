@@ -11,6 +11,7 @@ pub const CAPABILITY_WATCHLIST_READ: &str = "trading.watchlist.read";
 pub const CAPABILITY_WATCHLIST_WRITE: &str = "trading.watchlist.write";
 pub const CAPABILITY_PROVIDER_READ: &str = "trading.provider.read";
 pub const CAPABILITY_PROVIDER_WRITE: &str = "trading.provider.write";
+pub const CAPABILITY_MARKET_READ: &str = "trading.market.read";
 
 /// Identity resolved from the bearer token.
 #[derive(Debug, Clone)]
@@ -123,6 +124,7 @@ impl FromRequestParts<AppState> for AuthContext {
                         CAPABILITY_WATCHLIST_WRITE.to_owned(),
                         CAPABILITY_PROVIDER_READ.to_owned(),
                         CAPABILITY_PROVIDER_WRITE.to_owned(),
+                        CAPABILITY_MARKET_READ.to_owned(),
                     ],
                 },
             });

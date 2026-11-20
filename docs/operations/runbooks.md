@@ -284,6 +284,23 @@ a replica set; a standalone `mongod` cannot accept the batch path.
 - A cycle that exceeds `TM_TRADING_MARKET_CYCLE_TIMEOUT_MS` is cancelled and reported as a timeout.
 - An Agent shutdown aborts an in-flight cycle and reports `drained: false`; pending operations also prevent a drained result.
 
+## Market read model
+
+The Management API serves the closed candles written by the Market Worker:
+
+```powershell
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/market/overview?symbols=BTCUSDT,ETHUSDT&timeframe=1m&bars=60"
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/market/pulse?symbols=BTCUSDT,ETHUSDT&timeframe=1m&bars=60"
+```
+
+- `symbols` is optional; without it the caller's default watchlist is used. At most 20 symbols and 500 bars are accepted.
+- A symbol is `EMPTY` with no closed bars, `PARTIAL` with fewer than the requested bars, `STALE` when its newest close is older than half a timeframe (minimum 60 seconds), and `OK` otherwise.
+- The panel state is the worst symbol state, so missing data is never shown as current.
+- Both endpoints require `trading.market.read`; the Agent credential is rejected with `403`.
+- The Desktop Market Overview and Market Pulse panels call the same two endpoints and show the symbol state beside each row.
+
 ## Logs and status
 
 - Agent logs use `tracing`; set `TM_LOG_FORMAT=json` for structured JSON output.

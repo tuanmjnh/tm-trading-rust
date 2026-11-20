@@ -1,5 +1,6 @@
 mod auth;
 mod error;
+mod market;
 mod routes;
 mod state;
 
@@ -10,9 +11,9 @@ use utoipa::OpenApi;
 use tm_trading_contracts::ApiDoc;
 
 pub use auth::{
-    AuthContext, CAPABILITY_OPERATION_READ, CAPABILITY_PROVIDER_READ, CAPABILITY_PROVIDER_WRITE,
-    CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ, CAPABILITY_WATCHLIST_READ,
-    CAPABILITY_WATCHLIST_WRITE, Principal,
+    AuthContext, CAPABILITY_MARKET_READ, CAPABILITY_OPERATION_READ, CAPABILITY_PROVIDER_READ,
+    CAPABILITY_PROVIDER_WRITE, CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ,
+    CAPABILITY_WATCHLIST_READ, CAPABILITY_WATCHLIST_WRITE, Principal,
 };
 pub use error::ApiError;
 pub use state::{AppState, AuthConfig};
@@ -66,6 +67,8 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/providers/{provider_instance_id}/test",
             post(routes::test_provider_instance),
         )
+        .route("/api/v1/market/overview", get(market::market_overview))
+        .route("/api/v1/market/pulse", get(market::market_pulse))
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(
             "/api/v1/agent/commands/claim",

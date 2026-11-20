@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, and Phase 5 market data, watchlists, provider configuration, and the opt-in Market Worker are implemented; the closed-candle API read model and remaining Phase 5 panels are not started<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, and Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented<br>
 > Last updated: 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -27,15 +27,16 @@ Implemented:
 - a durable `service_instances` read model replaced per Agent heartbeat, so the Desktop keeps showing the last reported state across an API restart;
 - an Agent command channel that heartbeats per-Agent service snapshots and executes claimed operations;
 - a typed `api-client` crate that depends only on the versioned public contracts;
-- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, an owner-scoped watchlist editor, and EN/VI localization;
+- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, an owner-scoped watchlist editor, Market Overview and Market Pulse panels, and EN/VI localization;
 - a provider catalog and provider instance configuration with bounded, read-only health probes;
 - an opt-in Market Worker that collects closed public bars from one provider definition, records the provider health it observed, and writes each multi-candle batch in one majority-write-concern transaction;
 - a dual-writer guard: the Market Worker refuses to start unless `TM_TRADING_MARKET_SOURCE_OF_TRUTH` is explicitly enabled, exiting with code `78` before any provider or candle access;
-- bounded provider fallback of at most three instances of one definition, ordered by health, with each attempt's observed health recorded.
+- bounded provider fallback of at most three instances of one definition, ordered by health, with each attempt's observed health recorded;
+- a closed-candle Management API read model at `GET /api/v1/market/overview` and `GET /api/v1/market/pulse`, with explicit `OK`, `PARTIAL`, `STALE`, and `EMPTY` states, bounded symbol and bar counts, and the owner's default watchlist as the implicit symbol set;
+- Desktop Market Overview and Market Pulse panels reading that API through `api-client`, with EN/VI localization.
 
 Not implemented:
 
-- the closed-candle Management API read model and the Desktop Market Overview/Market Pulse panels;
 - WebSocket trade/ticker/depth streams;
 - Bybit and other provider adapters;
 - TM Hub token verification and capability enforcement (local bearer credentials are used today);
@@ -109,7 +110,7 @@ The Desktop app stores its WebView2 profile under `<exe_dir>/data/desktop`, over
 - API errors use stable typed codes and include a correlation ID.
 - The generated contract snapshot is [`docs/api/openapi.yaml`](../api/openapi.yaml).
 
-The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, the watchlist endpoints, the provider catalog and instance endpoints, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
+The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, the watchlist endpoints, the provider catalog and instance endpoints, the market overview and pulse read models, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
 
 ## 4. Service and operation model
 
@@ -145,7 +146,9 @@ Verified against a TLS-enabled MongoDB 8.2 instance with certificate validation 
 
 Verified live: after the Agent process is killed, and again after the Management API restarts, `GET /api/v1/services` still returns the last reported instance with its original `updated_at`; a fresh Agent heartbeat replaces that row instead of duplicating it. The `service_instances` collection carries only the subset of section 8.2 fields the current read model exposes (`generation`, `pid`, `host`, and the readiness-check list are not collected yet), plus `schemaVersion = 1`; a document with an unknown schema version or an unparseable enum is rejected as corrupt.
 
-`MongoCandleRepository` implements `CandleRepository` against the `candles` collection from section 6.1, behind `InMemoryCandleRepository` for the local default. The natural key `{symbol}:{timeframe}:{openTime}` makes re-recording a closed bar an upsert instead of a duplicate, and the three declared indexes are created at startup. Reads accept the legacy document shape: an absent `volume` becomes `0`, an absent schema stamp is treated as `candle.v1`, and whole numbers may arrive as any BSON numeric type. A row whose `state` is not `closed`, whose `_id` disagrees with its fields, or whose schema stamp is unknown is rejected as corrupt. A batch with more than one candle is written in a single majority-write-concern transaction with a bounded retry on `UnknownTransactionCommitResult`, so a multi-symbol cycle is all-or-nothing; the commit is idempotent, so the retry cannot duplicate bars. No API endpoint serves candles yet.
+`MongoCandleRepository` implements `CandleRepository` against the `candles` collection from section 6.1, behind `InMemoryCandleRepository` for the local default. The natural key `{symbol}:{timeframe}:{openTime}` makes re-recording a closed bar an upsert instead of a duplicate, and the three declared indexes are created at startup. Reads accept the legacy document shape: an absent `volume` becomes `0`, an absent schema stamp is treated as `candle.v1`, and whole numbers may arrive as any BSON numeric type. A row whose `state` is not `closed`, whose `_id` disagrees with its fields, or whose schema stamp is unknown is rejected as corrupt. A batch with more than one candle is written in a single majority-write-concern transaction with a bounded retry on `UnknownTransactionCommitResult`, so a multi-symbol cycle is all-or-nothing; the commit is idempotent, so the retry cannot duplicate bars.
+
+`GET /api/v1/market/overview` and `GET /api/v1/market/pulse` read closed candles through `CandleRepository` under `trading.market.read`. Both accept `symbols`, `timeframe`, and `bars`, default to `1m` and 60 bars, cap the request at 20 symbols and 500 bars, and fall back to the caller's default watchlist when `symbols` is absent. Every symbol carries an explicit state: `EMPTY` with no rows, `PARTIAL` when fewer than the requested bars exist, `STALE` when the newest close is older than half a timeframe (at least 60 seconds), and `OK` otherwise. The panel state is the worst state in the set, so an absent symbol is never presented as current data. Movers rank by absolute percentage change and include a volume ratio against the prior bars and a high-low volatility percentage.
 
 `MongoWatchlistRepository` implements `WatchlistRepository` against the `watchlists` collection from section 6.5, behind `InMemoryWatchlistRepository` for the local default. `_id` remains an `ObjectId` and timestamps remain BSON datetimes so legacy rows stay compatible. The unique `{ownerId, name}` index uses primary-strength collation, and every query includes the owner, so one subject cannot read, replace, or delete another subject's list. The first list an owner creates becomes their default. The Management API serves these rows only through the authenticated subject; the Agent credential is rejected with `403`.
 
@@ -168,9 +171,9 @@ Current defaults and variables:
 | `TM_HUB_URL` | `http://127.0.0.1:4000` | TM Hub base URL |
 | `TM_HUB_APP_ID` | unset | Dedicated Rust Hub application ID |
 | `TM_LOG_FORMAT` | `compact` | `compact` or `json` tracing output |
-| `TM_TRADING_STORE` | `memory` | `memory` or `mongodb` for operations and service snapshots; production requires `mongodb` |
+| `TM_TRADING_STORE` | `memory` | `memory` or `mongodb` for operations, service snapshots, watchlists, providers, and candles; production requires `mongodb` |
 | `TM_TRADING_API_BIND` | `127.0.0.1:8787` | Management API bind; non-loopback is rejected in local mode |
-| `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read`, `trading.watchlist.read`, `trading.watchlist.write`, `trading.provider.read`, `trading.provider.write` |
+| `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read`, `trading.watchlist.read`, `trading.watchlist.write`, `trading.provider.read`, `trading.provider.write`, `trading.market.read` |
 | `TM_TRADING_AGENT_TOKEN` | required | Per-installation Agent-only bearer token; read from the environment, never the command line |
 | `TM_TRADING_LOCAL_API_SUBJECT` | `local-operator` | Subject recorded on locally authenticated operations |
 | `TM_TRADING_AGENT_ID` | `local-agent` | Agent identity the API expects on Agent endpoints |
@@ -221,6 +224,8 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Implement public Binance spot and OKX swap candle adapters with bounded health checks.
 - [x] Port the owner-scoped watchlist model and serve it through the Management API.
 - [x] Implement the opt-in Market Worker with write-authority gating, bounded provider fallback, closed-bar-only persistence, and transactional multi-candle writes.
+- [x] Implement the closed-candle Market Overview and Market Pulse API read models with explicit empty, partial, and stale states.
+- [x] Add the Desktop Market Overview and Market Pulse panels with EN/VI localization.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

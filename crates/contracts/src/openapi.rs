@@ -1,6 +1,9 @@
 use utoipa::OpenApi;
 
 use crate::error::ApiErrorResponse;
+use crate::market::{
+    MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
+};
 use crate::operation::{CreateOperationRequest, OperationResponse};
 use crate::provider::{
     CreateProviderInstanceRequest, ProviderDefinitionDto, ProviderHealthStateDto,
@@ -42,7 +45,9 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         get_provider_instance,
         update_provider_instance,
         delete_provider_instance,
-        test_provider_instance
+        test_provider_instance,
+        market_overview,
+        market_pulse
     ),
     components(schemas(
         ApiVersionInfo,
@@ -67,7 +72,12 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         ProviderInstanceDto,
         ProviderHealthStateDto,
         CreateProviderInstanceRequest,
-        UpdateProviderInstanceRequest
+        UpdateProviderInstanceRequest,
+        MarketStateDto,
+        MarketSymbolDto,
+        MarketOverviewDto,
+        MarketMoverDto,
+        MarketPulseDto
     )),
     tags(
         (name = "System", description = "Version and health endpoints"),
@@ -75,6 +85,7 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         (name = "Operations", description = "Durable asynchronous service operations"),
         (name = "Watchlists", description = "Owner-scoped symbol lists"),
         (name = "Providers", description = "Provider catalog and configured instances"),
+        (name = "Market", description = "Closed-candle market overview and pulse"),
         (name = "Agent", description = "Agent-only heartbeat and command endpoints")
     )
 )]
@@ -387,3 +398,41 @@ pub fn delete_provider_instance() {}
     )
 )]
 pub fn test_provider_instance() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/market/overview",
+    tag = "Market",
+    params(
+        ("symbols" = Option<String>, Query, description = "Comma-separated symbols; defaults to the caller's default watchlist"),
+        ("timeframe" = Option<String>, Query, description = "Closed-candle timeframe, default 1m"),
+        ("bars" = Option<usize>, Query, description = "Bars per symbol, 1 to 500, default 60")
+    ),
+    responses(
+        (status = 200, description = "Closed-candle overview with an explicit empty, partial, or stale state", body = MarketOverviewDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 422, description = "Unsupported timeframe or an out-of-range request", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn market_overview() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/market/pulse",
+    tag = "Market",
+    params(
+        ("symbols" = Option<String>, Query, description = "Comma-separated symbols; defaults to the caller's default watchlist"),
+        ("timeframe" = Option<String>, Query, description = "Closed-candle timeframe, default 1m"),
+        ("bars" = Option<usize>, Query, description = "Bars per symbol, 1 to 500, default 60")
+    ),
+    responses(
+        (status = 200, description = "Ranked movers with a change, volume ratio, and volatility summary", body = MarketPulseDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing capability", body = ApiErrorResponse),
+        (status = 422, description = "Unsupported timeframe or an out-of-range request", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn market_pulse() {}

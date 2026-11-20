@@ -1,4 +1,5 @@
 mod error;
+mod market;
 pub mod openapi;
 mod operation;
 mod provider;
@@ -7,6 +8,9 @@ mod system;
 mod watchlist;
 
 pub use error::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
+pub use market::{
+    MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
+};
 pub use openapi::ApiDoc;
 pub use operation::{
     CreateOperationRequest, OperationActionDto, OperationResponse, OperationStatusDto,

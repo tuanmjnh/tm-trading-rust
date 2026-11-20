@@ -188,6 +188,118 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /api/v1/market/overview:
+    get:
+      tags:
+      - Market
+      operationId: market_overview
+      parameters:
+      - name: symbols
+        in: query
+        description: Comma-separated symbols; defaults to the caller's default watchlist
+        required: false
+        schema:
+          type: string
+      - name: timeframe
+        in: query
+        description: Closed-candle timeframe, default 1m
+        required: false
+        schema:
+          type: string
+      - name: bars
+        in: query
+        description: Bars per symbol, 1 to 500, default 60
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+      responses:
+        '200':
+          description: Closed-candle overview with an explicit empty, partial, or stale state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketOverviewDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Unsupported timeframe or an out-of-range request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/market/pulse:
+    get:
+      tags:
+      - Market
+      operationId: market_pulse
+      parameters:
+      - name: symbols
+        in: query
+        description: Comma-separated symbols; defaults to the caller's default watchlist
+        required: false
+        schema:
+          type: string
+      - name: timeframe
+        in: query
+        description: Closed-candle timeframe, default 1m
+        required: false
+        schema:
+          type: string
+      - name: bars
+        in: query
+        description: Bars per symbol, 1 to 500, default 60
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+      responses:
+        '200':
+          description: Ranked movers with a change, volume ratio, and volatility summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketPulseDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Unsupported timeframe or an out-of-range request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/operations/{operation_id}:
     get:
       tags:
@@ -1080,6 +1192,156 @@ components:
       - healthy
       - degraded
       - unhealthy
+    MarketMoverDto:
+      type: object
+      description: One symbol ranked by movement.
+      required:
+      - symbol
+      - state
+      - candle_count
+      properties:
+        candle_count:
+          type: integer
+          minimum: 0
+        change_percent:
+          type:
+          - number
+          - 'null'
+          format: double
+        last_close:
+          type:
+          - number
+          - 'null'
+          format: double
+        state:
+          $ref: '#/components/schemas/MarketStateDto'
+        symbol:
+          type: string
+        volatility_percent:
+          type:
+          - number
+          - 'null'
+          format: double
+        volume_ratio:
+          type:
+          - number
+          - 'null'
+          format: double
+    MarketOverviewDto:
+      type: object
+      description: Closed-candle overview for a bounded set of symbols.
+      required:
+      - generated_at
+      - timeframe
+      - state
+      - stale_after_seconds
+      - symbols
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        stale_after_seconds:
+          type: integer
+          format: int64
+        state:
+          $ref: '#/components/schemas/MarketStateDto'
+        symbols:
+          type: array
+          items:
+            $ref: '#/components/schemas/MarketSymbolDto'
+        timeframe:
+          type: string
+    MarketPulseDto:
+      type: object
+      description: Ranked movers and activity for the same bounded symbol set.
+      required:
+      - generated_at
+      - timeframe
+      - state
+      - stale_after_seconds
+      - movers
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        movers:
+          type: array
+          items:
+            $ref: '#/components/schemas/MarketMoverDto'
+        stale_after_seconds:
+          type: integer
+          format: int64
+        state:
+          $ref: '#/components/schemas/MarketStateDto'
+        timeframe:
+          type: string
+    MarketStateDto:
+      type: string
+      description: |-
+        Read-model state of one market panel or one symbol inside it.
+
+        The states are explicit so a caller can tell "no data yet" from "data exists but is
+        old" without inferring it from empty arrays or timestamps.
+      enum:
+      - OK
+      - PARTIAL
+      - STALE
+      - EMPTY
+    MarketSymbolDto:
+      type: object
+      description: One symbol's closed-candle summary.
+      required:
+      - symbol
+      - state
+      - candle_count
+      properties:
+        candle_count:
+          type: integer
+          minimum: 0
+        change_percent:
+          type:
+          - number
+          - 'null'
+          format: double
+        data_age_seconds:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        high:
+          type:
+          - number
+          - 'null'
+          format: double
+        last_close:
+          type:
+          - number
+          - 'null'
+          format: double
+        last_close_time:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_open_time:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        low:
+          type:
+          - number
+          - 'null'
+          format: double
+        state:
+          $ref: '#/components/schemas/MarketStateDto'
+        symbol:
+          type: string
+        volume:
+          type:
+          - number
+          - 'null'
+          format: double
     ObservedStateDto:
       type: string
       description: Canonical observed state of a service instance.
@@ -1420,5 +1682,7 @@ tags:
   description: Owner-scoped symbol lists
 - name: Providers
   description: Provider catalog and configured instances
+- name: Market
+  description: Closed-candle market overview and pulse
 - name: Agent
   description: Agent-only heartbeat and command endpoints

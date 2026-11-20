@@ -11,6 +11,7 @@ use dioxus::prelude::*;
 use futures_util::StreamExt;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
+    MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
     OperationActionDto, OperationResponse, OperationStatusDto, ServiceSnapshot, WatchlistDto,
 };
 
@@ -118,6 +119,9 @@ fn App() -> Element {
     let watchlists = use_signal(Vec::<WatchlistDto>::new);
     let mut new_list_name = use_signal(String::new);
     let watchlist_error = use_signal(|| Option::<String>::None);
+    let market_overview = use_signal(|| Option::<MarketOverviewDto>::None);
+    let market_pulse = use_signal(|| Option::<MarketPulseDto>::None);
+    let market_error = use_signal(|| Option::<String>::None);
 
     let client_task = client.clone();
     let actions = use_coroutine(move |mut actions: UnboundedReceiver<UiAction>| {
@@ -127,6 +131,8 @@ fn App() -> Element {
         let (mut operation, mut command_error) = (operation, command_error);
         let (mut refreshed_at, mut pending_operation) = (refreshed_at, pending_operation);
         let (mut watchlists, mut watchlist_error) = (watchlists, watchlist_error);
+        let (mut market_overview, mut market_pulse, mut market_error) =
+            (market_overview, market_pulse, market_error);
         async move {
             loop {
                 tokio::select! {
@@ -199,6 +205,18 @@ fn App() -> Element {
                     watchlists.set(list);
                 }
 
+                // An empty symbol list means "use my default watchlist" on the server.
+                match client.market_overview(&[], "1m", 60).await {
+                    Ok(overview) => {
+                        market_overview.set(Some(overview));
+                        market_error.set(None);
+                    }
+                    Err(error) => market_error.set(Some(error.to_string())),
+                }
+                if let Ok(pulse) = client.market_pulse(&[], "1m", 60).await {
+                    market_pulse.set(Some(pulse));
+                }
+
                 if let Some(operation_id) = pending_operation() {
                     match client.get_operation(&operation_id).await {
                         Ok(current) => {
@@ -217,6 +235,9 @@ fn App() -> Element {
 
     let rows = services();
     let lists = watchlists();
+    let overview = market_overview();
+    let pulse = market_pulse();
+    let market_error_message = market_error();
     let watchlist_error_message = watchlist_error();
     let name_value = new_list_name();
     let list_sender = actions;
@@ -420,6 +441,129 @@ fn App() -> Element {
                         }
                     }
                 }
+                section { class: "panel market-panel",
+                    div { class: "panel-head",
+                        h2 { "{strings().market_overview}" }
+                        if let Some(overview) = overview.as_ref() {
+                            span { class: "panel-meta",
+                                "{overview.timeframe} · {market_state_label(overview.state, &strings())}"
+                            }
+                        }
+                    }
+                    if let Some(error) = market_error_message.as_ref() {
+                        div { class: "banner error", role: "alert", "{error}" }
+                    }
+                    if let Some(overview) = overview.as_ref() {
+                        if overview.symbols.is_empty() {
+                            div { class: "empty",
+                                p { class: "empty-title", "{strings().market_empty}" }
+                                p { "{strings().market_empty_hint}" }
+                            }
+                        } else {
+                            div { class: "table-wrap",
+                                table { class: "services",
+                                    thead {
+                                        tr {
+                                            th { "{strings().market_symbol_column}" }
+                                            th { class: "numeric", "{strings().market_last_close_column}" }
+                                            th { class: "numeric", "{strings().market_change_column}" }
+                                            th { class: "numeric", "{strings().market_volume_column}" }
+                                            th { class: "numeric", "{strings().market_age_column}" }
+                                            th { "{strings().market_status_column}" }
+                                        }
+                                    }
+                                    tbody {
+                                        for item in overview.symbols.iter() {
+                                            MarketSymbolRow {
+                                                key: "{item.symbol}",
+                                                symbol: item.clone(),
+                                                strings: strings(),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                section { class: "panel market-panel",
+                    div { class: "panel-head",
+                        h2 { "{strings().market_pulse}" }
+                        if let Some(pulse) = pulse.as_ref() {
+                            span { class: "panel-meta",
+                                "{pulse.timeframe} · {market_state_label(pulse.state, &strings())}"
+                            }
+                        }
+                    }
+                    if let Some(pulse) = pulse.as_ref() {
+                        if pulse.movers.is_empty() {
+                            div { class: "empty",
+                                p { class: "empty-title", "{strings().market_empty}" }
+                                p { "{strings().market_empty_hint}" }
+                            }
+                        } else {
+                            div { class: "table-wrap",
+                                table { class: "services",
+                                    thead {
+                                        tr {
+                                            th { "{strings().market_symbol_column}" }
+                                            th { class: "numeric", "{strings().market_last_close_column}" }
+                                            th { class: "numeric", "{strings().market_change_column}" }
+                                            th { class: "numeric", "{strings().market_volume_ratio_column}" }
+                                            th { class: "numeric", "{strings().market_volatility_column}" }
+                                            th { "{strings().market_status_column}" }
+                                        }
+                                    }
+                                    tbody {
+                                        for mover in pulse.movers.iter() {
+                                            MarketMoverRow {
+                                                key: "{mover.symbol}",
+                                                mover: mover.clone(),
+                                                strings: strings(),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn MarketSymbolRow(symbol: MarketSymbolDto, strings: UiStrings) -> Element {
+    rsx! {
+        tr {
+            td { div { class: "service-name", "{symbol.symbol}" } }
+            td { class: "numeric", "{format_number(symbol.last_close)}" }
+            td { class: "numeric", "{format_percent(symbol.change_percent)}" }
+            td { class: "numeric", "{format_number(symbol.volume)}" }
+            td { class: "numeric", "{format_age(symbol.data_age_seconds)}" }
+            td {
+                span { class: "pill {market_state_class(symbol.state)}",
+                    "{market_state_label(symbol.state, &strings)}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn MarketMoverRow(mover: MarketMoverDto, strings: UiStrings) -> Element {
+    rsx! {
+        tr {
+            td { div { class: "service-name", "{mover.symbol}" } }
+            td { class: "numeric", "{format_number(mover.last_close)}" }
+            td { class: "numeric", "{format_percent(mover.change_percent)}" }
+            td { class: "numeric", "{format_number(mover.volume_ratio)}" }
+            td { class: "numeric", "{format_percent(mover.volatility_percent)}" }
+            td {
+                span { class: "pill {market_state_class(mover.state)}",
+                    "{market_state_label(mover.state, &strings)}"
+                }
             }
         }
     }
@@ -543,6 +687,36 @@ fn parse_symbols(raw: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+fn format_number(value: Option<f64>) -> String {
+    value.map_or_else(|| "-".to_owned(), |value| format!("{value:.2}"))
+}
+
+fn format_percent(value: Option<f64>) -> String {
+    value.map_or_else(|| "-".to_owned(), |value| format!("{value:.2}%"))
+}
+
+fn format_age(seconds: Option<i64>) -> String {
+    seconds.map_or_else(|| "-".to_owned(), |seconds| format!("{seconds}s"))
+}
+
+fn market_state_label(state: MarketStateDto, strings: &UiStrings) -> &'static str {
+    match state {
+        MarketStateDto::Ok => strings.market_state_ok,
+        MarketStateDto::Partial => strings.market_state_partial,
+        MarketStateDto::Stale => strings.market_state_stale,
+        MarketStateDto::Empty => strings.market_state_empty,
+    }
+}
+
+fn market_state_class(state: MarketStateDto) -> &'static str {
+    match state {
+        MarketStateDto::Ok => "state-ok",
+        MarketStateDto::Partial => "state-partial",
+        MarketStateDto::Stale => "state-stale",
+        MarketStateDto::Empty => "state-empty",
+    }
 }
 
 fn connection_label(state: &ConnectionState, strings: &UiStrings) -> String {

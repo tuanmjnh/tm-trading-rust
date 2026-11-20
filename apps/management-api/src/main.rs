@@ -5,11 +5,12 @@ use std::sync::Arc;
 use tm_trading_config::LogFormat;
 use tm_trading_management_api::{AppState, AuthConfig, router};
 use tm_trading_storage::{
-    InMemoryOperationRepository, InMemoryProviderInstanceRepository,
-    InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository, MongoConnection,
-    MongoOperationRepository, MongoProviderInstanceRepository, MongoServiceSnapshotRepository,
-    MongoWatchlistRepository, OperationRepository, ProviderInstanceRepository,
-    ServiceSnapshotRepository, WatchlistRepository,
+    CandleRepository, InMemoryCandleRepository, InMemoryOperationRepository,
+    InMemoryProviderInstanceRepository, InMemoryServiceSnapshotRepository,
+    InMemoryWatchlistRepository, MongoCandleRepository, MongoConnection, MongoOperationRepository,
+    MongoProviderInstanceRepository, MongoServiceSnapshotRepository, MongoWatchlistRepository,
+    OperationRepository, ProviderInstanceRepository, ServiceSnapshotRepository,
+    WatchlistRepository,
 };
 use tokio::net::TcpListener;
 
@@ -48,8 +49,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| DEFAULT_AGENT_ID.to_owned()),
     };
 
-    let (operations, services, watchlists, providers) = stores().await?;
-    let state = AppState::with_repositories(auth, operations, services, watchlists, providers);
+    let (operations, services, watchlists, providers, candles) = stores().await?;
+    let state =
+        AppState::with_repositories(auth, operations, services, watchlists, providers, candles);
     let app = router(state);
     let listener = TcpListener::bind(bind).await?;
     tracing::info!(address = %bind, "management api listening");
@@ -69,6 +71,7 @@ async fn stores() -> Result<
         Arc<dyn ServiceSnapshotRepository>,
         Arc<dyn WatchlistRepository>,
         Arc<dyn ProviderInstanceRepository>,
+        Arc<dyn CandleRepository>,
     ),
     Box<dyn std::error::Error>,
 > {
@@ -83,6 +86,7 @@ async fn stores() -> Result<
             Arc::new(InMemoryServiceSnapshotRepository::new()),
             Arc::new(InMemoryWatchlistRepository::new()),
             Arc::new(InMemoryProviderInstanceRepository::new()),
+            Arc::new(InMemoryCandleRepository::new()),
         )),
         "mongodb" => {
             let uri = std::env::var("TM_DATABASE_URI")?;
@@ -94,6 +98,7 @@ async fn stores() -> Result<
                 Arc::new(MongoServiceSnapshotRepository::new(connection.database()).await?),
                 Arc::new(MongoWatchlistRepository::new(connection.database()).await?),
                 Arc::new(MongoProviderInstanceRepository::new(connection.database()).await?),
+                Arc::new(MongoCandleRepository::new(connection.database()).await?),
             ))
         }
         other => {

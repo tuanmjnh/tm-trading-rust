@@ -4,8 +4,9 @@ use reqwest::Client;
 use thiserror::Error;
 use tm_trading_contracts::{
     CreateOperationRequest, CreateProviderInstanceRequest, CreateWatchlistRequest, HealthResponse,
-    OperationActionDto, OperationResponse, ProviderDefinitionDto, ProviderInstanceDto,
-    ReplaceWatchlistSymbolsRequest, ServiceSnapshot, UpdateProviderInstanceRequest, WatchlistDto,
+    MarketOverviewDto, MarketPulseDto, OperationActionDto, OperationResponse,
+    ProviderDefinitionDto, ProviderInstanceDto, ReplaceWatchlistSymbolsRequest, ServiceSnapshot,
+    UpdateProviderInstanceRequest, WatchlistDto,
 };
 
 /// Typed client for the versioned Management API contract.
@@ -327,6 +328,54 @@ impl ManagementApiClient {
                 message: error.to_string(),
             })?;
         Self::decode(response, &path).await
+    }
+
+    pub async fn market_overview(
+        &self,
+        symbols: &[String],
+        timeframe: &str,
+        bars: usize,
+    ) -> Result<MarketOverviewDto, ApiClientError> {
+        self.get_market("/api/v1/market/overview", symbols, timeframe, bars)
+            .await
+    }
+
+    pub async fn market_pulse(
+        &self,
+        symbols: &[String],
+        timeframe: &str,
+        bars: usize,
+    ) -> Result<MarketPulseDto, ApiClientError> {
+        self.get_market("/api/v1/market/pulse", symbols, timeframe, bars)
+            .await
+    }
+
+    async fn get_market<TResponse>(
+        &self,
+        path: &str,
+        symbols: &[String],
+        timeframe: &str,
+        bars: usize,
+    ) -> Result<TResponse, ApiClientError>
+    where
+        TResponse: for<'de> serde::Deserialize<'de>,
+    {
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .query(&[
+                ("symbols", symbols.join(",")),
+                ("timeframe", timeframe.to_owned()),
+                ("bars", bars.to_string()),
+            ])
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
     }
 
     async fn decode<TResponse>(

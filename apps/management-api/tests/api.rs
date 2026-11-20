@@ -4,6 +4,7 @@ use http_body_util::BodyExt;
 use serde_json::json;
 use tower::ServiceExt;
 
+use tm_trading_domain::{Candle, NewCandle};
 use tm_trading_management_api::{AppState, AuthConfig, router};
 
 const USER_TOKEN: &str = "user-token";
@@ -752,4 +753,130 @@ async fn provider_errors_map_to_stable_statuses() {
         .await
         .expect("response");
     assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+}
+
+fn test_candle(symbol: &str, open_time: i64, open: f64, close: f64, volume: f64) -> Candle {
+    Candle::new(NewCandle {
+        symbol: symbol.to_owned(),
+        timeframe: "1m".to_owned(),
+        market: None,
+        source: "test".to_owned(),
+        open,
+        high: open.max(close) + 1.0,
+        low: open.min(close) - 1.0,
+        close,
+        volume,
+        open_time,
+        close_time: open_time + 60_000,
+        event_time: None,
+        ingest_time: None,
+    })
+    .expect("valid candle")
+}
+
+#[tokio::test]
+async fn market_overview_reports_empty_partial_stale_and_ranked_movers() {
+    let state = state();
+    let app = router(state.clone());
+
+    let empty = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/market/overview?symbols=BTCUSDT&bars=2",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(empty.status(), StatusCode::OK);
+    let empty = json_body(empty).await;
+    assert_eq!(empty["state"], "EMPTY");
+    assert_eq!(empty["symbols"][0]["state"], "EMPTY");
+    assert_eq!(empty["symbols"][0]["candle_count"], 0);
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let open_time = now - 180_000;
+    state
+        .candles
+        .upsert_closed(&[
+            test_candle("BTCUSDT", open_time, 100.0, 102.0, 2.0),
+            test_candle("BTCUSDT", open_time + 60_000, 102.0, 120.0, 10.0),
+        ])
+        .await
+        .expect("seed candles");
+
+    let partial = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/market/overview?symbols=BTCUSDT&bars=3",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(partial.status(), StatusCode::OK);
+    let partial = json_body(partial).await;
+    assert_eq!(partial["state"], "PARTIAL");
+    assert_eq!(partial["symbols"][0]["last_close"], 120.0);
+    assert_eq!(partial["symbols"][0]["change_percent"], 20.0);
+
+    let pulse = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/market/pulse?symbols=BTCUSDT&bars=2",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(pulse.status(), StatusCode::OK);
+    let pulse = json_body(pulse).await;
+    assert_eq!(pulse["state"], "OK");
+    assert_eq!(pulse["movers"][0]["symbol"], "BTCUSDT");
+    assert_eq!(pulse["movers"][0]["volume_ratio"], 5.0);
+
+    state
+        .candles
+        .upsert_closed(&[test_candle("ETHUSDT", 1_600_000_000_000, 10.0, 11.0, 1.0)])
+        .await
+        .expect("seed stale candle");
+
+    let stale = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/market/overview?symbols=BTCUSDT,ETHUSDT&bars=2",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(stale.status(), StatusCode::OK);
+    assert_eq!(json_body(stale).await["state"], "STALE");
+
+    let unsupported = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/market/overview?symbols=BTCUSDT&timeframe=1y",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unsupported.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let agent = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/market/overview?symbols=BTCUSDT",
+            Some(AGENT_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
 }
