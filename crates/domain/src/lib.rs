@@ -12,7 +12,7 @@ pub use news::{
     DEFAULT_NEWS_POLL_INTERVAL_SEC, DEFAULT_NEWS_RETENTION_DAYS, MAX_NEWS_RETENTION_DAYS,
     NEWS_SOURCE_SCHEMA_VERSION, NewNewsSource, NewsHealthState, NewsLicenseGate, NewsLicenseStatus,
     NewsRights, NewsSource, NewsSourceError, NewsSourceHealth, NewsTransport, NewsTrustTier,
-    StoredNewsSource, sanitize_news_fetch_error,
+    StoredNewsSource, is_safe_news_feed_url, sanitize_news_fetch_error,
 };
 pub use operation::{
     NewOperation, OPERATION_SCHEMA_VERSION, Operation, OperationAction, OperationError,

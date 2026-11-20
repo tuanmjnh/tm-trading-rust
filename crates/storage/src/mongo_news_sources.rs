@@ -6,10 +6,10 @@ use mongodb::{Collection, Database, IndexModel};
 use tm_trading_domain::{
     NEWS_SOURCE_SCHEMA_VERSION, NewNewsSource, NewsHealthState, NewsLicenseStatus, NewsRights,
     NewsSource, NewsSourceHealth, NewsTransport, NewsTrustTier, StoredNewsSource,
-    sanitize_news_fetch_error,
+    is_safe_news_feed_url, sanitize_news_fetch_error,
 };
 
-use crate::bson_support::{from_timestamp, number_as_i64, timestamp};
+use crate::bson_support::{from_timestamp, timestamp};
 use crate::{NewsSourceRepository, RepositoryError};
 
 /// Durable `news_sources` store compatible with the legacy collection.
@@ -32,6 +32,22 @@ impl MongoNewsSourceRepository {
                 .await?;
         }
         Ok(Self { collection })
+    }
+
+    async fn quarantine_unsafe_feed(&self, document: &Document) -> Result<(), RepositoryError> {
+        if !has_unsafe_stored_feed(document) {
+            return Ok(());
+        }
+        self.collection
+            .update_one(
+                doc! { "_id": document.get_str("_id").map_err(|_| RepositoryError::CorruptRecord("_id"))? },
+                doc! { "$set": {
+                    "feedUrl": Bson::Null,
+                    "enabled": false,
+                } },
+            )
+            .await?;
+        Ok(())
     }
 }
 
@@ -81,17 +97,19 @@ impl NewsSourceRepository for MongoNewsSourceRepository {
             .await?;
         let mut sources = Vec::new();
         while cursor.advance().await? {
-            sources.push(from_document(cursor.deserialize_current()?)?);
+            let document = cursor.deserialize_current()?;
+            self.quarantine_unsafe_feed(&document).await?;
+            sources.push(from_document(document)?);
         }
         Ok(sources)
     }
 
     async fn get(&self, source_id: &str) -> Result<Option<NewsSource>, RepositoryError> {
-        self.collection
-            .find_one(doc! { "_id": source_id })
-            .await?
-            .map(from_document)
-            .transpose()
+        let Some(document) = self.collection.find_one(doc! { "_id": source_id }).await? else {
+            return Ok(None);
+        };
+        self.quarantine_unsafe_feed(&document).await?;
+        Ok(Some(from_document(document)?))
     }
 
     async fn set_enabled(
@@ -210,6 +228,14 @@ fn optional_timestamp(value: Option<DateTime<Utc>>) -> Bson {
     value.map_or(Bson::Null, |value| Bson::DateTime(timestamp(value)))
 }
 
+fn has_unsafe_stored_feed(document: &Document) -> bool {
+    match document.get("feedUrl") {
+        None | Some(Bson::Null) => false,
+        Some(Bson::String(value)) => !value.trim().is_empty() && !is_safe_news_feed_url(value),
+        Some(_) => true,
+    }
+}
+
 fn from_document(document: Document) -> Result<NewsSource, RepositoryError> {
     let source_id = match document.get("_id") {
         Some(Bson::String(value)) => value.clone(),
@@ -227,15 +253,15 @@ fn from_document(document: Document) -> Result<NewsSource, RepositoryError> {
         .ok_or(RepositoryError::CorruptRecord("licenseStatus"))?;
     let rights = rights_from_document(document.get("rights"))?;
     let health = health_from_document(document.get("health"))?;
-    let poll_interval_sec = optional_count(&document, "pollIntervalSec", 600)?;
-    let retention_days = optional_count(&document, "retentionDays", 7)?;
+    let poll_interval_sec = optional_count(&document, "pollIntervalSec", 600);
+    let retention_days = optional_count(&document, "retentionDays", 7);
 
     NewsSource::from_stored(StoredNewsSource {
         source_id,
         name: required_text(&document, "name")?,
         provider: optional_text(&document, "provider")?,
         transport,
-        feed_url: optional_text(&document, "feedUrl")?,
+        feed_url: optional_feed_text(&document),
         trust_tier,
         market_groups: string_array_or_default(&document, "marketGroups", "crypto")?,
         languages: string_array_or_default(&document, "languages", "en")?,
@@ -300,7 +326,7 @@ fn health_from_document(value: Option<&Bson>) -> Result<NewsSourceHealth, Reposi
         last_error: optional_nested_text(document, "lastError")?
             .as_deref()
             .map(sanitize_news_fetch_error),
-        consecutive_errors: optional_nested_count(document, "consecutiveErrors", 0)?,
+        consecutive_errors: optional_nested_count(document, "consecutiveErrors", 0),
     })
 }
 
@@ -319,6 +345,13 @@ fn optional_text(
         None | Some(Bson::Null) => Ok(None),
         Some(Bson::String(value)) => Ok(Some(value.clone())),
         _ => Err(RepositoryError::CorruptRecord(field)),
+    }
+}
+
+fn optional_feed_text(document: &Document) -> Option<String> {
+    match document.get("feedUrl") {
+        Some(Bson::String(value)) => Some(value.clone()),
+        _ => None,
     }
 }
 
@@ -345,17 +378,29 @@ fn string_array_or_default(
         .collect()
 }
 
-fn optional_count(
-    document: &Document,
-    field: &'static str,
-    default: u32,
-) -> Result<u32, RepositoryError> {
+fn optional_count(document: &Document, field: &'static str, default: u32) -> u32 {
     match document.get(field) {
-        None | Some(Bson::Null) => Ok(default),
-        Some(value) => {
-            let value = number_as_i64(field, value)?;
-            u32::try_from(value).map_err(|_| RepositoryError::CorruptRecord(field))
+        None | Some(Bson::Null) => default,
+        Some(Bson::Int32(value)) => stored_count(i64::from(*value), default),
+        Some(Bson::Int64(value)) => stored_count(*value, default),
+        Some(Bson::Double(value)) if value.is_finite() && value.fract() == 0.0 => {
+            if *value <= 0.0 {
+                default
+            } else if *value <= f64::from(u32::MAX) {
+                *value as u32
+            } else {
+                u32::MAX
+            }
         }
+        Some(_) => default,
+    }
+}
+
+fn stored_count(value: i64, default: u32) -> u32 {
+    if value <= 0 {
+        default
+    } else {
+        u32::try_from(value).unwrap_or(u32::MAX)
     }
 }
 
@@ -399,16 +444,20 @@ fn optional_nested_text(
     }
 }
 
-fn optional_nested_count(
-    document: &Document,
-    field: &'static str,
-    default: u32,
-) -> Result<u32, RepositoryError> {
+fn optional_nested_count(document: &Document, field: &'static str, default: u32) -> u32 {
     match document.get(field) {
-        None | Some(Bson::Null) => Ok(default),
-        Some(value) => {
-            let value = number_as_i64(field, value)?;
-            u32::try_from(value).map_err(|_| RepositoryError::CorruptRecord("health"))
+        None | Some(Bson::Null) => default,
+        Some(Bson::Int32(value)) => stored_count(i64::from(*value), default),
+        Some(Bson::Int64(value)) => stored_count(*value, default),
+        Some(Bson::Double(value)) if value.is_finite() && value.fract() == 0.0 => {
+            if *value <= 0.0 {
+                default
+            } else if *value <= f64::from(u32::MAX) {
+                *value as u32
+            } else {
+                u32::MAX
+            }
         }
+        Some(_) => default,
     }
 }

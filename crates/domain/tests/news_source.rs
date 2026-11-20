@@ -57,6 +57,9 @@ fn rejects_secret_bearing_or_restricted_feed_urls() {
         "https://example.com/feed?api_key=secret",
         "https://example.com/feed?access_token=secret",
         "https://example.com/feed?access[token]=secret",
+        "https://example.com/feed?accessToken=secret",
+        "https://example.com/feed?clientSecret=secret",
+        "https://example.com/feed?subscription-key=secret",
         "https://example.com/feed?jwt=secret",
         "https://example.com/feed?X-Amz-Credential=secret",
         "https://example.com/feed?AWSAccessKeyId=secret",
@@ -202,4 +205,40 @@ fn disables_a_legacy_source_with_an_unsafe_feed_url() {
 
     assert_eq!(source.feed_url(), None);
     assert!(!source.enabled());
+}
+
+#[test]
+fn preserves_valid_legacy_identity_and_positive_long_intervals() {
+    let source_id = " legacy ";
+    let name = "Legacy publisher ".repeat(20);
+    let source = NewsSource::from_stored(StoredNewsSource {
+        source_id: source_id.to_owned(),
+        name: name.clone(),
+        provider: None,
+        transport: NewsTransport::Rss,
+        feed_url: Some("https://example.com/feed".to_owned()),
+        trust_tier: NewsTrustTier::T2Secondary,
+        market_groups: vec!["crypto".to_owned()],
+        languages: vec!["en".to_owned()],
+        license_status: NewsLicenseStatus::Ok,
+        rights: NewsRights {
+            allowed_store_metadata: true,
+            allowed_display: true,
+            allowed_summarize: false,
+            allowed_training: false,
+        },
+        enabled: true,
+        poll_interval_sec: 604_800,
+        retention_days: 1_000,
+        retry_requested_at: None,
+        health: NewsSourceHealth::default(),
+        created_at: at(),
+        updated_at: at(),
+    })
+    .expect("valid legacy source remains readable");
+
+    assert_eq!(source.source_id(), source_id);
+    assert_eq!(source.name(), name);
+    assert_eq!(source.poll_interval_sec(), 604_800);
+    assert_eq!(source.retention_days(), 1_000);
 }

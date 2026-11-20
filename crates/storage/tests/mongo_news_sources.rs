@@ -180,9 +180,60 @@ async fn reads_legacy_edge_values_and_fails_closed_on_malformed_enablement() {
         })
         .await
         .expect("insert legacy source with missing defaults");
+    connection
+        .database()
+        .collection::<mongodb::bson::Document>("news_sources")
+        .insert_one(doc! {
+            "_id": "legacy-counts",
+            "sourceId": "legacy-counts",
+            "name": "Legacy Counts",
+            "transport": "rss",
+            "trustTier": "T2_SECONDARY",
+            "licenseStatus": "unknown",
+            "pollIntervalSec": 604_800_i64,
+            "retentionDays": 1_000_i64,
+            "createdAt": mongodb::bson::DateTime::from_millis(at().timestamp_millis()),
+            "updatedAt": mongodb::bson::DateTime::from_millis(at().timestamp_millis()),
+        })
+        .await
+        .expect("insert legacy source with long positive intervals");
+    connection
+        .database()
+        .collection::<mongodb::bson::Document>("news_sources")
+        .insert_one(doc! {
+            "_id": "legacy-invalid-counts",
+            "sourceId": "legacy-invalid-counts",
+            "name": "Legacy Invalid Counts",
+            "transport": "rss",
+            "trustTier": "T2_SECONDARY",
+            "licenseStatus": "unknown",
+            "pollIntervalSec": -5_i64,
+            "retentionDays": 1.5,
+            "createdAt": mongodb::bson::DateTime::from_millis(at().timestamp_millis()),
+            "updatedAt": mongodb::bson::DateTime::from_millis(at().timestamp_millis()),
+        })
+        .await
+        .expect("insert legacy source with invalid intervals");
+    let legacy_id = " legacy-long ".to_owned();
+    let legacy_name = "Legacy publisher ".repeat(20);
+    connection
+        .database()
+        .collection::<mongodb::bson::Document>("news_sources")
+        .insert_one(doc! {
+            "_id": legacy_id.clone(),
+            "sourceId": legacy_id.clone(),
+            "name": legacy_name.clone(),
+            "transport": "rss",
+            "trustTier": "T2_SECONDARY",
+            "licenseStatus": "unknown",
+            "createdAt": mongodb::bson::DateTime::from_millis(at().timestamp_millis()),
+            "updatedAt": mongodb::bson::DateTime::from_millis(at().timestamp_millis()),
+        })
+        .await
+        .expect("insert legacy source with long identity");
 
     let sources = repository.list().await.expect("list legacy sources");
-    assert_eq!(sources.len(), 2);
+    assert_eq!(sources.len(), 5);
     let source = sources
         .iter()
         .find(|source| source.source_id() == "legacy")
@@ -193,6 +244,23 @@ async fn reads_legacy_edge_values_and_fails_closed_on_malformed_enablement() {
         .expect("legacy source with missing defaults");
     assert_eq!(missing_defaults.market_groups(), ["crypto"]);
     assert_eq!(missing_defaults.languages(), ["en"]);
+    let counts = sources
+        .iter()
+        .find(|source| source.source_id() == "legacy-counts")
+        .expect("legacy source with long positive intervals");
+    assert_eq!(counts.poll_interval_sec(), 604_800);
+    assert_eq!(counts.retention_days(), 1_000);
+    let invalid_counts = sources
+        .iter()
+        .find(|source| source.source_id() == "legacy-invalid-counts")
+        .expect("legacy source with invalid intervals");
+    assert_eq!(invalid_counts.poll_interval_sec(), 600);
+    assert_eq!(invalid_counts.retention_days(), 7);
+    let long_identity = sources
+        .iter()
+        .find(|source| source.source_id() == legacy_id)
+        .expect("legacy source with long identity");
+    assert_eq!(long_identity.name(), legacy_name);
     assert_eq!(source.provider(), None);
     assert_eq!(source.feed_url(), None);
     assert_eq!(source.market_groups(), ["crypto"]);
@@ -200,6 +268,52 @@ async fn reads_legacy_edge_values_and_fails_closed_on_malformed_enablement() {
     assert_eq!(source.poll_interval_sec(), 600);
     assert_eq!(source.retention_days(), 7);
     assert!(!source.enabled());
+}
+
+#[tokio::test]
+async fn quarantines_an_unsafe_legacy_feed_url_in_storage() {
+    let (connection, repository) = harness_or_skip!();
+    connection
+        .database()
+        .collection::<mongodb::bson::Document>("news_sources")
+        .insert_one(doc! {
+            "_id": "legacy-unsafe",
+            "sourceId": "legacy-unsafe",
+            "name": "Legacy Unsafe Feed",
+            "transport": "rss",
+            "feedUrl": "https://example.com/feed?accessToken=secret",
+            "trustTier": "T2_SECONDARY",
+            "licenseStatus": "ok",
+            "rights": {
+                "allowedStoreMetadata": true,
+                "allowedDisplay": true,
+                "allowedSummarize": false,
+                "allowedTraining": false,
+            },
+            "enabled": true,
+            "createdAt": mongodb::bson::DateTime::from_millis(at().timestamp_millis()),
+            "updatedAt": mongodb::bson::DateTime::from_millis(at().timestamp_millis()),
+        })
+        .await
+        .expect("insert legacy source with unsafe feed URL");
+
+    let source = repository
+        .get("legacy-unsafe")
+        .await
+        .expect("read source")
+        .expect("source");
+    assert_eq!(source.feed_url(), None);
+    assert!(!source.enabled());
+
+    let document = connection
+        .database()
+        .collection::<mongodb::bson::Document>("news_sources")
+        .find_one(doc! { "_id": "legacy-unsafe" })
+        .await
+        .expect("find source")
+        .expect("source document");
+    assert!(matches!(document.get("feedUrl"), Some(Bson::Null)));
+    assert!(!document.get_bool("enabled").expect("enabled"));
 }
 
 #[tokio::test]

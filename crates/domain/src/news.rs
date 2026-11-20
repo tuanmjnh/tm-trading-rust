@@ -299,6 +299,12 @@ impl NewsSource {
     /// unreadable and hiding the complete registry. An unsafe stored feed URL is
     /// removed and disables the source.
     pub fn from_stored(input: StoredNewsSource) -> Result<Self, NewsSourceError> {
+        if input.source_id.is_empty() {
+            return Err(NewsSourceError::EmptySourceId);
+        }
+        if input.name.is_empty() {
+            return Err(NewsSourceError::EmptyName);
+        }
         let provider = input
             .provider
             .map(|value| value.trim().to_owned())
@@ -315,14 +321,12 @@ impl NewsSource {
             },
             None => (None, input.enabled),
         };
-        let poll_interval_sec = if (MIN_NEWS_POLL_INTERVAL_SEC..=MAX_NEWS_POLL_INTERVAL_SEC)
-            .contains(&input.poll_interval_sec)
-        {
+        let poll_interval_sec = if input.poll_interval_sec > 0 {
             input.poll_interval_sec
         } else {
             DEFAULT_NEWS_POLL_INTERVAL_SEC
         };
-        let retention_days = if (1..=MAX_NEWS_RETENTION_DAYS).contains(&input.retention_days) {
+        let retention_days = if input.retention_days > 0 {
             input.retention_days
         } else {
             DEFAULT_NEWS_RETENTION_DAYS
@@ -330,7 +334,7 @@ impl NewsSource {
 
         let mut health = input.health;
         health.last_error = health.last_error.as_deref().map(sanitize_news_fetch_error);
-        let mut source = Self::new(NewNewsSource {
+        Ok(Self {
             source_id: input.source_id,
             name: input.name,
             provider,
@@ -344,12 +348,11 @@ impl NewsSource {
             enabled,
             poll_interval_sec,
             retention_days,
+            retry_requested_at: input.retry_requested_at,
+            health,
             created_at: input.created_at,
-        })?;
-        source.retry_requested_at = input.retry_requested_at;
-        source.health = health;
-        source.updated_at = input.updated_at;
-        Ok(source)
+            updated_at: input.updated_at,
+        })
     }
 
     /// Returns a copy with a new update timestamp.
@@ -551,6 +554,12 @@ fn normalize_optional_text(value: String, _field: &'static str) -> Result<String
     Ok(value.to_owned())
 }
 
+/// Returns whether a feed URL is safe for an outbound public request.
+#[must_use]
+pub fn is_safe_news_feed_url(value: &str) -> bool {
+    normalize_feed_url(value).is_ok()
+}
+
 fn normalize_feed_url(value: &str) -> Result<String, NewsSourceError> {
     let value = value.trim();
     let url = Url::parse(value).map_err(|_| NewsSourceError::InvalidFeedUrl)?;
@@ -577,16 +586,25 @@ fn normalize_feed_url(value: &str) -> Result<String, NewsSourceError> {
 }
 
 fn is_sensitive_query_key(key: &str) -> bool {
-    let key = key
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character.to_ascii_lowercase()
-            } else {
-                '_'
+    let characters: Vec<char> = key.chars().collect();
+    let mut key = String::with_capacity(key.len() + 4);
+    for (index, character) in characters.iter().copied().enumerate() {
+        if character.is_ascii_uppercase() {
+            let previous = index.checked_sub(1).map(|index| characters[index]);
+            let next = characters.get(index + 1).copied();
+            if previous.is_some_and(|value| value.is_ascii_lowercase() || value.is_ascii_digit())
+                || (previous.is_some_and(|value| value.is_ascii_uppercase())
+                    && next.is_some_and(|value| value.is_ascii_lowercase()))
+            {
+                key.push('_');
             }
-        })
-        .collect::<String>();
+            key.push(character.to_ascii_lowercase());
+        } else if character.is_ascii_alphanumeric() {
+            key.push(character.to_ascii_lowercase());
+        } else {
+            key.push('_');
+        }
+    }
     let key = key
         .split('_')
         .filter(|part| !part.is_empty())
@@ -596,25 +614,35 @@ fn is_sensitive_query_key(key: &str) -> bool {
         key.as_str(),
         "api_key"
             | "apikey"
+            | "access_key"
+            | "access_key_id"
             | "accesskeyid"
+            | "aws_access_key_id"
             | "awsaccesskeyid"
             | "auth"
             | "authorization"
             | "credential"
             | "credentials"
             | "jwt"
+            | "key"
             | "password"
+            | "private_key"
             | "secret"
+            | "secret_key"
             | "sig"
             | "signature"
+            | "subscription_key"
             | "token"
-    ) || key.ends_with("_api_key")
+    ) || key.ends_with("_access_key")
+        || key.ends_with("_access_key_id")
+        || key.ends_with("_api_key")
         || key.ends_with("_auth")
         || key.ends_with("_credential")
         || key.ends_with("_credentials")
         || key.ends_with("_password")
         || key.ends_with("_secret")
         || key.ends_with("_signature")
+        || key.ends_with("_subscription_key")
         || key.ends_with("_token")
 }
 
