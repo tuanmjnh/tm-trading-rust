@@ -112,12 +112,41 @@ pub struct ResearchEvent {
 }
 
 impl ResearchEvent {
-    /// Builds an event and derives its stable identifier.
+    /// Builds a new event and derives its stable identifier.
     ///
     /// The identifier is derived from the owner, symbol, timeframe, method,
     /// event type and detection time, so re-running the same method over the
     /// same input never produces a second copy of the same observation.
     pub fn new(input: NewResearchEvent) -> Result<Self, ResearchEventError> {
+        Self::build(
+            input,
+            RESEARCH_PRODUCER_VERSION.to_owned(),
+            RESEARCH_EVENT_SCHEMA_VERSION.to_owned(),
+        )
+    }
+
+    /// Restores an event with the producer and schema stamps found in storage.
+    ///
+    /// New events always receive the current stamps. A repository reader must
+    /// use this constructor so an older stored observation keeps the version
+    /// that actually produced it.
+    pub fn from_stored(
+        input: NewResearchEvent,
+        producer_version: String,
+        schema_version: String,
+    ) -> Result<Self, ResearchEventError> {
+        Self::build(
+            input,
+            required("producerVersion", producer_version)?,
+            required("schemaVersion", schema_version)?,
+        )
+    }
+
+    fn build(
+        input: NewResearchEvent,
+        producer_version: String,
+        schema_version: String,
+    ) -> Result<Self, ResearchEventError> {
         let owner_scope = required("ownerScope", input.owner_scope)?;
         let symbol = required("symbol", input.symbol)?;
         let timeframe = required("timeframe", input.timeframe)?;
@@ -167,8 +196,8 @@ impl ResearchEvent {
             source_id,
             provider_method,
             input_snapshot_id,
-            producer_version: RESEARCH_PRODUCER_VERSION.to_owned(),
-            schema_version: RESEARCH_EVENT_SCHEMA_VERSION.to_owned(),
+            producer_version,
+            schema_version,
             quality_state: input.quality_state,
             quality_reasons: input.quality_reasons,
             evidence: input.evidence,
@@ -423,6 +452,18 @@ mod tests {
             one,
             input_snapshot_id("BTCUSDT", "15m", "vsa", "1", 1, 2, 2)
         );
+    }
+
+    #[test]
+    fn a_stored_event_keeps_its_producer_and_schema_stamps() {
+        let event = ResearchEvent::from_stored(
+            input(),
+            "producer/previous".to_owned(),
+            "research-event.previous".to_owned(),
+        )
+        .unwrap();
+        assert_eq!(event.producer_version(), "producer/previous");
+        assert_eq!(event.schema_version(), "research-event.previous");
     }
 
     #[test]

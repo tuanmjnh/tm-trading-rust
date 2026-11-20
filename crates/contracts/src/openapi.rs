@@ -9,6 +9,10 @@ use crate::provider::{
     CreateProviderInstanceRequest, ProviderDefinitionDto, ProviderHealthStateDto,
     ProviderInstanceDto, UpdateProviderInstanceRequest,
 };
+use crate::research::{
+    ResearchEventDto, ResearchEventListDto, ResearchEventQueryDto, ResearchFreshnessDto,
+    ResearchQualityDto,
+};
 use crate::service::{
     AgentCommandDto, AgentHeartbeatRequest, AgentHeartbeatResponse, ClaimCommandRequest,
     ClaimCommandResponse, CompleteCommandRequest, CompleteCommandResponse, ProgressCommandRequest,
@@ -47,7 +51,9 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         delete_provider_instance,
         test_provider_instance,
         market_overview,
-        market_pulse
+        market_pulse,
+        list_research_events,
+        get_research_event
     ),
     components(schemas(
         ApiVersionInfo,
@@ -77,7 +83,12 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         MarketSymbolDto,
         MarketOverviewDto,
         MarketMoverDto,
-        MarketPulseDto
+        MarketPulseDto,
+        ResearchEventDto,
+        ResearchEventListDto,
+        ResearchEventQueryDto,
+        ResearchFreshnessDto,
+        ResearchQualityDto
     )),
     tags(
         (name = "System", description = "Version and health endpoints"),
@@ -86,6 +97,7 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         (name = "Watchlists", description = "Owner-scoped symbol lists"),
         (name = "Providers", description = "Provider catalog and configured instances"),
         (name = "Market", description = "Closed-candle market overview and pulse"),
+        (name = "Research", description = "Owner-scoped deterministic research observations"),
         (name = "Agent", description = "Agent-only heartbeat and command endpoints")
     )
 )]
@@ -436,3 +448,39 @@ pub fn market_overview() {}
     )
 )]
 pub fn market_pulse() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/research/events",
+    tag = "Research",
+    params(
+        ("symbol" = Option<String>, Query, description = "Exact symbol filter"),
+        ("timeframe" = Option<String>, Query, description = "Exact timeframe filter"),
+        ("event_type" = Option<String>, Query, description = "Exact event type filter"),
+        ("since" = Option<String>, Query, description = "Only events detected at or after this RFC 3339 instant"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of events, 1 to 200, default 50")
+    ),
+    responses(
+        (status = 200, description = "Owner-scoped research observations, newest first", body = ResearchEventListDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 422, description = "The requested limit is out of range", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_research_events() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/research/events/{event_id}",
+    tag = "Research",
+    params(("event_id" = String, Path, description = "Research event identifier")),
+    responses(
+        (status = 200, description = "Research observation with provenance and freshness", body = ResearchEventDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown research event", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn get_research_event() {}

@@ -626,6 +626,117 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/research/events:
+    get:
+      tags:
+      - Research
+      operationId: list_research_events
+      parameters:
+      - name: symbol
+        in: query
+        description: Exact symbol filter
+        required: false
+        schema:
+          type: string
+      - name: timeframe
+        in: query
+        description: Exact timeframe filter
+        required: false
+        schema:
+          type: string
+      - name: event_type
+        in: query
+        description: Exact event type filter
+        required: false
+        schema:
+          type: string
+      - name: since
+        in: query
+        description: Only events detected at or after this RFC 3339 instant
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        description: Maximum number of events, 1 to 200, default 50
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+      responses:
+        '200':
+          description: Owner-scoped research observations, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResearchEventListDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The requested limit is out of range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/research/events/{event_id}:
+    get:
+      tags:
+      - Research
+      operationId: get_research_event
+      parameters:
+      - name: event_id
+        in: path
+        description: Research event identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Research observation with provenance and freshness
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResearchEventDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown research event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/services:
     get:
       tags:
@@ -1573,6 +1684,165 @@ components:
           type: array
           items:
             type: string
+    ResearchEventDto:
+      type: object
+      description: One research observation with its provenance.
+      required:
+      - id
+      - owner_scope
+      - symbol
+      - timeframe
+      - event_type
+      - method
+      - method_version
+      - direction
+      - score
+      - observed_at
+      - detected_at
+      - ingested_at
+      - source_id
+      - provider_method
+      - input_snapshot_id
+      - producer_version
+      - schema_version
+      - quality_state
+      - quality_reasons
+      - freshness
+      - age_seconds
+      - evidence
+      - context
+      properties:
+        age_seconds:
+          type: integer
+          format: int64
+        context:
+          type: object
+          additionalProperties:
+            type: string
+          propertyNames:
+            type: string
+        detected_at:
+          type: string
+          format: date-time
+        direction:
+          type: integer
+          format: int32
+          description: '`-1` for a bearish observation, `1` for a bullish one, `0` for neutral.'
+        event_type:
+          type: string
+        evidence:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+          propertyNames:
+            type: string
+        freshness:
+          $ref: '#/components/schemas/ResearchFreshnessDto'
+        id:
+          type: string
+        ingested_at:
+          type: string
+          format: date-time
+        input_snapshot_id:
+          type: string
+        method:
+          type: string
+        method_version:
+          type: string
+        observed_at:
+          type: string
+          format: date-time
+        owner_scope:
+          type: string
+        producer_version:
+          type: string
+        provider_method:
+          type: string
+        quality_reasons:
+          type: array
+          items:
+            type: string
+        quality_state:
+          $ref: '#/components/schemas/ResearchQualityDto'
+        schema_version:
+          type: string
+        score:
+          type: number
+          format: double
+        source_id:
+          type: string
+        symbol:
+          type: string
+        timeframe:
+          type: string
+    ResearchEventListDto:
+      type: object
+      description: A bounded list of research observations.
+      required:
+      - generated_at
+      - count
+      - events
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResearchEventDto'
+        generated_at:
+          type: string
+          format: date-time
+    ResearchEventQueryDto:
+      type: object
+      description: |-
+        Optional filters for a research event list request.
+
+        The owner scope is never accepted from the client: the API always derives it
+        from the authenticated subject.
+      properties:
+        event_type:
+          type:
+          - string
+          - 'null'
+        limit:
+          type:
+          - integer
+          - 'null'
+          description: Maximum number of events to return.
+          minimum: 0
+        since:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: Only events detected at or after this instant.
+        symbol:
+          type:
+          - string
+          - 'null'
+        timeframe:
+          type:
+          - string
+          - 'null'
+    ResearchFreshnessDto:
+      type: string
+      description: |-
+        Whether an observation is still current.
+
+        Freshness is computed when the event is read, because it depends on the
+        current time, not on the moment the event was written.
+      enum:
+      - FRESH
+      - STALE
+    ResearchQualityDto:
+      type: string
+      description: How complete the input of a research event was.
+      enum:
+      - COMPLETE
+      - PARTIAL
+      - UNKNOWN
     ServiceSnapshot:
       type: object
       description: Read model of one service instance as reported by its owning Agent.
@@ -1684,5 +1954,7 @@ tags:
   description: Provider catalog and configured instances
 - name: Market
   description: Closed-candle market overview and pulse
+- name: Research
+  description: Owner-scoped deterministic research observations
 - name: Agent
   description: Agent-only heartbeat and command endpoints

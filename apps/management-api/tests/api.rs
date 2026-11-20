@@ -4,7 +4,10 @@ use http_body_util::BodyExt;
 use serde_json::json;
 use tower::ServiceExt;
 
-use tm_trading_domain::{Candle, NewCandle};
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Duration, Utc};
+use tm_trading_domain::{Candle, NewCandle, NewResearchEvent, ResearchEvent, ResearchQuality};
 use tm_trading_management_api::{AppState, AuthConfig, router};
 
 const USER_TOKEN: &str = "user-token";
@@ -879,4 +882,146 @@ async fn market_overview_reports_empty_partial_stale_and_ranked_movers() {
         .await
         .expect("response");
     assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+}
+
+fn research_event(
+    owner_scope: &str,
+    symbol: &str,
+    event_type: &str,
+    detected_at: DateTime<Utc>,
+) -> ResearchEvent {
+    ResearchEvent::new(NewResearchEvent {
+        owner_scope: owner_scope.to_owned(),
+        symbol: symbol.to_owned(),
+        timeframe: "15m".to_owned(),
+        method: "vsa".to_owned(),
+        method_version: "1".to_owned(),
+        event_type: event_type.to_owned(),
+        direction: 1,
+        score: 0.75,
+        observed_at: detected_at,
+        detected_at,
+        ingested_at: detected_at,
+        source_id: "binance".to_owned(),
+        provider_method: "binance.klines".to_owned(),
+        input_snapshot_id: "rsnap1_0123456789abcdef".to_owned(),
+        quality_state: ResearchQuality::Complete,
+        quality_reasons: vec!["fixture".to_owned()],
+        evidence: BTreeMap::from([("close".to_owned(), 100.5)]),
+        context: BTreeMap::from([("bucket".to_owned(), "TIM".to_owned())]),
+    })
+    .expect("valid research event")
+}
+
+#[tokio::test]
+async fn research_events_are_owner_scoped_bounded_and_carry_provenance() {
+    let state = state();
+    let app = router(state.clone());
+    let now = Utc::now();
+    let fresh = research_event(
+        "test-operator",
+        "BTCUSDT",
+        "ST LONG",
+        now - Duration::minutes(1),
+    );
+    let stale = research_event("test-operator", "BTCUSDT", "BC", now - Duration::hours(2));
+    let foreign = research_event("another-operator", "BTCUSDT", "SV", now);
+    state
+        .research_events
+        .upsert(&[fresh.clone(), stale.clone(), foreign.clone()])
+        .await
+        .expect("seed research events");
+
+    let list = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/research/events?symbol=BTCUSDT&timeframe=15m&limit=10",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(list.status(), StatusCode::OK);
+    let list = json_body(list).await;
+    assert_eq!(list["count"], 2);
+    assert_eq!(list["events"][0]["id"], fresh.id());
+    assert_eq!(list["events"][0]["owner_scope"], "test-operator");
+    assert_eq!(list["events"][0]["quality_state"], "COMPLETE");
+    assert_eq!(list["events"][0]["freshness"], "FRESH");
+    assert_eq!(list["events"][0]["evidence"]["close"], 100.5);
+    assert_eq!(list["events"][0]["context"]["bucket"], "TIM");
+
+    let stale = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/research/events?event_type=BC",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(stale.status(), StatusCode::OK);
+    let stale = json_body(stale).await;
+    assert_eq!(stale["count"], 1);
+    assert_eq!(stale["events"][0]["freshness"], "STALE");
+
+    let detail = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/research/events/{}", fresh.id()),
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(detail.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(detail).await["input_snapshot_id"],
+        "rsnap1_0123456789abcdef"
+    );
+
+    let foreign = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/research/events/{}", foreign.id()),
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(foreign.status(), StatusCode::NOT_FOUND);
+
+    let invalid_limit = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/research/events?limit=0",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(invalid_limit.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let agent = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/research/events",
+            Some(AGENT_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    let anonymous = app
+        .oneshot(request("GET", "/api/v1/research/events", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
 }

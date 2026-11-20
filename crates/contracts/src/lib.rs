@@ -3,6 +3,7 @@ mod market;
 pub mod openapi;
 mod operation;
 mod provider;
+mod research;
 mod service;
 mod system;
 mod watchlist;
@@ -18,6 +19,10 @@ pub use operation::{
 pub use provider::{
     CreateProviderInstanceRequest, ProviderDefinitionDto, ProviderHealthStateDto,
     ProviderInstanceDto, UpdateProviderInstanceRequest,
+};
+pub use research::{
+    ResearchEventDto, ResearchEventListDto, ResearchEventQueryDto, ResearchFreshnessDto,
+    ResearchQualityDto,
 };
 pub use service::{
     AgentCommandDto, AgentHeartbeatRequest, AgentHeartbeatResponse, ClaimCommandRequest,

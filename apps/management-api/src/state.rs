@@ -3,8 +3,9 @@ use std::sync::Arc;
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_storage::{
     CandleRepository, InMemoryCandleRepository, InMemoryOperationRepository,
-    InMemoryProviderInstanceRepository, InMemoryServiceSnapshotRepository,
-    InMemoryWatchlistRepository, OperationRepository, ProviderInstanceRepository, RepositoryError,
+    InMemoryProviderInstanceRepository, InMemoryResearchEventRepository,
+    InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository, OperationRepository,
+    ProviderInstanceRepository, RepositoryError, ResearchEventRepository,
     ServiceSnapshotRepository, WatchlistRepository,
 };
 
@@ -25,6 +26,7 @@ pub struct AppState {
     pub watchlists: Arc<dyn WatchlistRepository>,
     pub providers: Arc<dyn ProviderInstanceRepository>,
     pub candles: Arc<dyn CandleRepository>,
+    pub research_events: Arc<dyn ResearchEventRepository>,
     pub auth: AuthConfig,
 }
 
@@ -38,6 +40,7 @@ impl AppState {
             Arc::new(InMemoryWatchlistRepository::new()),
             Arc::new(InMemoryProviderInstanceRepository::new()),
             Arc::new(InMemoryCandleRepository::new()),
+            Arc::new(InMemoryResearchEventRepository::new()),
         )
     }
 
@@ -49,6 +52,7 @@ impl AppState {
         watchlists: Arc<dyn WatchlistRepository>,
         providers: Arc<dyn ProviderInstanceRepository>,
         candles: Arc<dyn CandleRepository>,
+        research_events: Arc<dyn ResearchEventRepository>,
     ) -> Self {
         Self {
             operations,
@@ -56,6 +60,7 @@ impl AppState {
             watchlists,
             providers,
             candles,
+            research_events,
             auth,
         }
     }

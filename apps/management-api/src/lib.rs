@@ -1,6 +1,7 @@
 mod auth;
 mod error;
 mod market;
+mod research;
 mod routes;
 mod state;
 
@@ -12,8 +13,8 @@ use tm_trading_contracts::ApiDoc;
 
 pub use auth::{
     AuthContext, CAPABILITY_MARKET_READ, CAPABILITY_OPERATION_READ, CAPABILITY_PROVIDER_READ,
-    CAPABILITY_PROVIDER_WRITE, CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ,
-    CAPABILITY_WATCHLIST_READ, CAPABILITY_WATCHLIST_WRITE, Principal,
+    CAPABILITY_PROVIDER_WRITE, CAPABILITY_RESEARCH_READ, CAPABILITY_SERVICE_CONTROL,
+    CAPABILITY_SERVICE_READ, CAPABILITY_WATCHLIST_READ, CAPABILITY_WATCHLIST_WRITE, Principal,
 };
 pub use error::ApiError;
 pub use state::{AppState, AuthConfig};
@@ -69,6 +70,14 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/market/overview", get(market::market_overview))
         .route("/api/v1/market/pulse", get(market::market_pulse))
+        .route(
+            "/api/v1/research/events",
+            get(research::list_research_events),
+        )
+        .route(
+            "/api/v1/research/events/{event_id}",
+            get(research::get_research_event),
+        )
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(
             "/api/v1/agent/commands/claim",

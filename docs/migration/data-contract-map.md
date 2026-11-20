@@ -86,7 +86,8 @@ Required distinctions:
 | `market_feed` | `marketFeed.mjs` | Global append-only observations | Market repository | KEEP; type payload variants later |
 | `market_snapshots` | `snapshot.mjs` | Owner-scoped decision context; historically execution-oriented | Research/storage | Read-only compatibility until semantics are audited |
 | `intel` | `intel.mjs` | Mixed global snapshot/event records | Market/research read repository | KEEP collection; split typed DTOs by `kind` |
-| `signals` | `signal.mjs` | Owner/account scoped research events | Research repository | PORT as read-only research event |
+| `signals` | `signal.mjs` | Owner/account scoped research events | Research repository | PORT as read-only research event; legacy compatibility reader remains later |
+| `research_events` | None (new in Rust) | Owner-scoped deterministic research observations | Research repository | NEW; do not rewrite legacy `signals` rows in place |
 | `research_evidence_sets` | `evidenceSet.mjs` | Owner/account scoped frozen evidence | Evidence repository | KEEP deterministic ID/hash semantics |
 | `runs` | `run.mjs` | Owner-scoped research/backtest run | Research repository | PORT read-only; preserve version stamps |
 | `datasets` | `dataset.mjs` | Research dataset manifest | Research repository | PORT later |
@@ -336,6 +337,50 @@ Initial Rust behavior:
 3. Do not delete or rewrite `secretEnc` during metadata migration.
 4. Deactivate a legacy secret reference only after a tested secure-store path exists.
 
+### 6.12 `research_events` (new in Rust)
+
+There is no legacy collection with this name. The collection stores new deterministic
+research observations without rewriting or reinterpreting the legacy `signals` rows.
+
+Required fields:
+
+```text
+_id / eventId
+ownerScope
+symbol
+timeframe
+method
+methodVersion
+eventType
+direction
+score
+observedAt
+detectedAt
+ingestedAt
+sourceId
+providerMethod
+inputSnapshotId
+producerVersion
+schemaVersion
+qualityState
+qualityReasons
+evidence
+context
+```
+
+`_id` is the stable `rev1_` identifier derived from owner, symbol, timeframe, method,
+method version, event type, and detection time. Replaying the same observation updates
+that row instead of creating another copy. Timestamps are BSON `DateTime`; `direction`
+is `-1`, `0`, or `1`; `score` and numeric evidence values must be finite.
+
+The MongoDB repository declares read indexes on
+`{ ownerScope, detectedAt }` and
+`{ ownerScope, symbol, timeframe, detectedAt }`. Replaying an observation uses one atomic
+upsert, and the stored producer/schema stamps are read back unchanged so an older event is
+never relabeled as the current producer. The Management API always derives owner scope from
+the authenticated subject. Another owner's event identifier returns `404`, and the list is
+bounded to 200 events with a default of 50.
+
 ## 7. Event contracts
 
 ### 7.1 Existing domain-event envelope
@@ -526,6 +571,7 @@ ServiceSnapshotRepository
 CandleRepository
 WatchlistRepository
 ProviderInstanceRepository
+ResearchEventRepository
 ```
 
 Planned traits:
@@ -534,7 +580,6 @@ Planned traits:
 ServiceInstanceRepository
 AgentRepository
 MarketObservationRepository
-ResearchEventRepository
 EvidenceRepository
 NewsRepository
 ProviderRepository

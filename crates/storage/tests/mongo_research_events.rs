@@ -5,6 +5,7 @@
 //! dropped per test.
 
 use chrono::{DateTime, TimeZone, Utc};
+use mongodb::bson::doc;
 use std::collections::BTreeMap;
 use tm_trading_domain::{NewResearchEvent, ResearchEvent, ResearchQuality};
 use tm_trading_storage::{
@@ -135,6 +136,38 @@ async fn events_are_read_back_with_their_provenance() {
         .unwrap();
     assert!(foreign.is_empty());
 
+    connection.database().drop().await.unwrap();
+}
+
+#[tokio::test]
+async fn stored_producer_and_schema_stamps_are_preserved() {
+    let (connection, repository) = harness_or_skip!();
+    let event = event("BTCUSDT", "ST LONG", 0);
+    repository
+        .upsert(std::slice::from_ref(&event))
+        .await
+        .unwrap();
+
+    connection
+        .database()
+        .collection::<mongodb::bson::Document>("research_events")
+        .update_one(
+            doc! { "_id": event.id() },
+            doc! { "$set": {
+                "producerVersion": "producer/previous",
+                "schemaVersion": "research-event.previous",
+            } },
+        )
+        .await
+        .unwrap();
+
+    let stored = repository
+        .get(event.id())
+        .await
+        .unwrap()
+        .expect("stored event");
+    assert_eq!(stored.producer_version(), "producer/previous");
+    assert_eq!(stored.schema_version(), "research-event.previous");
     connection.database().drop().await.unwrap();
 }
 

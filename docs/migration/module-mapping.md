@@ -79,6 +79,7 @@ Create these only when their owning slice begins:
 | `engine/ta.mjs` | `crates/research-engine` | Port, primitives done | Deterministic outputs and numeric edge cases; goldens are generated from the legacy module by `crates/research-engine/tests/fixtures/generate_vectors.mjs` |
 | `engine/indicators.mjs` | `crates/research-engine` | Port, catalog done | Preserve ids, definition versions, parameter names/bounds, output keys, and warmup behavior |
 | `engine/methods/vsa.mjs` | `crates/research-engine` | Port, method 0 done | Pine parity remains the acceptance source; events, setups, flags and per-bar series are compared against a legacy-generated scenario fixture |
+| `engine/models/signal.mjs` | `crates/domain` + `crates/storage` + `crates/contracts` | New Rust event contract done; legacy reader later | Preserve legacy rows read-only; new `research_events` rows carry explicit quality and provenance |
 | `engine/methods/priceAction.mjs`, `trend.mjs`, `orderflow.mjs` | `crates/research-engine` | Port one method at a time | Each method needs approved fixtures and version stamp |
 | `engine/version.mjs` | `crates/domain` + research engine | Port | Preserve engine version, params hash, data hash, universe snapshot, Git revision |
 | `engine/keys.mjs` | `crates/domain` | Port retained keys | Deterministic key derivation must remain stable for existing records |
@@ -137,6 +138,7 @@ Create these only when their owning slice begins:
 | `server/api/v1/operations/**` | `apps/management-api` + `crates/storage` | Recreate | `202 Accepted`, operation ID, correlation ID, idempotency |
 | `server/api/v1/watchlists/**` | `apps/management-api` + `crates/storage` | Recreate done | Owner scope and per-owner unique names |
 | `server/api/v1/market-sources/health.get.ts` | `apps/management-api` + `crates/market-providers` | Recreate done for public market providers | Bounded public probe; liveness and freshness remain separate; no credentials |
+| New research event read contract | `apps/management-api` + `crates/storage` + `crates/contracts` | Recreate done | Owner scope, explicit quality/provenance, computed freshness, bounded reads; observations never become execution instructions |
 | `server/api/v1/news/**` | API + news worker | Recreate later | Publication/ingestion times and canonical/origin URLs |
 | `server/api/v1/ai/providers/**` | API + provider core | Recreate later | Secrets masked and never returned |
 | `app/composables/useHub.ts` | `crates/api-client` + `crates/auth` | Reimplement | Same Hub identity source; no browser-only assumptions |

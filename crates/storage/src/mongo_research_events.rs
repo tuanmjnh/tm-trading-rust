@@ -57,9 +57,12 @@ impl ResearchEventRepository for MongoResearchEventRepository {
             let update = doc! {
                 "$set": fields(event)?,
             };
-            let result = self.collection.update_one(filter, update).await?;
-            if result.matched_count == 0 {
-                self.collection.insert_one(to_document(event)?).await?;
+            let result = self
+                .collection
+                .update_one(filter, update)
+                .upsert(true)
+                .await?;
+            if result.upserted_id.is_some() {
                 outcome.inserted += 1;
             } else {
                 outcome.existing += 1;
@@ -108,12 +111,6 @@ impl ResearchEventRepository for MongoResearchEventRepository {
         };
         Ok(Some(from_document(document)?))
     }
-}
-
-fn to_document(event: &ResearchEvent) -> Result<Document, RepositoryError> {
-    let mut document = fields(event)?;
-    document.insert("_id", event.id());
-    Ok(document)
 }
 
 fn fields(event: &ResearchEvent) -> Result<Document, RepositoryError> {
@@ -207,26 +204,36 @@ fn from_document(document: Document) -> Result<ResearchEvent, RepositoryError> {
         .get_i32("direction")
         .map_err(|_| RepositoryError::CorruptRecord("direction"))?;
 
-    ResearchEvent::new(NewResearchEvent {
-        owner_scope: text("ownerScope")?,
-        symbol: text("symbol")?,
-        timeframe: text("timeframe")?,
-        method: text("method")?,
-        method_version: text("methodVersion")?,
-        event_type: text("eventType")?,
-        direction: i8::try_from(direction)
-            .map_err(|_| RepositoryError::CorruptRecord("direction"))?,
-        score: number("score")?,
-        observed_at: timestamp_of("observedAt")?,
-        detected_at: timestamp_of("detectedAt")?,
-        ingested_at: timestamp_of("ingestedAt")?,
-        source_id: text("sourceId")?,
-        provider_method: text("providerMethod")?,
-        input_snapshot_id: text("inputSnapshotId")?,
-        quality_state,
-        quality_reasons,
-        evidence,
-        context,
-    })
-    .map_err(RepositoryError::from)
+    let producer_version = text("producerVersion")?;
+    let schema_version = text("schemaVersion")?;
+    let event = ResearchEvent::from_stored(
+        NewResearchEvent {
+            owner_scope: text("ownerScope")?,
+            symbol: text("symbol")?,
+            timeframe: text("timeframe")?,
+            method: text("method")?,
+            method_version: text("methodVersion")?,
+            event_type: text("eventType")?,
+            direction: i8::try_from(direction)
+                .map_err(|_| RepositoryError::CorruptRecord("direction"))?,
+            score: number("score")?,
+            observed_at: timestamp_of("observedAt")?,
+            detected_at: timestamp_of("detectedAt")?,
+            ingested_at: timestamp_of("ingestedAt")?,
+            source_id: text("sourceId")?,
+            provider_method: text("providerMethod")?,
+            input_snapshot_id: text("inputSnapshotId")?,
+            quality_state,
+            quality_reasons,
+            evidence,
+            context,
+        },
+        producer_version,
+        schema_version,
+    )
+    .map_err(RepositoryError::from)?;
+    if document.get_str("_id").ok() != Some(event.id()) {
+        return Err(RepositoryError::CorruptRecord("_id"));
+    }
+    Ok(event)
 }

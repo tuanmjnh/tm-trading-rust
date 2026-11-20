@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, and Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, and the owner-scoped research event API; the Research Worker and Signal Center remain<br>
 > Last updated: 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -33,7 +33,10 @@ Implemented:
 - a dual-writer guard: the Market Worker refuses to start unless `TM_TRADING_MARKET_SOURCE_OF_TRUTH` is explicitly enabled, exiting with code `78` before any provider or candle access;
 - bounded provider fallback of at most three instances of one definition, ordered by health, with each attempt's observed health recorded;
 - a closed-candle Management API read model at `GET /api/v1/market/overview` and `GET /api/v1/market/pulse`, with explicit `OK`, `PARTIAL`, `STALE`, and `EMPTY` states, bounded symbol and bar counts, and the owner's default watchlist as the implicit symbol set;
-- Desktop Market Overview and Market Pulse panels reading that API through `api-client`, with EN/VI localization.
+- Desktop Market Overview and Market Pulse panels reading that API through `api-client`, with EN/VI localization;
+- a pure `research-engine` crate with legacy-matched technical-analysis primitives, the canonical indicator catalog, and the VSA/Wyckoff method (method 0), compared against committed golden fixtures;
+- a `ResearchEvent` domain contract and memory/MongoDB repositories that preserve owner scope, method and producer versions, input snapshot identity, observation/detection/ingestion times, quality state and reasons, evidence, and context;
+- owner-scoped research event reads at `GET /api/v1/research/events` and `GET /api/v1/research/events/{event_id}`, with bounded filters, computed freshness, and the exact `trading.research.read` capability.
 
 Not implemented:
 
@@ -41,7 +44,9 @@ Not implemented:
 - Bybit and other provider adapters;
 - TM Hub token verification and capability enforcement (local bearer credentials are used today);
 - durable Agent credential rotation;
-- TM Hub login, TOTP, and refresh flow in the Desktop client.
+- TM Hub login, TOTP, and refresh flow in the Desktop client;
+- the Research Worker that turns closed-candle input into persisted research events;
+- the Desktop Signal Center and research-event detail Slideover.
 
 ## 2. Target runtime and current implementation
 
@@ -73,6 +78,8 @@ tm-trading-market-providers -> tm-trading-domain  (read-only public data)
         +-> tm-trading-management-api  (provider catalog and bounded health probe)
         +-> tm-trading-market-worker   (bounded collection cycles, agent-owned)
 
+tm-trading-research-engine  (pure deterministic calculations; no I/O or clock)
+
 tm-trading-agent-protocol -> tm-trading-supervisor-core -> tm-trading-agent
         |                                      |
         |                                      +-> local locked checkpoint
@@ -95,7 +102,7 @@ Dependency rules:
 - `workers/market-worker` implements the same control protocol and runs one bounded collection cycle at a time in a spawned task, so heartbeats and control commands stay responsive. It requires the write-authority flag, selects a bounded set of provider instances from MongoDB, persists only closed bars, records observed provider health, and reports a skipped cycle as skipped rather than successful. On shutdown it aborts an in-flight cycle and reports `drained: false`.
 - `apps/management-api` is the local Axum Management API. It binds to loopback only, is a command producer and read-model provider, never spawns a process, and never runs a continuous worker loop. User endpoints require a bearer credential that carries exact `trading.*` capabilities; Agent endpoints require the separate per-installation Agent credential and may only act as the Agent named in the request. Operations are durable and idempotent, and are claimed with an expiring lease and fencing token.
 - `apps/agent` additionally opens an outbound command channel to the Management API: it heartbeats its service read model, claims commands addressed to its own Agent identity, executes them against its own worker registry, and reports the real outcome. The Agent never accepts an executable path or command line from the API.
-- `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, operation creation/polling, watchlists, and provider instances.
+- `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, operation creation/polling, watchlists, provider instances, market read models, and research events.
 - `apps/desktop` is a thin Dioxus view over `api-client`. It connects only to the Management API, never to MongoDB or a worker, and holds no credentials beyond the user bearer token. Every user-facing string comes from `apps/desktop/src/i18n.rs`.
 - Executable processes remain thin composition roots around these crates.
 
@@ -111,7 +118,7 @@ The Desktop app stores its WebView2 profile under `<exe_dir>/data/desktop`, over
 - API errors use stable typed codes and include a correlation ID.
 - The generated contract snapshot is [`docs/api/openapi.yaml`](../api/openapi.yaml).
 
-The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, the watchlist endpoints, the provider catalog and instance endpoints, the market overview and pulse read models, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
+The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, the watchlist endpoints, the provider catalog and instance endpoints, the market overview and pulse read models, the owner-scoped research event reads, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
 
 ## 4. Service and operation model
 
@@ -231,6 +238,8 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Port the canonical indicator registry with clamped parameters and legacy-matched outputs.
 - [x] Port the session filter and the VSA volume buckets from `engine/ta.mjs`.
 - [x] Port the VSA/Wyckoff method (method 0) with a legacy-generated scenario fixture.
+- [x] Define the research event contract and preserve schema, producer, input, source, and quality provenance.
+- [x] Add the memory/MongoDB research event repositories and owner-scoped research event API reads.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

@@ -5,8 +5,9 @@ use thiserror::Error;
 use tm_trading_contracts::{
     CreateOperationRequest, CreateProviderInstanceRequest, CreateWatchlistRequest, HealthResponse,
     MarketOverviewDto, MarketPulseDto, OperationActionDto, OperationResponse,
-    ProviderDefinitionDto, ProviderInstanceDto, ReplaceWatchlistSymbolsRequest, ServiceSnapshot,
-    UpdateProviderInstanceRequest, WatchlistDto,
+    ProviderDefinitionDto, ProviderInstanceDto, ReplaceWatchlistSymbolsRequest, ResearchEventDto,
+    ResearchEventListDto, ResearchEventQueryDto, ServiceSnapshot, UpdateProviderInstanceRequest,
+    WatchlistDto,
 };
 
 /// Typed client for the versioned Management API contract.
@@ -348,6 +349,43 @@ impl ManagementApiClient {
     ) -> Result<MarketPulseDto, ApiClientError> {
         self.get_market("/api/v1/market/pulse", symbols, timeframe, bars)
             .await
+    }
+
+    pub async fn list_research_events(
+        &self,
+        query: &ResearchEventQueryDto,
+    ) -> Result<ResearchEventListDto, ApiClientError> {
+        let path = "/api/v1/research/events";
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .query(query)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn get_research_event(
+        &self,
+        event_id: &str,
+    ) -> Result<ResearchEventDto, ApiClientError> {
+        let path = format!("/api/v1/research/events/{event_id}");
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, &path).await
     }
 
     async fn get_market<TResponse>(
