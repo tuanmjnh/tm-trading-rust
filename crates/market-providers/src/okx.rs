@@ -24,9 +24,11 @@ pub struct OkxProvider {
 
 impl OkxProvider {
     pub fn new(base_url: impl Into<String>, timeout: Duration) -> Result<Self, ProviderError> {
+        let base_url = base_url.into();
+        crate::validate_provider_url(PROVIDER, &base_url)?;
         Ok(Self {
             http: http_client(PROVIDER, timeout)?,
-            base_url: base_url.into().trim_end_matches('/').to_owned(),
+            base_url: base_url.trim_end_matches('/').to_owned(),
         })
     }
 }
@@ -186,7 +188,8 @@ fn parse_candles(
             open_time,
             close_time,
             event_time: None,
-            ingest_time: None,
+            // The caller's observation time records when this worker received the bar.
+            ingest_time: Some(now_ms),
         })?);
     }
     candles.sort_by_key(|candle| candle.open_time());
@@ -242,6 +245,7 @@ mod tests {
         assert_eq!(candle.source(), "okx");
         assert_eq!(candle.market(), Some("futures"));
         assert_eq!(candle.close_time(), 1_700_000_299_999);
+        assert_eq!(candle.ingest_time(), NOW);
     }
 
     #[test]

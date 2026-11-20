@@ -1,6 +1,6 @@
 # Operations Runbooks
 
-> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 closed-candle store, public market-data adapters, and owner-scoped watchlists (operation, service-snapshot, candle, and watchlist MongoDB stores), implemented on 2026-11-19<br>
+> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 closed-candle store, public market-data adapters, owner-scoped watchlists, and the opt-in Market Worker (operation, service-snapshot, candle, watchlist, and provider-instance MongoDB stores), implemented on 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## Build the Agent and sample worker
@@ -231,6 +231,58 @@ probe, and a probe never changes the operator's settings.
 
 The Agent credential cannot use these endpoints: it receives `403` because it holds no user
 capabilities.
+
+## Run the Market Worker
+
+The Market Worker is opt-in and runs under the Agent. Build it together with the Agent, then
+start the Agent with the write authority explicitly enabled. The database URI is passed only to
+that worker; the Agent's other children never receive it.
+
+```powershell
+cargo build -p tm-trading-agent -p tm-trading-sample-worker -p tm-trading-market-worker
+
+$env:TM_TRADING_MARKET_WORKER_ENABLED = "1"
+$env:TM_TRADING_MARKET_SYMBOLS = "BTCUSDT,ETHUSDT"
+$env:TM_TRADING_MARKET_TIMEFRAME = "1m"
+$env:TM_TRADING_MARKET_PROVIDER_ID = "binance"
+$env:TM_TRADING_MARKET_SOURCE_OF_TRUTH = "1"
+$env:TM_DATABASE_URI = "mongodb://localhost:27018/?tls=true&tlsCAFile=D:/certs/ca.pem"
+$env:TM_DATABASE_NAME = "tm-trading-rust"
+.\target\debug\tm-trading-agent.exe --worker-dir .\target\debug --state-dir .\target\tmp\agent-local
+```
+
+Expected result:
+
+- `GET /api/v1/services` lists `market-worker` alongside `sample-worker`;
+- `market-worker` stays `NOT_READY` until a real cycle stores closed bars, then becomes `READY`;
+- each cycle upserts closed bars into `candles` and updates `healthState` on the provider instance;
+- the worker never writes a forming bar, and a cycle that returns no closed bars is reported as skipped, not successful.
+
+With `TM_TRADING_MARKET_SOURCE_OF_TRUTH` unset or `0`, the worker exits with code `78` before
+touching a provider or a candle. That is the dual-writer guard, not a runtime failure to retry.
+
+`TM_TRADING_MARKET_PROVIDER_ID` is optional only when exactly one provider definition is
+enabled. If both Binance and OKX instances are enabled and no definition is named, startup is
+rejected as ambiguous instead of silently picking one.
+
+### Market Worker durability checks
+
+```powershell
+$env:TM_TRADING_TEST_MONGODB_URI = "mongodb://localhost:27018/?tls=true&tlsCAFile=D:/certs/ca.pem"
+cargo test -p tm-trading-storage --test mongo_candles
+```
+
+A multi-candle batch runs in one transaction. The test forces the second candle of a batch to
+fail and asserts the first is rolled back. Transactions require the MongoDB deployment to run as
+a replica set; a standalone `mongod` cannot accept the batch path.
+
+### Market Worker failure handling
+
+- Exactly one selected provider is probed before the worker reports capability; every probed instance's health is recorded.
+- A provider failure falls back to the next candidate in the bounded chain; the chain never crosses provider definitions.
+- A storage failure ends the cycle immediately; it does not fall back to another provider.
+- A cycle that exceeds `TM_TRADING_MARKET_CYCLE_TIMEOUT_MS` is cancelled and reported as a timeout.
+- An Agent shutdown aborts an in-flight cycle and reports `drained: false`; pending operations also prevent a drained result.
 
 ## Logs and status
 

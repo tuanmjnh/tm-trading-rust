@@ -366,6 +366,8 @@ pub async fn create_provider_instance(
     let base_url = request
         .base_url
         .unwrap_or_else(|| definition.default_base_url.to_owned());
+    tm_trading_market_providers::validate_provider_url(&request.provider_definition_id, &base_url)
+        .map_err(|error| ApiError::UnprocessableEntity(error.to_string()))?;
     let instance = state
         .providers
         .create(
@@ -419,6 +421,8 @@ pub async fn update_provider_instance(
         .unwrap_or_else(|| current.base_url().to_owned());
     let timeout_ms = request.timeout_ms.unwrap_or(current.timeout_ms());
     let enabled = request.enabled.unwrap_or(current.enabled());
+    tm_trading_market_providers::validate_provider_url(current.provider_definition_id(), &base_url)
+        .map_err(|error| ApiError::UnprocessableEntity(error.to_string()))?;
     let updated = current
         .with_settings(&display_name, &base_url, timeout_ms, enabled, Utc::now())
         .map_err(|error| ApiError::UnprocessableEntity(error.to_string()))?;

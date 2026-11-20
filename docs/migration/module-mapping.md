@@ -63,13 +63,13 @@ Create these only when their owning slice begins:
 | `market/events.mjs` | `crates/domain` + `crates/contracts` | Port/normalize | Preserve canonical event identity, source, timestamps, and payload compatibility |
 | `market/clock.mjs` | `crates/domain` | Port | Trading time and wall time remain distinct |
 | `market/candleBuilder.mjs`, `market/aggregate.mjs` | `crates/research-engine` or market domain | Port later | Closed candle output and aggregation boundaries must match fixtures |
-| `market/recorder.mjs` | `crates/storage` + market worker | Port later | Keep `candles` natural ID and schema version |
-| `market/quoteStore.mjs`, `market/orderbookStore.mjs` | Market worker state | Reimplement | In-memory state is worker-owned, not API-owned |
+| `market/recorder.mjs` | `crates/storage` + `workers/market-worker` | Ported: closed-bar repository and bounded collection worker | Keep `candles` natural ID and schema version |
+| `market/quoteStore.mjs`, `market/orderbookStore.mjs` | Market worker state | Defer | In-memory state is worker-owned, not API-owned |
 | `market/eventBus.mjs` | Internal worker messaging | Reimplement | Keep high-frequency fan-out internal and bounded |
 | `market/providers/binance.mjs` | `crates/market-providers` | Port REST candles done; WebSocket streams later | Public data only; no account/order endpoints |
 | `market/providers/bybit.mjs`, `market/providers/okx.mjs` | `crates/market-providers` | OKX REST candles done; other adapters later | Public data only; verify public endpoint terms before activation |
 | `market/quality.mjs` | `crates/domain` | Port | Quality states must be explicit, not inferred by UI |
-| `market/monitor.mjs`, `market/healthSnapshot.mjs` | Market worker readiness/health | Port later | Freshness and source evidence feed readiness |
+| `market/monitor.mjs`, `market/healthSnapshot.mjs` | Market worker readiness/health | Ported basics: per-instance health and worker readiness | Freshness and source evidence feed readiness |
 | `realtime/` | SSE/event layer or worker transport | Defer | Do not preserve raw WebSocket API merely for compatibility |
 
 ### 3.2 Research engine

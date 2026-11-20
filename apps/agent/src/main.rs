@@ -8,8 +8,8 @@ use tm_trading_config::LogFormat;
 use tm_trading_supervisor_core::WorkerRegistry;
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(100);
-// The Agent and sample worker inherit the same workspace release version.
-const SAMPLE_WORKER_EXECUTABLE_VERSION: &str = env!("CARGO_PKG_VERSION");
+// The Agent and its workers inherit the same workspace release version.
+const WORKER_EXECUTABLE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
@@ -36,7 +36,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         &cli.agent_id,
         worker_dir,
         state_dir,
-        WorkerRegistry::sample_with_version(SAMPLE_WORKER_EXECUTABLE_VERSION),
+        WorkerRegistry::local_with_version(WORKER_EXECUTABLE_VERSION, market_worker_enabled()),
     )?;
     agent.spawn_shutdown_listener();
     if let Some(crash_after_ms) = cli.crash_after_ms {
@@ -249,4 +249,17 @@ fn default_worker_dir() -> PathBuf {
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// The market worker is registered only when it is explicitly enabled, so a default
+/// installation does not run a service that cannot collect anything.
+fn market_worker_enabled() -> bool {
+    env::var("TM_TRADING_MARKET_WORKER_ENABLED")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
+        .unwrap_or(false)
 }

@@ -286,6 +286,9 @@ pub fn normalize_base_url(value: &str) -> Result<String, ProviderInstanceError> 
     if url.scheme() == "http" && !is_loopback_host(host) {
         return Err(ProviderInstanceError::InsecureBaseUrl);
     }
+    if is_restricted_host(host) {
+        return Err(ProviderInstanceError::RestrictedAddress);
+    }
     Ok(value.to_owned())
 }
 
@@ -296,6 +299,33 @@ fn is_loopback_host(host: &str) -> bool {
         || host
             .parse::<std::net::IpAddr>()
             .is_ok_and(|address| address.is_loopback())
+}
+
+fn is_restricted_host(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let Ok(address) = host.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    if address.is_loopback() {
+        return false;
+    }
+    match address {
+        std::net::IpAddr::V4(address) => {
+            address.is_private()
+                || address.is_link_local()
+                || address.is_unspecified()
+                || address.is_multicast()
+                || address.is_broadcast()
+                || (address.octets()[0] == 100 && (address.octets()[1] & 0xc0) == 64)
+        }
+        std::net::IpAddr::V6(address) => {
+            let segments = address.segments();
+            address.is_unspecified()
+                || address.is_multicast()
+                || (segments[0] & 0xffc0) == 0xfe80
+                || (segments[0] & 0xfe00) == 0xfc00
+        }
+    }
 }
 
 fn check_timeout(timeout_ms: u64) -> Result<u64, ProviderInstanceError> {
@@ -327,6 +357,8 @@ pub enum ProviderInstanceError {
     CredentialsInUrl,
     #[error("provider base URL must use https unless it targets the loopback interface")]
     InsecureBaseUrl,
+    #[error("provider base URL must not target a private, link-local or metadata address")]
+    RestrictedAddress,
     #[error("provider timeout is outside the allowed range")]
     TimeoutOutOfRange,
 }
@@ -370,6 +402,23 @@ mod tests {
             new("http://api.binance.com"),
             Err(ProviderInstanceError::InsecureBaseUrl)
         );
+    }
+
+    #[test]
+    fn rejects_private_link_local_and_metadata_ip_literals() {
+        for base_url in [
+            "https://10.0.0.1",
+            "https://169.254.169.254",
+            "https://192.168.1.10",
+            "https://[fe80::1]",
+            "https://[fc00::1]",
+        ] {
+            assert_eq!(
+                new(base_url),
+                Err(ProviderInstanceError::RestrictedAddress),
+                "base URL should be rejected: {base_url}"
+            );
+        }
     }
 
     #[test]

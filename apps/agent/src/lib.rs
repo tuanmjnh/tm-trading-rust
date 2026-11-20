@@ -17,14 +17,15 @@ use tokio::time::Instant;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use tm_trading_agent_protocol::{SupervisorCommand, WorkerMessage};
+use tm_trading_agent_protocol::{SupervisorCommand, WORKER_CONFIGURATION_EXIT_CODE, WorkerMessage};
 use tm_trading_contracts::{
     AgentCommandDto, DesiredStateDto, ObservedStateDto, OperationActionDto, ReadinessDto,
     ServiceSnapshot,
 };
 use tm_trading_domain::{DesiredState, ObservedState, Readiness};
 use tm_trading_supervisor_core::{
-    ServiceState, SupervisorError, WorkerDefinition, WorkerProcessIdentity, WorkerRegistry,
+    MARKET_WORKER_ID, ServiceState, SupervisorError, WorkerDefinition, WorkerProcessIdentity,
+    WorkerRegistry,
 };
 
 pub use api::ManagementApiClient;
@@ -38,6 +39,20 @@ use windows::Win32::System::Threading::DETACHED_PROCESS;
 
 const AGENT_LOCK_FILE_NAME: &str = "agent.lock";
 const MAX_WORKER_EVENTS_PER_BATCH: usize = 128;
+
+/// Environment handed to the market worker only.
+const MARKET_WORKER_ENVIRONMENT: &[&str] = &[
+    "TM_DATABASE_URI",
+    "TM_DATABASE_NAME",
+    "TM_TRADING_MARKET_SYMBOLS",
+    "TM_TRADING_MARKET_TIMEFRAME",
+    "TM_TRADING_MARKET_BARS",
+    "TM_TRADING_MARKET_CYCLE_MS",
+    "TM_TRADING_MARKET_CYCLE_TIMEOUT_MS",
+    "TM_TRADING_MARKET_HEARTBEAT_MS",
+    "TM_TRADING_MARKET_PROVIDER_ID",
+    "TM_TRADING_MARKET_SOURCE_OF_TRUTH",
+];
 const FORCED_TERMINATION_TIMEOUT: Duration = Duration::from_secs(5);
 const FINAL_EVENT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -88,6 +103,10 @@ impl AgentError {
         matches!(
             self,
             Self::Protocol(_) | Self::InvalidProtocol(_) | Self::WorkerIdentityMismatch(_)
+        ) || matches!(
+            self,
+            Self::ExitedBeforeReady(Some(exit_code))
+                if *exit_code == WORKER_CONFIGURATION_EXIT_CODE
         )
     }
 }
@@ -787,6 +806,9 @@ impl Agent {
                 .stderr(std::process::Stdio::piped());
         });
         allowlisted_environment(command.command_mut());
+        if definition.id == MARKET_WORKER_ID {
+            worker_specific_environment(command.command_mut(), MARKET_WORKER_ENVIRONMENT);
+        }
         if let Some(crash_after_ms) = self.crash_after_ms {
             command.command_mut().env(
                 "TM_SAMPLE_WORKER_CRASH_AFTER_MS",
@@ -1134,6 +1156,18 @@ fn allowlisted_environment(command: &mut Command) {
     }
 }
 
+/// Environment handed to one specific worker.
+///
+/// The database credential reaches only the market worker, which is the worker that writes
+/// market observations. No other worker receives it.
+fn worker_specific_environment(command: &mut Command, keys: &[&str]) {
+    for key in keys {
+        if let Ok(value) = std::env::var(key) {
+            command.env(key, value);
+        }
+    }
+}
+
 fn executable_identity(path: &Path) -> String {
     let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let value = path.to_string_lossy().into_owned();
@@ -1272,6 +1306,14 @@ mod tests {
         };
 
         assert!(matches!(error, AgentError::InvalidAgentId));
+    }
+
+    #[test]
+    fn a_configuration_exit_is_not_retried() {
+        let error = AgentError::ExitedBeforeReady(Some(WORKER_CONFIGURATION_EXIT_CODE));
+
+        assert!(error.is_deterministic_worker_rejection());
+        assert!(!AgentError::ExitedBeforeReady(Some(2)).is_deterministic_worker_rejection());
     }
 
     #[tokio::test]

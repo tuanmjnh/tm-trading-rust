@@ -5668,6 +5668,23 @@ dependencies = [
  "thiserror 2.0.21",
  "tm-trading-domain",
  "tokio",
+ "url",
+]
+
+[[package]]
+name = "tm-trading-market-worker"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tm-trading-agent-protocol",
+ "tm-trading-domain",
+ "tm-trading-market-providers",
+ "tm-trading-storage",
+ "tokio",
 ]
 
 [[package]]

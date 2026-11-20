@@ -17,6 +17,7 @@ pub const PROVIDER_INSTANCE_SCHEMA_VERSION: &str = "provider-instance.v1";
 ///
 /// This collection is new to the Rust service, so there is no legacy shape to preserve.
 /// The document keeps configuration and observed health in separate fields.
+#[derive(Clone)]
 pub struct MongoProviderInstanceRepository {
     collection: Collection<Document>,
 }

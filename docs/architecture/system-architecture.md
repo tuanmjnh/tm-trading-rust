@@ -1,7 +1,7 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, and Phase 5 market data, watchlists, and provider configuration implemented; the Market Worker and the remaining Phase 5 panels are not started<br>
-> Last updated: 2026-11-19<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, and Phase 5 market data, watchlists, provider configuration, and the opt-in Market Worker are implemented; the closed-candle API read model and remaining Phase 5 panels are not started<br>
+> Last updated: 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## 1. Current scope
@@ -28,10 +28,16 @@ Implemented:
 - an Agent command channel that heartbeats per-Agent service snapshots and executes claimed operations;
 - a typed `api-client` crate that depends only on the versioned public contracts;
 - a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, an owner-scoped watchlist editor, and EN/VI localization;
-- a provider catalog and provider instance configuration with bounded, read-only health probes.
+- a provider catalog and provider instance configuration with bounded, read-only health probes;
+- an opt-in Market Worker that collects closed public bars from one provider definition, records the provider health it observed, and writes each multi-candle batch in one majority-write-concern transaction;
+- a dual-writer guard: the Market Worker refuses to start unless `TM_TRADING_MARKET_SOURCE_OF_TRUTH` is explicitly enabled, exiting with code `78` before any provider or candle access;
+- bounded provider fallback of at most three instances of one definition, ordered by health, with each attempt's observed health recorded.
 
 Not implemented:
 
+- the closed-candle Management API read model and the Desktop Market Overview/Market Pulse panels;
+- WebSocket trade/ticker/depth streams;
+- Bybit and other provider adapters;
 - TM Hub token verification and capability enforcement (local bearer credentials are used today);
 - durable Agent credential rotation;
 - TM Hub login, TOTP, and refresh flow in the Desktop client.
@@ -64,6 +70,7 @@ tm-trading-config -> tm-trading-observability
 tm-trading-market-providers -> tm-trading-domain  (read-only public data)
         |
         +-> tm-trading-management-api  (provider catalog and bounded health probe)
+        +-> tm-trading-market-worker   (bounded collection cycles, agent-owned)
 
 tm-trading-agent-protocol -> tm-trading-supervisor-core -> tm-trading-agent
         |                                      |
@@ -83,6 +90,7 @@ Dependency rules:
 - `supervisor-core` owns static worker definitions and deterministic lifecycle/readiness transitions; it has no OS process or UI dependency.
 - `apps/agent` is the sole OS process owner for workers, uses a static executable registry, clears inherited child environment before adding an allowlist, and never accepts arbitrary executable paths or arguments. It holds an exclusive state-directory lock, validates the worker's PID, executable path, and executable version during the `worker.v2` handshake, uses a Windows Job Object or Unix process group, and isolates a rejected worker without stopping other workers. On Windows the worker is spawned with `DETACHED_PROCESS` so console control events reach only the Agent, which drains the worker over the explicit control channel. Windows Job Object descendant containment is implemented; Unix forced termination targets the process group, while descendant cleanup after an abrupt Agent loss remains unverified on a Unix runtime.
 - `workers/sample-worker` implements the versioned control protocol, performs its capability self-check before readiness, and reports explicit drain status.
+- `workers/market-worker` implements the same control protocol and runs one bounded collection cycle at a time in a spawned task, so heartbeats and control commands stay responsive. It requires the write-authority flag, selects a bounded set of provider instances from MongoDB, persists only closed bars, records observed provider health, and reports a skipped cycle as skipped rather than successful. On shutdown it aborts an in-flight cycle and reports `drained: false`.
 - `apps/management-api` is the local Axum Management API. It binds to loopback only, is a command producer and read-model provider, never spawns a process, and never runs a continuous worker loop. User endpoints require a bearer credential that carries exact `trading.*` capabilities; Agent endpoints require the separate per-installation Agent credential and may only act as the Agent named in the request. Operations are durable and idempotent, and are claimed with an expiring lease and fencing token.
 - `apps/agent` additionally opens an outbound command channel to the Management API: it heartbeats its service read model, claims commands addressed to its own Agent identity, executes them against its own worker registry, and reports the real outcome. The Agent never accepts an executable path or command line from the API.
 - `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, operation creation/polling, watchlists, and provider instances.
@@ -137,7 +145,7 @@ Verified against a TLS-enabled MongoDB 8.2 instance with certificate validation 
 
 Verified live: after the Agent process is killed, and again after the Management API restarts, `GET /api/v1/services` still returns the last reported instance with its original `updated_at`; a fresh Agent heartbeat replaces that row instead of duplicating it. The `service_instances` collection carries only the subset of section 8.2 fields the current read model exposes (`generation`, `pid`, `host`, and the readiness-check list are not collected yet), plus `schemaVersion = 1`; a document with an unknown schema version or an unparseable enum is rejected as corrupt.
 
-`MongoCandleRepository` implements `CandleRepository` against the `candles` collection from section 6.1, behind `InMemoryCandleRepository` for the local default. The natural key `{symbol}:{timeframe}:{openTime}` makes re-recording a closed bar an upsert instead of a duplicate, and the three declared indexes are created at startup. Reads accept the legacy document shape: an absent `volume` becomes `0`, an absent schema stamp is treated as `candle.v1`, and whole numbers may arrive as any BSON numeric type. A row whose `state` is not `closed`, whose `_id` disagrees with its fields, or whose schema stamp is unknown is rejected as corrupt. No API endpoint serves candles yet.
+`MongoCandleRepository` implements `CandleRepository` against the `candles` collection from section 6.1, behind `InMemoryCandleRepository` for the local default. The natural key `{symbol}:{timeframe}:{openTime}` makes re-recording a closed bar an upsert instead of a duplicate, and the three declared indexes are created at startup. Reads accept the legacy document shape: an absent `volume` becomes `0`, an absent schema stamp is treated as `candle.v1`, and whole numbers may arrive as any BSON numeric type. A row whose `state` is not `closed`, whose `_id` disagrees with its fields, or whose schema stamp is unknown is rejected as corrupt. A batch with more than one candle is written in a single majority-write-concern transaction with a bounded retry on `UnknownTransactionCommitResult`, so a multi-symbol cycle is all-or-nothing; the commit is idempotent, so the retry cannot duplicate bars. No API endpoint serves candles yet.
 
 `MongoWatchlistRepository` implements `WatchlistRepository` against the `watchlists` collection from section 6.5, behind `InMemoryWatchlistRepository` for the local default. `_id` remains an `ObjectId` and timestamps remain BSON datetimes so legacy rows stay compatible. The unique `{ownerId, name}` index uses primary-strength collation, and every query includes the owner, so one subject cannot read, replace, or delete another subject's list. The first list an owner creates becomes their default. The Management API serves these rows only through the authenticated subject; the Agent credential is rejected with `403`.
 
@@ -168,6 +176,15 @@ Current defaults and variables:
 | `TM_TRADING_AGENT_ID` | `local-agent` | Agent identity the API expects on Agent endpoints |
 | `TM_TRADING_API_URL` | unset | Management API base URL used by the Agent and Desktop client |
 | `TM_TRADING_DESKTOP_DATA_DIR` | `<exe_dir>/data/desktop` | WebView2 profile directory for the Desktop app |
+| `TM_TRADING_MARKET_WORKER_ENABLED` | unset | `1` registers the Market Worker with the Agent |
+| `TM_TRADING_MARKET_SYMBOLS` | unset | Comma-separated symbols the Market Worker collects |
+| `TM_TRADING_MARKET_TIMEFRAME` | `1m` | Market Worker candle timeframe |
+| `TM_TRADING_MARKET_BARS` | `100` | Bars requested per collection cycle |
+| `TM_TRADING_MARKET_CYCLE_MS` | `60000` | Delay between completed collection cycles |
+| `TM_TRADING_MARKET_CYCLE_TIMEOUT_MS` | `30000` | Hard deadline for one collection cycle |
+| `TM_TRADING_MARKET_HEARTBEAT_MS` | `5000` | Market Worker heartbeat interval |
+| `TM_TRADING_MARKET_PROVIDER_ID` | unset | Provider definition the Market Worker uses; required when the enabled set is ambiguous |
+| `TM_TRADING_MARKET_SOURCE_OF_TRUTH` | off | `1` authorizes candle writes; without it the worker exits with code `78` |
 | `TM_TRADING_LOCALE` | `en` | Desktop initial locale (`en` or `vi`) |
 
 TM Hub remains authoritative for human identity, sessions, RBAC, routes, and shared configuration. Until Hub verification is wired, the Management API authenticates two local bearer credentials with an exact-match comparison: a user credential that carries `trading.service.read`, `trading.service.control`, and `trading.operation.read`, and a separate Agent credential that may only act as the Agent named in the request. A missing or invalid credential is `401`; a credential used on an endpoint of the other kind is `403`. The Hub-enforced `trading.*` capability set documented in the TM Hub integration map replaces this local mode without changing the endpoint contracts.
@@ -203,6 +220,7 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Port the closed-candle domain model and its memory/MongoDB repositories.
 - [x] Implement public Binance spot and OKX swap candle adapters with bounded health checks.
 - [x] Port the owner-scoped watchlist model and serve it through the Management API.
+- [x] Implement the opt-in Market Worker with write-authority gating, bounded provider fallback, closed-bar-only persistence, and transactional multi-candle writes.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

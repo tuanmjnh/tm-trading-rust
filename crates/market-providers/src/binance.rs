@@ -24,9 +24,11 @@ pub struct BinanceProvider {
 
 impl BinanceProvider {
     pub fn new(base_url: impl Into<String>, timeout: Duration) -> Result<Self, ProviderError> {
+        let base_url = base_url.into();
+        crate::validate_provider_url(PROVIDER, &base_url)?;
         Ok(Self {
             http: http_client(PROVIDER, timeout)?,
-            base_url: base_url.into().trim_end_matches('/').to_owned(),
+            base_url: base_url.trim_end_matches('/').to_owned(),
         })
     }
 }
@@ -148,8 +150,9 @@ fn parse_klines(
             open_time,
             close_time,
             event_time: None,
-            // The exchange close time is the only event time Binance gives us.
-            ingest_time: None,
+            // The exchange close time is the only event time Binance gives us; the
+            // caller's observation time records when this worker received the bar.
+            ingest_time: Some(now_ms),
         })?);
     }
     candles.sort_by_key(|candle| candle.open_time());
@@ -218,6 +221,7 @@ mod tests {
         assert_eq!(candle.market(), Some("spot"));
         assert_eq!(candle.close(), 105.25);
         assert_eq!(candle.event_time(), 1_700_000_059_999);
+        assert_eq!(candle.ingest_time(), NOW);
     }
 
     #[test]

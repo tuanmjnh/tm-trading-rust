@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use mongodb::bson::{Bson, Document, doc};
-use mongodb::options::IndexOptions;
-use mongodb::{Collection, Database, IndexModel};
+use mongodb::options::{IndexOptions, WriteConcern};
+use mongodb::{ClientSession, Collection, Database, IndexModel};
 
 use tm_trading_domain::{CANDLE_SCHEMA_VERSION, Candle, NewCandle};
 
@@ -13,6 +13,7 @@ use crate::{CandleRepository, CandleUpsertOutcome, RepositoryError};
 ///
 /// Rows are closed bars keyed by `{symbol}:{timeframe}:{openTime}`, so re-recording the
 /// same close is an upsert rather than a duplicate. Forming bars are never accepted here.
+#[derive(Clone)]
 pub struct MongoCandleRepository {
     collection: Collection<Document>,
 }
@@ -38,13 +39,11 @@ impl MongoCandleRepository {
             .await?;
         Ok(Self { collection })
     }
-}
 
-#[async_trait]
-impl CandleRepository for MongoCandleRepository {
-    async fn upsert_closed(
+    async fn upsert_all(
         &self,
         candles: &[Candle],
+        mut session: Option<&mut ClientSession>,
     ) -> Result<CandleUpsertOutcome, RepositoryError> {
         let mut outcome = CandleUpsertOutcome::default();
         for candle in candles {
@@ -55,20 +54,28 @@ impl CandleRepository for MongoCandleRepository {
                 .timestamp_millis_opt(candle.ingest_time())
                 .single()
                 .ok_or(RepositoryError::CorruptRecord("ingestTime"))?;
-            let result = self
-                .collection
-                .update_one(
-                    doc! { "_id": candle.id() },
-                    doc! {
-                        "$set": set,
-                        "$setOnInsert": {
-                            "_id": candle.id(),
-                            "createdAt": timestamp(created_at),
-                        },
-                    },
-                )
-                .upsert(true)
-                .await?;
+            let update = doc! {
+                "$set": set,
+                "$setOnInsert": {
+                    "_id": candle.id(),
+                    "createdAt": timestamp(created_at),
+                },
+            };
+            let result = match session.as_deref_mut() {
+                Some(session) => {
+                    self.collection
+                        .update_one(doc! { "_id": candle.id() }, update)
+                        .session(session)
+                        .upsert(true)
+                        .await?
+                }
+                None => {
+                    self.collection
+                        .update_one(doc! { "_id": candle.id() }, update)
+                        .upsert(true)
+                        .await?
+                }
+            };
             if result.upserted_id.is_some() {
                 outcome.inserted += 1;
             } else {
@@ -76,6 +83,39 @@ impl CandleRepository for MongoCandleRepository {
             }
         }
         Ok(outcome)
+    }
+}
+
+#[async_trait]
+impl CandleRepository for MongoCandleRepository {
+    async fn upsert_closed(
+        &self,
+        candles: &[Candle],
+    ) -> Result<CandleUpsertOutcome, RepositoryError> {
+        if candles.is_empty() {
+            return Ok(CandleUpsertOutcome::default());
+        }
+        if candles.len() == 1 {
+            return self.upsert_all(candles, None).await;
+        }
+
+        // A multi-symbol cycle must be all-or-nothing. Transactions require MongoDB to run
+        // as a replica set, which is the production topology for durable candle batches.
+        let mut session = self.collection.client().start_session().await?;
+        session
+            .start_transaction()
+            .write_concern(WriteConcern::majority())
+            .await?;
+        match self.upsert_all(candles, Some(&mut session)).await {
+            Ok(outcome) => {
+                commit(&mut session).await?;
+                Ok(outcome)
+            }
+            Err(error) => {
+                let _ = session.abort_transaction().await;
+                Err(error)
+            }
+        }
     }
 
     async fn recent(
@@ -106,6 +146,29 @@ impl CandleRepository for MongoCandleRepository {
             .await?
             .map(from_document)
             .transpose()
+    }
+}
+
+/// Commits with a bounded retry for `UnknownTransactionCommitResult`.
+///
+/// The commit is idempotent, so retrying cannot duplicate the batch. Reporting the batch as
+/// failed while it may have committed would be worse: the caller could retry a writer cycle
+/// that already succeeded.
+async fn commit(session: &mut ClientSession) -> Result<(), RepositoryError> {
+    const MAX_COMMIT_ATTEMPTS: usize = 3;
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match session.commit_transaction().await {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if attempts < MAX_COMMIT_ATTEMPTS
+                    && error.contains_label(mongodb::error::UNKNOWN_TRANSACTION_COMMIT_RESULT) =>
+            {
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
 }
 

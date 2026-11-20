@@ -696,6 +696,11 @@ async fn provider_errors_map_to_stable_statuses() {
             "display_name": "Secret",
             "base_url": "https://user:secret@api.binance.com"
         }),
+        json!({
+            "provider_definition_id": "binance",
+            "display_name": "Untrusted host",
+            "base_url": "https://example.com"
+        }),
         json!({ "provider_definition_id": "binance" }),
     ] {
         let response = app

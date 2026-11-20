@@ -1,0 +1,24 @@
+[package]
+name = "tm-trading-market-worker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+tm-trading-agent-protocol.workspace = true
+tm-trading-domain.workspace = true
+tm-trading-market-providers.workspace = true
+tm-trading-storage.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

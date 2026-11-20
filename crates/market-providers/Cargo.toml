@@ -10,6 +10,7 @@ reqwest = { workspace = true, features = ["query"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror.workspace = true
+url.workspace = true
 
 tm-trading-domain = { workspace = true }
 

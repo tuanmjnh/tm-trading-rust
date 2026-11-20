@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 pub const WORKER_SCHEMA_VERSION: &str = "worker.v2";
+/// Exit code used when a worker cannot start because its typed configuration is invalid.
+pub const WORKER_CONFIGURATION_EXIT_CODE: i32 = 78;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

@@ -14,6 +14,7 @@ members = [
     "apps/management-api",
     "apps/desktop",
     "workers/sample-worker",
+    "workers/market-worker",
 ]
 
 [workspace.package]

@@ -95,10 +95,14 @@ Health failures are reported as sanitized classes, never as raw provider text:
 ## 7. Not implemented yet
 
 - Persistent provider health history and the Control Center Market Providers section.
-- WebSocket trade/ticker/depth streams and the Market Worker that records bars into the `candles` collection.
+- WebSocket trade/ticker/depth streams.
 - Bybit and other adapters.
 - Provider fields from the roadmap that no public market adapter uses yet: priority, fallback
   group, maximum concurrency, rate-limit policy, and secret reference.
+
+The opt-in Market Worker consumes the enabled instances of one provider definition and records
+each attempt's observed health back onto that instance. It never mixes definitions in one
+fallback chain, because Binance and OKX symbols are not interchangeable.
 
 ## 8. Verification
 

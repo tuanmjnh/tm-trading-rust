@@ -117,6 +117,38 @@ async fn recent_is_newest_first_and_bounded() {
 }
 
 #[tokio::test]
+async fn a_failed_batch_rolls_back_every_candle() {
+    let (connection, repository) = harness_or_skip!();
+    let valid = candle(1_700_000_000_000, 105.0);
+    let invalid = Candle::new(NewCandle {
+        symbol: "ETHUSDT".to_owned(),
+        timeframe: "1m".to_owned(),
+        market: Some("spot".to_owned()),
+        source: "binance".to_owned(),
+        open: 100.0,
+        high: 110.0,
+        low: 90.0,
+        close: 105.0,
+        volume: 12.5,
+        open_time: 1_700_000_060_000,
+        close_time: 1_700_000_119_999,
+        event_time: None,
+        ingest_time: Some(i64::MAX),
+    })
+    .expect("build a candle with an invalid ingestion timestamp");
+
+    let result = repository.upsert_closed(&[valid.clone(), invalid]).await;
+    let stored = repository.recent("BTCUSDT", "1m", 10).await.unwrap();
+    connection.database().drop().await.unwrap();
+
+    assert!(matches!(
+        result,
+        Err(RepositoryError::CorruptRecord("ingestTime"))
+    ));
+    assert!(stored.is_empty());
+}
+
+#[tokio::test]
 async fn a_legacy_row_without_a_schema_stamp_is_readable() {
     let (connection, repository) = harness_or_skip!();
     let collection = connection

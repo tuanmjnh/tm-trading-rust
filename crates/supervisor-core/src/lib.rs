@@ -8,6 +8,7 @@ use tm_trading_agent_protocol::{WORKER_SCHEMA_VERSION, WorkerEvidence, WorkerMes
 use tm_trading_domain::{DesiredState, ObservedState, Readiness};
 
 pub const SAMPLE_WORKER_ID: &str = "sample-worker";
+pub const MARKET_WORKER_ID: &str = "market-worker";
 pub const MAX_LOG_ENTRIES: usize = 100;
 pub const MAX_LOG_LINE_CHARS: usize = 1_000;
 const FUTURE_TIMESTAMP_SKEW: Duration = Duration::from_secs(5);
@@ -90,6 +91,26 @@ impl WorkerRegistry {
         Self {
             workers: vec![sample_worker_definition()],
         }
+    }
+
+    /// Registry for the local Agent: the sample worker plus the market worker.
+    ///
+    /// The market worker is registered only when it is enabled, so a default installation
+    /// does not run a service that cannot collect anything.
+    #[must_use]
+    pub fn local_with_version(
+        executable_version: &'static str,
+        market_worker_enabled: bool,
+    ) -> Self {
+        let mut sample = sample_worker_definition();
+        sample.executable_version = executable_version;
+        let mut workers = vec![sample];
+        if market_worker_enabled {
+            let mut market = market_worker_definition();
+            market.executable_version = executable_version;
+            workers.push(market);
+        }
+        Self { workers }
     }
 
     #[must_use]
@@ -484,6 +505,56 @@ pub fn sample_worker_definition() -> WorkerDefinition {
 }
 
 #[must_use]
+pub fn market_worker_definition() -> WorkerDefinition {
+    WorkerDefinition {
+        id: MARKET_WORKER_ID,
+        executable_name: if cfg!(windows) {
+            "tm-trading-market-worker.exe"
+        } else {
+            "tm-trading-market-worker"
+        },
+        executable_version: env!("CARGO_PKG_VERSION"),
+        readiness_rules: vec![
+            ReadinessRule {
+                id: "process-alive",
+                required: true,
+                max_age: None,
+            },
+            ReadinessRule {
+                id: "capability-verified",
+                required: true,
+                max_age: None,
+            },
+            ReadinessRule {
+                id: "recent-heartbeat",
+                required: true,
+                max_age: Some(Duration::from_secs(30)),
+            },
+            ReadinessRule {
+                id: "dependencies-reachable",
+                required: true,
+                max_age: None,
+            },
+            ReadinessRule {
+                id: "sink-writable",
+                required: true,
+                max_age: None,
+            },
+            // A stale collection is a stale market view, so the worker stops being ready
+            // when the last successful cycle ages out.
+            ReadinessRule {
+                id: "recent-success",
+                required: true,
+                max_age: Some(Duration::from_secs(600)),
+            },
+        ],
+        startup_timeout: Duration::from_secs(120),
+        stop_grace: Duration::from_secs(15),
+        max_restart_attempts: 5,
+    }
+}
+
+#[must_use]
 pub fn evaluate_readiness(
     definition: &WorkerDefinition,
     process_alive: Option<bool>,
@@ -540,7 +611,17 @@ fn evaluate_rule(
         },
         "recent-heartbeat" => evaluate_timestamp(last_heartbeat_at, rule.max_age, now),
         "recent-success" => evaluate_timestamp(evidence.last_success_at, rule.max_age, now),
+        "dependencies-reachable" => evaluate_boolean(evidence.dependencies_reachable),
+        "sink-writable" => evaluate_boolean(evidence.sink_writable),
         _ => EvidenceState::Unknown,
+    }
+}
+
+fn evaluate_boolean(value: Option<bool>) -> EvidenceState {
+    match value {
+        Some(true) => EvidenceState::Passed,
+        Some(false) => EvidenceState::Failed,
+        None => EvidenceState::Unknown,
     }
 }
 
@@ -584,6 +665,45 @@ mod tests {
 
     fn state() -> ServiceState {
         ServiceState::new("sample-worker", "sample-worker@local-agent:1")
+    }
+
+    #[test]
+    fn the_market_worker_is_only_registered_when_it_is_enabled() {
+        let disabled = WorkerRegistry::local_with_version("0.1.0", false);
+        assert_eq!(disabled.iter().count(), 1);
+        assert!(disabled.get(SAMPLE_WORKER_ID).is_some());
+        assert!(disabled.get(MARKET_WORKER_ID).is_none());
+
+        let enabled = WorkerRegistry::local_with_version("0.1.0", true);
+        assert_eq!(enabled.iter().count(), 2);
+        let market = enabled.get(MARKET_WORKER_ID).expect("market worker");
+        assert_eq!(market.executable_version, "0.1.0");
+        assert!(
+            market
+                .readiness_rules
+                .iter()
+                .any(|rule| rule.id == "recent-success" && rule.required)
+        );
+    }
+
+    #[test]
+    fn a_market_provider_failure_revokes_readiness_immediately() {
+        let definition = market_worker_definition();
+        let now = Utc.with_ymd_and_hms(2026, 11, 20, 0, 0, 0).unwrap();
+        let evidence = WorkerEvidence {
+            capability_verified: Some(true),
+            dependencies_reachable: Some(false),
+            sink_writable: Some(true),
+            last_success_at: Some(now),
+            ..WorkerEvidence::default()
+        };
+
+        let report = evaluate_readiness(&definition, Some(true), Some(now), &evidence, now);
+
+        assert_eq!(report.readiness, Readiness::NotReady);
+        assert!(report.checks.iter().any(|check| {
+            check.id == "dependencies-reachable" && check.state == EvidenceState::Failed
+        }));
     }
 
     #[test]
