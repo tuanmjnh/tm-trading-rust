@@ -308,6 +308,11 @@ fn ported_primitives_match_the_legacy_engine() {
         &ta::cmf(&bars, 20),
         &fixture_series(&fixture, &["expected", "cmf20"]),
     );
+    assert_series(
+        "psar",
+        &ta::sar(&bars, 0.02, 0.02, 0.2),
+        &fixture_series(&fixture, &["expected", "psar"]),
+    );
 
     let expected = ta::macd(&closes, 12, 26, 9);
     let legacy = &fixture["expected"]["macd12_26_9"];

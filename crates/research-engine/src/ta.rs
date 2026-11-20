@@ -78,6 +78,65 @@ pub fn ema(values: &[Option<f64>], length: usize) -> Vec<Option<f64>> {
     out
 }
 
+/// Parabolic SAR, Wilder's state machine (`ta.sar(start, inc, max)`).
+///
+/// The first value appears on the second bar. Direction is not returned: the
+/// legacy caller derives it from `sar < low` (up) just like the Pine scripts.
+#[must_use]
+pub fn sar(bars: &[Bar], start: f64, inc: f64, max: f64) -> Vec<Option<f64>> {
+    let mut out = vec![None; bars.len()];
+    if bars.len() < 2
+        || !start.is_finite()
+        || !inc.is_finite()
+        || !max.is_finite()
+        || start <= 0.0
+        || inc <= 0.0
+        || max < start
+    {
+        return out;
+    }
+
+    let mut up = bars[1].close >= bars[0].close;
+    let mut extreme = if up { bars[0].high } else { bars[0].low };
+    let mut value = if up { bars[0].low } else { bars[0].high };
+    let mut acceleration = start;
+    out[1] = Some(value);
+
+    for i in 2..bars.len() {
+        let bar = bars[i];
+        let previous = bars[i - 1];
+        let older = bars[i - 2];
+
+        value += acceleration * (extreme - value);
+        value = if up {
+            value.min(previous.low).min(older.low)
+        } else {
+            value.max(previous.high).max(older.high)
+        };
+
+        let flipped = if up {
+            bar.low < value
+        } else {
+            bar.high > value
+        };
+
+        if flipped {
+            up = !up;
+            value = extreme;
+            extreme = if up { bar.high } else { bar.low };
+            acceleration = start;
+        } else if up && bar.high > extreme {
+            extreme = bar.high;
+            acceleration = (acceleration + inc).min(max);
+        } else if !up && bar.low < extreme {
+            extreme = bar.low;
+            acceleration = (acceleration + inc).min(max);
+        }
+        out[i] = Some(value);
+    }
+    out
+}
+
 /// `ta.tr`: the first bar has no previous close, so its range is `high - low`.
 #[must_use]
 pub fn true_range(bars: &[Bar]) -> Vec<f64> {

@@ -76,8 +76,8 @@ Create these only when their owning slice begins:
 
 | Legacy path | Target | Action | Compatibility requirement |
 |---|---|---|---|
-| `engine/ta.mjs` | `crates/research-engine` | Port, primitives done | Deterministic outputs and numeric edge cases; goldens are generated from the legacy module by `crates/research-engine/tests/fixtures/generate_ta_vectors.mjs` |
-| `engine/indicators.mjs` | `crates/research-engine` | Port | Preserve parameter names and warmup behavior |
+| `engine/ta.mjs` | `crates/research-engine` | Port, primitives done | Deterministic outputs and numeric edge cases; goldens are generated from the legacy module by `crates/research-engine/tests/fixtures/generate_vectors.mjs` |
+| `engine/indicators.mjs` | `crates/research-engine` | Port, catalog done | Preserve ids, definition versions, parameter names/bounds, output keys, and warmup behavior |
 | `engine/methods/vsa.mjs` | `crates/research-engine` | Port with golden fixtures | Pine parity remains the acceptance source |
 | `engine/methods/priceAction.mjs`, `trend.mjs`, `orderflow.mjs` | `crates/research-engine` | Port one method at a time | Each method needs approved fixtures and version stamp |
 | `engine/version.mjs` | `crates/domain` + research engine | Port | Preserve engine version, params hash, data hash, universe snapshot, Git revision |

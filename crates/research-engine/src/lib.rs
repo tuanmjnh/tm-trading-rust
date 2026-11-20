@@ -4,6 +4,7 @@
 //! calculation can be replayed from stored bars and compared against the legacy
 //! engine's golden fixtures.
 
+pub mod indicators;
 pub mod ta;
 
 /// One closed bar. Indicators read only these fields, so a caller can map any
