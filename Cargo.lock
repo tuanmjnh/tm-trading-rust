@@ -5736,6 +5736,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tm-trading-research-worker"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tm-trading-domain",
+ "tm-trading-market-providers",
+ "tm-trading-research-engine",
+ "tm-trading-storage",
+ "tokio",
+]
+
+[[package]]
 name = "tm-trading-sample-worker"
 version = "0.1.0"
 dependencies = [

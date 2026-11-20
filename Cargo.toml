@@ -11,6 +11,7 @@ members = [
     "crates/supervisor-core",
     "crates/api-client",
     "crates/research-engine",
+    "workers/research-worker",
     "apps/agent",
     "apps/management-api",
     "apps/desktop",
@@ -51,6 +52,7 @@ tm-trading-contracts = { path = "crates/contracts" }
 tm-trading-domain = { path = "crates/domain" }
 tm-trading-market-providers = { path = "crates/market-providers" }
 tm-trading-observability = { path = "crates/observability" }
+tm-trading-research-engine = { path = "crates/research-engine" }
 tm-trading-storage = { path = "crates/storage" }
 tm-trading-supervisor-core = { path = "crates/supervisor-core" }
 
