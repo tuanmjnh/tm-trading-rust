@@ -268,5 +268,5 @@ For each worker cutover:
 - The sample worker is intentionally not a market worker; its purpose is to prove lifecycle truth.
 - The in-memory repository is the first test implementation, not a production cache.
 - MongoDB operations/outbox schema is introduced before remote Agents, so local and remote modes use the same contract.
-- Market, watchlist, provider, candle, and the first VSA research-event ports are implemented; remaining research methods and later news/AI/notification planes continue incrementally.
+- Market, watchlist, provider, candle, the first VSA research-event port, and the legacy-compatible News source registry are implemented; remaining research methods and later News Worker, AI, and notification planes continue incrementally.
 - Execution, paper trading, bot launch, exchange-demo, and autonomous-agent behavior are excluded.

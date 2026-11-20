@@ -6,8 +6,9 @@ use thiserror::Error;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{
-    Candle, CandleError, Operation, OperationError, OperationId, ProviderInstance,
-    ProviderInstanceError, ResearchEvent, ResearchEventError, Watchlist, WatchlistError,
+    Candle, CandleError, NewNewsSource, NewsSource, NewsSourceError, Operation, OperationError,
+    OperationId, ProviderInstance, ProviderInstanceError, ResearchEvent, ResearchEventError,
+    Watchlist, WatchlistError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,6 +221,40 @@ pub trait WatchlistRepository: Send + Sync {
     async fn delete(&self, owner_id: &str, watchlist_id: &str) -> Result<(), RepositoryError>;
 }
 
+/// Durable registry for policy-backed news sources.
+///
+/// Seeding writes policy fields only on insert, so an operator's edit survives a later
+/// seed. Health and retry fields have their own writes and never overwrite policy.
+#[async_trait]
+pub trait NewsSourceRepository: Send + Sync {
+    async fn upsert_seed(&self, source: NewNewsSource) -> Result<NewsSource, RepositoryError>;
+
+    async fn list(&self) -> Result<Vec<NewsSource>, RepositoryError>;
+
+    async fn get(&self, source_id: &str) -> Result<Option<NewsSource>, RepositoryError>;
+
+    async fn set_enabled(
+        &self,
+        source_id: &str,
+        enabled: bool,
+        updated_at: DateTime<Utc>,
+    ) -> Result<NewsSource, RepositoryError>;
+
+    async fn record_health(
+        &self,
+        source_id: &str,
+        observed_at: DateTime<Utc>,
+        item_count: u32,
+        error: Option<&str>,
+    ) -> Result<NewsSource, RepositoryError>;
+
+    async fn request_retry(
+        &self,
+        source_id: &str,
+        requested_at: DateTime<Utc>,
+    ) -> Result<NewsSource, RepositoryError>;
+}
+
 /// Configured provider instances, separate from the static adapter catalog.
 ///
 /// Every method records configuration or observed health; the repository never calls a
@@ -301,6 +336,10 @@ pub enum RepositoryError {
     WatchlistNotFound,
     #[error("provider instance was not found")]
     ProviderInstanceNotFound,
+    #[error("news source was not found")]
+    NewsSourceNotFound,
+    #[error(transparent)]
+    NewsSource(#[from] NewsSourceError),
     #[error(transparent)]
     ProviderInstance(#[from] ProviderInstanceError),
     #[error(transparent)]

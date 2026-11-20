@@ -292,7 +292,7 @@ pub fn normalize_base_url(value: &str) -> Result<String, ProviderInstanceError> 
     Ok(value.to_owned())
 }
 
-fn is_loopback_host(host: &str) -> bool {
+pub(crate) fn is_loopback_host(host: &str) -> bool {
     // The URL parser keeps the brackets around an IPv6 literal.
     let host = host.trim_start_matches('[').trim_end_matches(']');
     host.eq_ignore_ascii_case("localhost")
@@ -301,7 +301,7 @@ fn is_loopback_host(host: &str) -> bool {
             .is_ok_and(|address| address.is_loopback())
 }
 
-fn is_restricted_host(host: &str) -> bool {
+pub(crate) fn is_restricted_host(host: &str) -> bool {
     let host = host.trim_start_matches('[').trim_end_matches(']');
     let Ok(address) = host.parse::<std::net::IpAddr>() else {
         return false;

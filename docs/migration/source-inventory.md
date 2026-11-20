@@ -97,6 +97,7 @@ These changes belong to the legacy repository and were neither overwritten nor u
 | `engine/version.mjs` | Engine/params/data version stamps | Preserve equivalent provenance fields in Rust outputs |
 | `engine/keys.mjs` | Deterministic idempotency keys | Port key derivation rules for retained read-only domains |
 | `engine/news*.mjs` | News ingestion, clustering, extraction, assessment, outlook | Map to `workers/news-worker` and research crates |
+| `engine/models/newsSource.mjs`, `services/newsStore.mjs` | Policy-backed News source registry and health | Registry domain/storage ported; News Worker and APIs remain |
 | `engine/evidence.mjs`, `engine/evidenceSet.mjs` | Frozen evidence sets and hashes | Port to domain/contracts/storage; preserve append-only semantics |
 | `engine/models/*.mjs` | MongoDB collection schemas and indexes | Keep existing collection/schema compatibility first |
 | `engine/db.mjs` | MongoDB connection and model access | Replace with repository traits and MongoDB driver |

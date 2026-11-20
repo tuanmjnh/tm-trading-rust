@@ -268,7 +268,43 @@ never overwrite an operator's configuration. The Management API exposes the cata
 instances under `/api/v1/providers`, and the probe under
 `POST /api/v1/providers/{id}/test`; see [`docs/providers/provider-catalog.md`](../providers/provider-catalog.md).
 
-### 6.7 `news_items`
+### 6.7 `news_sources`
+
+Source: `engine/models/newsSource.mjs`.
+
+Important compatibility fields:
+
+```text
+_id, sourceId, name, provider, transport, feedUrl, trustTier,
+marketGroups, languages, licenseStatus, rights, enabled,
+pollIntervalSec, retentionDays, retryRequestedAt, health, schemaVersion,
+createdAt, updatedAt
+```
+
+Rules:
+
+- `_id` is the deterministic source identifier string and is equal to `sourceId`.
+- Seeded policy fields use insert-only semantics. Re-running a seed never replaces the
+  operator's policy or enablement setting.
+- `health` records observations separately from policy. `lastFetchAt`, `lastOkAt`, and
+  `lastItemAt` remain distinct; a failed fetch increments `consecutiveErrors`, while a
+  successful fetch clears the error count and a pending manual retry. `lastError` stores
+  only a bounded diagnostic code; raw provider error text is not persisted.
+- Storage and display fail closed for disabled, unverified, revoked, or
+  `allowedStoreMetadata: false` sources.
+- `feedUrl` contains a public endpoint only. Embedded credentials, credential-like query
+  parameters, private or metadata IP literals, and non-loopback plain HTTP are rejected.
+- API tokens and other secrets are never stored in this collection or in its URLs.
+- Legacy operator-edited edge values remain readable: empty groups/languages and invalid
+  intervals use the legacy defaults. An unsafe stored feed URL is removed and disables the
+  source instead of hiding the complete registry. `updatedAt` never moves backwards.
+
+Implementation: `NewsSourceRepository` has an in-memory and a MongoDB adapter over the
+existing `news_sources` collection. The MongoDB adapter preserves the legacy field names
+and string `_id`, uses `$setOnInsert` for seeded policy, keeps `updatedAt` monotonic, and
+writes health and retry fields independently.
+
+### 6.8 `news_items`
 
 Source: `engine/models/newsItem.mjs`.
 
@@ -289,7 +325,7 @@ Rules:
 - A material update first appends `news_item_revisions` and then updates the envelope.
 - `ingestedAt` remains frozen on re-ingest and is the declared TTL base.
 
-### 6.8 `news_market_events`
+### 6.9 `news_market_events`
 
 Source: `engine/models/marketEvent.mjs`.
 
@@ -299,7 +335,7 @@ Source: `engine/models/marketEvent.mjs`.
 - Corroboration and source items retain provenance.
 - `lastSeenAt` is an observation timestamp, not a publication timestamp.
 
-### 6.9 `news_market_outlooks`
+### 6.10 `news_market_outlooks`
 
 Source: `engine/models/marketOutlook.mjs`.
 
@@ -308,7 +344,7 @@ Source: `engine/models/marketOutlook.mjs`.
 - Evidence references point to event/item IDs and retain URLs where available.
 - Expired or invalidated outlooks remain readable but must be rendered stale/invalidated.
 
-### 6.10 `notification_outbox` and `notification_logs`
+### 6.11 `notification_outbox` and `notification_logs`
 
 Source: `engine/models/notificationOutbox.mjs` and `notificationLog.mjs`.
 
@@ -321,7 +357,7 @@ The two collections intentionally have different jobs:
 
 The outbox `_id` is `${notifyId}:${channel}`. The log `_id` is `${notifyId}:${at}`. Rust must preserve this separation so retries do not rewrite the delivery ledger.
 
-### 6.11 `ai_provider_connections` and `ai_provider_models`
+### 6.12 `ai_provider_connections` and `ai_provider_models`
 
 Source: `engine/models/aiProviderConnection.mjs` and `aiProviderModel.mjs`.
 
@@ -572,6 +608,7 @@ CandleRepository
 WatchlistRepository
 ProviderInstanceRepository
 ResearchEventRepository
+NewsSourceRepository
 ```
 
 Planned traits:
