@@ -10,6 +10,7 @@ members = [
     "crates/agent-protocol",
     "crates/supervisor-core",
     "crates/api-client",
+    "crates/research-engine",
     "apps/agent",
     "apps/management-api",
     "apps/desktop",

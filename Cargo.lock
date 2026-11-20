@@ -5699,6 +5699,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tm-trading-research-engine"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "tm-trading-sample-worker"
 version = "0.1.0"
 dependencies = [

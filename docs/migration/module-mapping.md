@@ -36,6 +36,7 @@ Package names describe ownership boundaries. Executable names describe process b
 | `apps/management-api` | Axum HTTP process and API composition | `server/api/v1/`, `server/middleware/`, `server/plugins/` |
 | `apps/agent` | Host Agent executable and process owner | `services/supervisor.mjs` runtime CLI |
 | `workers/sample-worker` | First end-to-end worker used to prove lifecycle behavior | Legacy fixture worker used by `tools/drills/` |
+| `crates/research-engine` | Pure deterministic calculations: technical-analysis primitives, then indicators, methods, and backtest logic | `engine/ta.mjs` |
 | `apps/desktop` | Dioxus Desktop client | `app/` |
 
 ### 2.2 Deferred packages
@@ -50,7 +51,6 @@ Create these only when their owning slice begins:
 | `crates/ai-providers` | `ai/gateway.mjs` and provider protocol adapters |
 | `crates/telegram-client` | `notify/send.mjs`, Telegram transport |
 | `crates/notification-core` | `notify/outbox.mjs`, `notify/router.mjs`, `notify/policy.mjs` |
-| `crates/research-engine` | `engine/ta.mjs`, indicators, methods, backtest/fixture logic |
 | `crates/ui-components` | Dioxus components shared by Desktop and Web |
 | `apps/web` | Future Dioxus Web client |
 
@@ -76,7 +76,7 @@ Create these only when their owning slice begins:
 
 | Legacy path | Target | Action | Compatibility requirement |
 |---|---|---|---|
-| `engine/ta.mjs` | `crates/research-engine` | Port | Deterministic outputs and numeric edge cases |
+| `engine/ta.mjs` | `crates/research-engine` | Port, primitives done | Deterministic outputs and numeric edge cases; goldens are generated from the legacy module by `crates/research-engine/tests/fixtures/generate_ta_vectors.mjs` |
 | `engine/indicators.mjs` | `crates/research-engine` | Port | Preserve parameter names and warmup behavior |
 | `engine/methods/vsa.mjs` | `crates/research-engine` | Port with golden fixtures | Pine parity remains the acceptance source |
 | `engine/methods/priceAction.mjs`, `trend.mjs`, `orderflow.mjs` | `crates/research-engine` | Port one method at a time | Each method needs approved fixtures and version stamp |
