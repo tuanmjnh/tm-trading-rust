@@ -5717,6 +5717,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "tm-trading-news-providers"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "reqwest",
+ "thiserror 2.0.21",
+ "tm-trading-domain",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "tm-trading-news-worker"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tm-trading-agent-protocol",
+ "tm-trading-domain",
+ "tm-trading-news-providers",
+ "tm-trading-storage",
+ "tokio",
+]
+
+[[package]]
 name = "tm-trading-observability"
 version = "0.1.0"
 dependencies = [

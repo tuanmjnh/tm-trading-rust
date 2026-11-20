@@ -318,8 +318,40 @@ With `TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` unset or `0`, the worker exits with c
 - A storage failure ends the cycle and revokes readiness.
 - An Agent shutdown aborts an in-flight scan and reports `drained: false`.
 
-## Market read model
+## Run the News Worker
 
+The News Worker is opt-in and runs under the Agent. It needs at least one enabled, license-verified RSS source in `news_sources`; seeding that registry is operator work, and the worker never invents a source. Sources whose `pollIntervalSec` has not elapsed are skipped until they are due.
+
+```powershell
+cargo build -p tm-trading-agent -p tm-trading-sample-worker -p tm-trading-news-worker
+
+$env:TM_TRADING_NEWS_WORKER_ENABLED = "1"
+$env:TM_TRADING_NEWS_SOURCE_OF_TRUTH = "1"
+$env:TM_TRADING_NEWS_MAX_ITEMS_PER_SOURCE = "40"
+$env:TM_DATABASE_URI = "mongodb://localhost:27018/?tls=true&tlsCAFile=D:/certs/ca.pem"
+$env:TM_DATABASE_NAME = "tm-trading-rust"
+.\target\debug\tm-trading-agent.exe --worker-dir .\target\debug --state-dir .\target\tmp\agent-local
+```
+
+Expected result:
+
+- `GET /api/v1/services` lists `news-worker` alongside the other enabled workers;
+- `news-worker` stays `NOT_READY` until one cycle polls at least one due, allowed source successfully;
+- a successful poll upserts normalized items into `news_items` with canonical and origin URLs, distinct observation times, and a rights snapshot;
+- each poll writes only that source's health fields in `news_sources`.
+
+With `TM_TRADING_NEWS_SOURCE_OF_TRUTH` unset or `0`, the worker exits with code `78` before opening MongoDB. That is the dual-writer guard, not a runtime failure to retry.
+
+### News Worker failure handling
+
+- No due or eligible source is reported as skipped, never as successful.
+- A cycle in which every polled source failed is a failure and revokes readiness.
+- A single source failure records a sanitized code (`timeout`, `http_error`, `rate_limited`, `permission_denied`, `invalid_feed`, `connection_error`, `unavailable`) and does not fail the other sources.
+- A feed larger than 2 MB, a redirect, a private or metadata address, or a non-feed document is rejected before storage.
+- A cycle that exceeds `TM_TRADING_NEWS_CYCLE_TIMEOUT_MS` is cancelled and reported as a timeout.
+- An Agent shutdown aborts an in-flight cycle and reports `drained: false`.
+
+## Market read model
 The Management API serves the closed candles written by the Market Worker:
 
 ```powershell

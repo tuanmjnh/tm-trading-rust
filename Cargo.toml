@@ -7,6 +7,7 @@ members = [
     "crates/observability",
     "crates/storage",
     "crates/market-providers",
+    "crates/news-providers",
     "crates/agent-protocol",
     "crates/supervisor-core",
     "crates/api-client",
@@ -17,6 +18,7 @@ members = [
     "apps/desktop",
     "workers/sample-worker",
     "workers/market-worker",
+    "workers/news-worker",
 ]
 
 [workspace.package]
@@ -52,6 +54,7 @@ tm-trading-config = { path = "crates/config" }
 tm-trading-contracts = { path = "crates/contracts" }
 tm-trading-domain = { path = "crates/domain" }
 tm-trading-market-providers = { path = "crates/market-providers" }
+tm-trading-news-providers = { path = "crates/news-providers" }
 tm-trading-observability = { path = "crates/observability" }
 tm-trading-research-engine = { path = "crates/research-engine" }
 tm-trading-storage = { path = "crates/storage" }

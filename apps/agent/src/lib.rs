@@ -24,8 +24,8 @@ use tm_trading_contracts::{
 };
 use tm_trading_domain::{DesiredState, ObservedState, Readiness};
 use tm_trading_supervisor_core::{
-    MARKET_WORKER_ID, RESEARCH_WORKER_ID, ServiceState, SupervisorError, WorkerDefinition,
-    WorkerProcessIdentity, WorkerRegistry,
+    MARKET_WORKER_ID, NEWS_WORKER_ID, RESEARCH_WORKER_ID, ServiceState, SupervisorError,
+    WorkerDefinition, WorkerProcessIdentity, WorkerRegistry,
 };
 
 pub use api::ManagementApiClient;
@@ -65,6 +65,17 @@ const RESEARCH_WORKER_ENVIRONMENT: &[&str] = &[
     "TM_TRADING_RESEARCH_CYCLE_TIMEOUT_MS",
     "TM_TRADING_RESEARCH_HEARTBEAT_MS",
     "TM_TRADING_RESEARCH_SOURCE_OF_TRUTH",
+];
+/// Environment handed to the news worker only.
+const NEWS_WORKER_ENVIRONMENT: &[&str] = &[
+    "TM_DATABASE_URI",
+    "TM_DATABASE_NAME",
+    "TM_TRADING_NEWS_MAX_ITEMS_PER_SOURCE",
+    "TM_TRADING_NEWS_MAX_SOURCES_PER_CYCLE",
+    "TM_TRADING_NEWS_CYCLE_MS",
+    "TM_TRADING_NEWS_CYCLE_TIMEOUT_MS",
+    "TM_TRADING_NEWS_HEARTBEAT_MS",
+    "TM_TRADING_NEWS_SOURCE_OF_TRUTH",
 ];
 const FORCED_TERMINATION_TIMEOUT: Duration = Duration::from_secs(5);
 const FINAL_EVENT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
@@ -824,6 +835,9 @@ impl Agent {
         }
         if definition.id == RESEARCH_WORKER_ID {
             worker_specific_environment(command.command_mut(), RESEARCH_WORKER_ENVIRONMENT);
+        }
+        if definition.id == NEWS_WORKER_ID {
+            worker_specific_environment(command.command_mut(), NEWS_WORKER_ENVIRONMENT);
         }
         if let Some(crash_after_ms) = self.crash_after_ms {
             command.command_mut().env(

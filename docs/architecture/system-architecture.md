@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover. Phase 7 begins with the legacy-compatible News source registry and the legacy-compatible News item contract, each with memory/MongoDB repositories<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover. Phase 7 has the legacy-compatible News source registry, the legacy-compatible News item contract with memory/MongoDB repositories, the RSS/Atom/RDF provider crate, and the opt-in News Worker<br>
 > Last updated: 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -39,7 +39,9 @@ Implemented:
 - owner-scoped research event reads at `GET /api/v1/research/events` and `GET /api/v1/research/events/{event_id}`, with bounded filters, computed freshness, and the exact `trading.research.read` capability;
 - an opt-in Research Worker that scans only persisted closed candles, runs the deterministic VSA method, upserts owner-scoped research events with full provenance, enforces its own source-of-truth flag, and becomes ready only after a successful non-stale scan;
 - a legacy-compatible News source registry with a fail-closed license/rights gate and memory/MongoDB repositories that preserve `news_sources` field names, string `_id = sourceId`, insert-only seeded policy, independent health updates, and secret-free public feed URLs;
-- a legacy-compatible News item contract with memory/MongoDB repositories that preserve `news_items` field names, the deterministic `news_<sha1(canonicalUrl)>` identifier, canonical/origin URL duality, distinct publication/first-seen/ingestion times, a bounded rights-safe excerpt, material-change fingerprinting, and frozen observation times on re-ingest.
+- a legacy-compatible News item contract with memory/MongoDB repositories that preserve `news_items` field names, the deterministic `news_<sha1(canonicalUrl)>` identifier, canonical/origin URL duality, distinct publication/first-seen/ingestion times, a bounded rights-safe excerpt, material-change fingerprinting, and frozen observation times on re-ingest;
+- a dependency-free RSS 2.0/Atom/RDF adapter that extracts only title, canonical link, publication time, a plain-text bounded excerpt, and category tags, behind a fetch path with one timeout, a 2 MB ceiling, no redirect following, and safe-URL validation;
+- an opt-in News Worker that polls only due, license-allowed sources, upserts normalized items, records each source's observed health, reports a cycle without a successful poll as skipped or failed, and becomes ready only after a real collection.
 
 Not implemented:
 
@@ -49,7 +51,7 @@ Not implemented:
 - durable Agent credential rotation;
 - TM Hub login, TOTP, and refresh flow in the Desktop client;
 - reusable data-backed panels beyond Market Overview, Market Pulse, and Signal Center;
-- RSS/Atom network collection, News Worker writes, News source and item APIs, and the News & Events panel.
+- News source and item APIs, the News & Events panel, and the AI Provider Center.
 
 ## 2. Target runtime and current implementation
 
@@ -86,6 +88,11 @@ tm-trading-research-engine  (pure deterministic calculations; no I/O or clock)
         +-> tm-trading-research-worker -> tm-trading-storage
                 (bounded closed-candle scans, agent-owned)
 
+tm-trading-news-providers -> tm-trading-domain  (read-only public feed parsing)
+        |
+        +-> tm-trading-news-worker -> tm-trading-storage
+                (bounded feed collection, agent-owned)
+
 tm-trading-agent-protocol -> tm-trading-supervisor-core -> tm-trading-agent
         |                                      |
         |                                      +-> local locked checkpoint
@@ -106,6 +113,7 @@ Dependency rules:
 - `apps/agent` is the sole OS process owner for workers, uses a static executable registry, clears inherited child environment before adding an allowlist, and never accepts arbitrary executable paths or arguments. It holds an exclusive state-directory lock, validates the worker's PID, executable path, and executable version during the `worker.v2` handshake, uses a Windows Job Object or Unix process group, and isolates a rejected worker without stopping other workers. On Windows the worker is spawned with `DETACHED_PROCESS` so console control events reach only the Agent, which drains the worker over the explicit control channel. Windows Job Object descendant containment is implemented; Unix forced termination targets the process group, while descendant cleanup after an abrupt Agent loss remains unverified on a Unix runtime.
 - `workers/sample-worker` implements the versioned control protocol, performs its capability self-check before readiness, and reports explicit drain status.
 - `workers/market-worker` implements the same control protocol and runs one bounded collection cycle at a time in a spawned task, so heartbeats and control commands stay responsive. It requires the write-authority flag, selects a bounded set of provider instances from MongoDB, persists only closed bars, records observed provider health, and reports a skipped cycle as skipped rather than successful. On shutdown it aborts an in-flight cycle and reports `drained: false`.
+- `workers/news-worker` implements the same control protocol and runs one bounded collection cycle at a time. It requires its own write-authority flag, polls only sources whose declared interval elapsed and whose license gate passes, fetches each feed with a timeout and a 2 MB ceiling without following redirects, stores only rights-safe normalized fields, records each source's sanitized health, and withholds readiness until a real poll succeeds. A cycle with no due source is skipped, and a cycle where every polled source failed is a failure. Shutdown aborts an active cycle and reports `drained: false`.
 - `workers/research-worker` implements the same control protocol and runs one bounded VSA scan at a time over persisted closed candles. It requires its own write-authority flag, rejects missing or stale required input without publishing partial output, upserts deterministic owner-scoped events with source/input/producer/schema/quality provenance, and withholds readiness until a real scan succeeds. A cycle timeout or input failure revokes readiness; shutdown aborts an active scan and reports `drained: false`.
 - `apps/management-api` is the local Axum Management API. It binds to loopback only, is a command producer and read-model provider, never spawns a process, and never runs a continuous worker loop. User endpoints require a bearer credential that carries exact `trading.*` capabilities; Agent endpoints require the separate per-installation Agent credential and may only act as the Agent named in the request. Operations are durable and idempotent, and are claimed with an expiring lease and fencing token.
 - `apps/agent` additionally opens an outbound command channel to the Management API: it heartbeats its service read model, claims commands addressed to its own Agent identity, executes them against its own worker registry, and reports the real outcome. The Agent never accepts an executable path or command line from the API.
@@ -216,6 +224,13 @@ Current defaults and variables:
 | `TM_TRADING_RESEARCH_CYCLE_TIMEOUT_MS` | `30000` | Hard deadline for one research scan |
 | `TM_TRADING_RESEARCH_HEARTBEAT_MS` | `5000` | Research Worker heartbeat interval |
 | `TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` | off | `1` authorizes research event writes; without it the worker exits with code `78` |
+| `TM_TRADING_NEWS_WORKER_ENABLED` | unset | `1` registers the News Worker with the Agent |
+| `TM_TRADING_NEWS_MAX_ITEMS_PER_SOURCE` | `40` | Items kept per source and collection cycle (maximum `200`) |
+| `TM_TRADING_NEWS_MAX_SOURCES_PER_CYCLE` | `25` | Sources polled per cycle (maximum `100`) |
+| `TM_TRADING_NEWS_CYCLE_MS` | `60000` | Delay between completed collection cycles |
+| `TM_TRADING_NEWS_CYCLE_TIMEOUT_MS` | `60000` | Hard deadline for one collection cycle |
+| `TM_TRADING_NEWS_HEARTBEAT_MS` | `5000` | News Worker heartbeat interval |
+| `TM_TRADING_NEWS_SOURCE_OF_TRUTH` | off | `1` authorizes news item writes; without it the worker exits with code `78` |
 | `TM_TRADING_LOCALE` | `en` | Desktop initial locale (`en` or `vi`) |
 
 TM Hub remains authoritative for human identity, sessions, RBAC, routes, and shared configuration. Until Hub verification is wired, the Management API authenticates two local bearer credentials with an exact-match comparison: a user credential that carries `trading.service.read`, `trading.service.control`, and `trading.operation.read`, and a separate Agent credential that may only act as the Agent named in the request. A missing or invalid credential is `401`; a credential used on an endpoint of the other kind is `403`. The Hub-enforced `trading.*` capability set documented in the TM Hub integration map replaces this local mode without changing the endpoint contracts.
@@ -265,6 +280,8 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Add the research-event detail Slideover with computed freshness, direction, quality reasons, evidence, and full source/producer/schema/input provenance.
 - [x] Add the legacy-compatible News source domain and memory/MongoDB repositories with insert-only policy seeds, independent health, and fail-closed license/rights handling.
 - [x] Add the legacy-compatible News item domain and memory/MongoDB repositories with canonical-URL identity, frozen observation times, and material-change fingerprinting.
+- [x] Add the bounded RSS/Atom/RDF feed adapter with safe-URL validation and secret-free health codes.
+- [x] Implement the opt-in News Worker with interval-gated polls, per-source health, write-authority gating, and success-only readiness.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

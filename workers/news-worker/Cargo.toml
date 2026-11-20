@@ -1,0 +1,23 @@
+[package]
+name = "tm-trading-news-worker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+tm-trading-agent-protocol.workspace = true
+tm-trading-domain.workspace = true
+tm-trading-news-providers.workspace = true
+tm-trading-storage.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

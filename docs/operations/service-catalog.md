@@ -1,6 +1,6 @@
 # Service Catalog
 
-> Status: Phase 2 sample-worker runtime implemented and hardened on 2026-11-18; Phase 5 market-worker runtime implemented on 2026-11-20; Phase 6 research-worker runtime implemented on 2026-11-20<br>
+> Status: Phase 2 sample-worker runtime implemented and hardened on 2026-11-18; Phase 5 market-worker runtime implemented on 2026-11-20; Phase 6 research-worker runtime implemented on 2026-11-20; Phase 7 news-worker runtime implemented on 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## `sample-worker`
@@ -170,4 +170,57 @@ Every symbol is read and validated before any event is written, so one invalid s
 
 - Only the VSA/Wyckoff method is ported; additional deterministic research methods remain incremental work.
 - The owner scope is installation configuration; multi-tenant identity binding to TM Hub is not yet available.
+- Unix runtime shutdown and descendant-containment drills remain unverified.
+
+## `news-worker`
+
+| Field | Value |
+|---|---|
+| Service definition ID | `news-worker` |
+| Executable | `tm-trading-news-worker.exe` on Windows; `tm-trading-news-worker` on other platforms |
+| Process owner | The single Host Agent for the host |
+| Purpose | Polls due, license-allowed RSS/Atom sources, stores rights-safe normalized items in `news_items`, and records per-source health in `news_sources` |
+| IPC schema | `worker.v2` |
+| Control channel | One JSON object per line over the worker stdin/stdout pipes |
+| Shutdown | The Agent sends an explicit `shutdown` command; the worker aborts an in-flight cycle, reports `stopped`, and exits |
+
+The worker is opt-in. It is registered only when `TM_TRADING_NEWS_WORKER_ENABLED=1`; otherwise the Agent does not launch it.
+
+### Configuration
+
+| Variable | Meaning |
+|---|---|
+| `TM_DATABASE_URI` | TLS MongoDB URI; only the domain workers receive it |
+| `TM_DATABASE_NAME` | Database name, default `tm-trading-rust` |
+| `TM_TRADING_NEWS_MAX_ITEMS_PER_SOURCE` | Items kept per source and cycle, default `40`, maximum `200` |
+| `TM_TRADING_NEWS_MAX_SOURCES_PER_CYCLE` | Sources polled per cycle, default `25`, maximum `100` |
+| `TM_TRADING_NEWS_CYCLE_MS` | Delay between completed cycles, default `60000` |
+| `TM_TRADING_NEWS_CYCLE_TIMEOUT_MS` | Hard deadline for one cycle, default `60000` |
+| `TM_TRADING_NEWS_HEARTBEAT_MS` | Heartbeat interval, default `5000` |
+| `TM_TRADING_NEWS_SOURCE_OF_TRUTH` | `1`/`true` allows news writes; defaults off |
+
+`TM_TRADING_NEWS_SOURCE_OF_TRUTH` is deliberately off by default. With it disabled the worker exits with code `78` before opening MongoDB or polling a source, so a cutover installation cannot become a second writer.
+
+### Readiness evidence
+
+| Check | Required | Meaning |
+|---|---:|---|
+| `process-alive` | Yes | The Agent still owns a live child process |
+| `capability-verified` | Yes | At least one due, allowed source was polled successfully |
+| `recent-heartbeat` | Yes | A heartbeat was observed within 30 seconds |
+| `dependencies-reachable` | Yes | MongoDB, the registry, and the item store were reachable |
+| `sink-writable` | Yes | The item store accepted the cycle output |
+| `recent-success` | Yes | A successful collection completed within 30 minutes |
+
+A cycle that polls nothing because no source is due is reported as skipped, not as a success. A cycle where every polled source failed is a failure, and an earlier success does not keep readiness.
+
+### Collection and write path
+
+Sources are considered only when their declared `pollIntervalSec` has elapsed since the last fetch, or when an operator requested a retry. A source must be enabled, have `licenseStatus = ok`, permit metadata storage, and carry an RSS feed URL; anything else is skipped without a request. Each fetch has one timeout, a 2 MB document ceiling, no redirect following, and a safe-URL check before the request, so the worker cannot become an SSRF proxy. Only title, canonical link, publication time, a plain-text 240-character excerpt, and category tags are extracted; full article text is never fetched or stored. Each fetch result updates only that source's health fields, and a failed fetch records a sanitized code instead of raw provider text.
+
+### Current limitations
+
+- RSS/Atom/RDF only; no source-specific API adapters and no news clustering yet.
+- Items are stored with default `level = med` and `dir = flat`; deterministic scoring and event classification remain subsequent work.
+- Items are not yet served by a Management API read model or the Desktop News & Events panel.
 - Unix runtime shutdown and descendant-containment drills remain unverified.
