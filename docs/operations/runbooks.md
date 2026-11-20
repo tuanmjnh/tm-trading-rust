@@ -397,6 +397,30 @@ The Slideover declares `role="dialog"`, `aria-modal`, and a labelled title, focu
 
 If the list request fails, the panel keeps the error banner and its last good rows. If the detail request fails, the Slideover shows a localized message with the sanitized API error instead of inventing event values.
 
+## News read model
+
+The Management API serves the items the News Worker stored:
+
+```powershell
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/news?market_group=crypto&limit=50"
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/news/news_..."
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/news/sources"
+```
+
+- `source_id`, `market_group`, `level`, and `since` are optional filters; `limit` is 1-200 and defaults to 50.
+- Only items whose persisted rights snapshot allows display are returned, from both the list and the detail read; a story that cannot be displayed answers `404` rather than leaking its metadata.
+- `freshness` and `age_seconds` are computed at read time from `ingested_at`; an item ingested more than 3,600 seconds ago is `STALE`. The list also reports `stale_after_seconds`.
+- `url` is the citation link exactly as the publisher exposed it, `published_at` is `null` when the feed carried no usable date, and `first_seen_at` and `ingested_at` are preserved separately.
+- The sources read returns each source's transport, trust tier, configured market groups and languages, poll interval, and sanitized health: state, last fetch/ok/item times, the bounded error code, and the consecutive error count. A raw provider error body is never returned.
+- All three endpoints require the exact `trading.news.read` capability; the Agent credential is rejected with `403`.
+
+The Desktop News & Events panel reads both lists every refresh cycle and shows one row per story with headline, publisher, publication and ingestion times, market group, topics, and freshness, plus a story, fresh, and source count in the panel header. It has independent loading, empty, error, and stale states for the story list and the source registry, so an API failure keeps the last loaded rows behind its own banner.
+
+Selecting a headline opens the news-story detail Slideover, which fetches that story by ID and shows its excerpt, level, direction, and freshness, a link to the original article, and full provenance: news ID, source, language, market group, event type, publication, first-seen and ingestion times, and the article URL. Opening a news story closes an open research-event Slideover and the reverse, so only one overlay is open at a time.
+
 ## Logs and status
 
 - Agent logs use `tracing`; set `TM_LOG_FORMAT=json` for structured JSON output.

@@ -3,15 +3,11 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use tm_trading_config::LogFormat;
-use tm_trading_management_api::{AppState, AuthConfig, router};
+use tm_trading_management_api::{AppState, AuthConfig, Repositories, router};
 use tm_trading_storage::{
-    CandleRepository, InMemoryCandleRepository, InMemoryOperationRepository,
-    InMemoryProviderInstanceRepository, InMemoryResearchEventRepository,
-    InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository, MongoCandleRepository,
-    MongoConnection, MongoOperationRepository, MongoProviderInstanceRepository,
-    MongoResearchEventRepository, MongoServiceSnapshotRepository, MongoWatchlistRepository,
-    OperationRepository, ProviderInstanceRepository, ResearchEventRepository,
-    ServiceSnapshotRepository, WatchlistRepository,
+    MongoCandleRepository, MongoConnection, MongoNewsItemRepository, MongoNewsSourceRepository,
+    MongoOperationRepository, MongoProviderInstanceRepository, MongoResearchEventRepository,
+    MongoServiceSnapshotRepository, MongoWatchlistRepository,
 };
 use tokio::net::TcpListener;
 
@@ -50,16 +46,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| DEFAULT_AGENT_ID.to_owned()),
     };
 
-    let (operations, services, watchlists, providers, candles, research_events) = stores().await?;
-    let state = AppState::with_repositories(
-        auth,
-        operations,
-        services,
-        watchlists,
-        providers,
-        candles,
-        research_events,
-    );
+    let repositories = stores().await?;
+    let state = AppState::with_repositories(auth, repositories);
     let app = router(state);
     let listener = TcpListener::bind(bind).await?;
     tracing::info!(address = %bind, "management api listening");
@@ -73,44 +61,37 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// Local development defaults to the in-memory stores so a developer does not need a
 /// database. Production fails closed instead of losing durable operations on restart.
-async fn stores() -> Result<
-    (
-        Arc<dyn OperationRepository>,
-        Arc<dyn ServiceSnapshotRepository>,
-        Arc<dyn WatchlistRepository>,
-        Arc<dyn ProviderInstanceRepository>,
-        Arc<dyn CandleRepository>,
-        Arc<dyn ResearchEventRepository>,
-    ),
-    Box<dyn std::error::Error>,
-> {
+async fn stores() -> Result<Repositories, Box<dyn std::error::Error>> {
     let store = std::env::var("TM_TRADING_STORE").unwrap_or_else(|_| "memory".to_owned());
     let environment = std::env::var("TM_ENVIRONMENT").unwrap_or_else(|_| "development".to_owned());
     match store.as_str() {
         "memory" if environment == "production" => {
             Err("TM_TRADING_STORE must be 'mongodb' when TM_ENVIRONMENT=production".into())
         }
-        "memory" => Ok((
-            Arc::new(InMemoryOperationRepository::new()),
-            Arc::new(InMemoryServiceSnapshotRepository::new()),
-            Arc::new(InMemoryWatchlistRepository::new()),
-            Arc::new(InMemoryProviderInstanceRepository::new()),
-            Arc::new(InMemoryCandleRepository::new()),
-            Arc::new(InMemoryResearchEventRepository::new()),
-        )),
+        "memory" => Ok(Repositories::in_memory()),
         "mongodb" => {
             let uri = std::env::var("TM_DATABASE_URI")?;
             let database_name =
                 std::env::var("TM_DATABASE_NAME").unwrap_or_else(|_| "tm-trading-rust".to_owned());
             let connection = MongoConnection::connect(&uri, &database_name).await?;
-            Ok((
-                Arc::new(MongoOperationRepository::new(connection.database()).await?),
-                Arc::new(MongoServiceSnapshotRepository::new(connection.database()).await?),
-                Arc::new(MongoWatchlistRepository::new(connection.database()).await?),
-                Arc::new(MongoProviderInstanceRepository::new(connection.database()).await?),
-                Arc::new(MongoCandleRepository::new(connection.database()).await?),
-                Arc::new(MongoResearchEventRepository::new(connection.database()).await?),
-            ))
+            Ok(Repositories {
+                operations: Arc::new(MongoOperationRepository::new(connection.database()).await?),
+                services: Arc::new(
+                    MongoServiceSnapshotRepository::new(connection.database()).await?,
+                ),
+                watchlists: Arc::new(MongoWatchlistRepository::new(connection.database()).await?),
+                providers: Arc::new(
+                    MongoProviderInstanceRepository::new(connection.database()).await?,
+                ),
+                candles: Arc::new(MongoCandleRepository::new(connection.database()).await?),
+                research_events: Arc::new(
+                    MongoResearchEventRepository::new(connection.database()).await?,
+                ),
+                news_sources: Arc::new(
+                    MongoNewsSourceRepository::new(connection.database()).await?,
+                ),
+                news_items: Arc::new(MongoNewsItemRepository::new(connection.database()).await?),
+            })
         }
         other => {
             Err(format!("TM_TRADING_STORE must be 'mongodb' or 'memory', got '{other}'").into())

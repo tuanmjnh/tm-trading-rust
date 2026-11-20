@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_storage::{
-    CandleRepository, InMemoryCandleRepository, InMemoryOperationRepository,
-    InMemoryProviderInstanceRepository, InMemoryResearchEventRepository,
-    InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository, OperationRepository,
+    CandleRepository, InMemoryCandleRepository, InMemoryNewsItemRepository,
+    InMemoryNewsSourceRepository, InMemoryOperationRepository, InMemoryProviderInstanceRepository,
+    InMemoryResearchEventRepository, InMemoryServiceSnapshotRepository,
+    InMemoryWatchlistRepository, NewsItemRepository, NewsSourceRepository, OperationRepository,
     ProviderInstanceRepository, RepositoryError, ResearchEventRepository,
     ServiceSnapshotRepository, WatchlistRepository,
 };
@@ -18,6 +19,35 @@ pub struct AuthConfig {
     pub agent_id: String,
 }
 
+/// Repository set injected into the shared application state.
+pub struct Repositories {
+    pub operations: Arc<dyn OperationRepository>,
+    pub services: Arc<dyn ServiceSnapshotRepository>,
+    pub watchlists: Arc<dyn WatchlistRepository>,
+    pub providers: Arc<dyn ProviderInstanceRepository>,
+    pub candles: Arc<dyn CandleRepository>,
+    pub research_events: Arc<dyn ResearchEventRepository>,
+    pub news_sources: Arc<dyn NewsSourceRepository>,
+    pub news_items: Arc<dyn NewsItemRepository>,
+}
+
+impl Repositories {
+    /// In-memory stores used by the local default and by tests.
+    #[must_use]
+    pub fn in_memory() -> Self {
+        Self {
+            operations: Arc::new(InMemoryOperationRepository::new()),
+            services: Arc::new(InMemoryServiceSnapshotRepository::new()),
+            watchlists: Arc::new(InMemoryWatchlistRepository::new()),
+            providers: Arc::new(InMemoryProviderInstanceRepository::new()),
+            candles: Arc::new(InMemoryCandleRepository::new()),
+            research_events: Arc::new(InMemoryResearchEventRepository::new()),
+            news_sources: Arc::new(InMemoryNewsSourceRepository::new()),
+            news_items: Arc::new(InMemoryNewsItemRepository::new()),
+        }
+    }
+}
+
 /// Shared application state.
 #[derive(Clone)]
 pub struct AppState {
@@ -27,40 +57,28 @@ pub struct AppState {
     pub providers: Arc<dyn ProviderInstanceRepository>,
     pub candles: Arc<dyn CandleRepository>,
     pub research_events: Arc<dyn ResearchEventRepository>,
+    pub news_sources: Arc<dyn NewsSourceRepository>,
+    pub news_items: Arc<dyn NewsItemRepository>,
     pub auth: AuthConfig,
 }
 
 impl AppState {
     #[must_use]
     pub fn new(auth: AuthConfig) -> Self {
-        Self::with_repositories(
-            auth,
-            Arc::new(InMemoryOperationRepository::new()),
-            Arc::new(InMemoryServiceSnapshotRepository::new()),
-            Arc::new(InMemoryWatchlistRepository::new()),
-            Arc::new(InMemoryProviderInstanceRepository::new()),
-            Arc::new(InMemoryCandleRepository::new()),
-            Arc::new(InMemoryResearchEventRepository::new()),
-        )
+        Self::with_repositories(auth, Repositories::in_memory())
     }
 
     #[must_use]
-    pub fn with_repositories(
-        auth: AuthConfig,
-        operations: Arc<dyn OperationRepository>,
-        services: Arc<dyn ServiceSnapshotRepository>,
-        watchlists: Arc<dyn WatchlistRepository>,
-        providers: Arc<dyn ProviderInstanceRepository>,
-        candles: Arc<dyn CandleRepository>,
-        research_events: Arc<dyn ResearchEventRepository>,
-    ) -> Self {
+    pub fn with_repositories(auth: AuthConfig, repositories: Repositories) -> Self {
         Self {
-            operations,
-            services,
-            watchlists,
-            providers,
-            candles,
-            research_events,
+            operations: repositories.operations,
+            services: repositories.services,
+            watchlists: repositories.watchlists,
+            providers: repositories.providers,
+            candles: repositories.candles,
+            research_events: repositories.research_events,
+            news_sources: repositories.news_sources,
+            news_items: repositories.news_items,
             auth,
         }
     }

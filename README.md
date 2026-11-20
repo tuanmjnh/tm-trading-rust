@@ -6,9 +6,9 @@ The authoritative product and architecture specification is [`docs/TM-TRADING-RU
 
 ## Current status
 
-The implemented platform now includes the Axum Management API, typed API client, Dioxus Desktop Control Center, Market Overview/Market Pulse panels and Signal Center with a research-event detail Slideover, independent Host Agent, opt-in Market and Research workers, MongoDB-backed durable operations, provider configuration, owner-scoped watchlists and research-event reads, the deterministic TA/indicator/VSA research engine, the legacy-compatible news source registry and news item store, and the RSS/Atom feed adapter with the opt-in News Worker.
+The implemented platform now includes the Axum Management API, typed API client, Dioxus Desktop Control Center, Market Overview/Market Pulse panels and Signal Center with a research-event detail Slideover, independent Host Agent, opt-in Market and Research workers, MongoDB-backed durable operations, provider configuration, owner-scoped watchlists and research-event reads, the deterministic TA/indicator/VSA research engine, the legacy-compatible news source registry and news item store, the RSS/Atom feed adapter with the opt-in News Worker, the owner-scoped news read API, and the Desktop News & Events panel with its story detail Slideover.
 
-The next milestone is Phase 7: the News & Events API and Desktop panel, deterministic news scoring and clustering, and the AI Provider Center with evidence-bound briefings. The project continues to reuse the existing MongoDB data where practical and does not perform a destructive migration.
+The next milestone is Phase 7 continued: deterministic news scoring and clustering, and the AI Provider Center with evidence-bound briefings. The project continues to reuse the existing MongoDB data where practical and does not perform a destructive migration.
 
 ## Product boundary
 

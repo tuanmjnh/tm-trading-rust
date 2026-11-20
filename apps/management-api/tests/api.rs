@@ -7,7 +7,10 @@ use tower::ServiceExt;
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, Utc};
-use tm_trading_domain::{Candle, NewCandle, NewResearchEvent, ResearchEvent, ResearchQuality};
+use tm_trading_domain::{
+    Candle, NewCandle, NewNewsItem, NewNewsSource, NewResearchEvent, NewsItem, NewsLevel,
+    ResearchEvent, ResearchQuality,
+};
 use tm_trading_management_api::{AppState, AuthConfig, router};
 
 const USER_TOKEN: &str = "user-token";
@@ -1021,6 +1024,198 @@ async fn research_events_are_owner_scoped_bounded_and_carry_provenance() {
 
     let anonymous = app
         .oneshot(request("GET", "/api/v1/research/events", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+}
+
+fn news_item(
+    slug: &str,
+    level: tm_trading_domain::NewsLevel,
+    ingested_at: DateTime<Utc>,
+    display_allowed: bool,
+) -> NewsItem {
+    let now = ingested_at;
+    NewsItem::new(NewNewsItem {
+        source_id: "coindesk".to_owned(),
+        url: format!("https://example.com/{slug}"),
+        origin_url: format!("https://example.com/{slug}?utm_source=rss"),
+        title: format!("Story {slug}"),
+        excerpt: "A rights-safe excerpt.".to_owned(),
+        language: "en".to_owned(),
+        published_at: None,
+        first_seen_at: now,
+        ingested_at,
+        market_group: None,
+        source_market_groups: vec!["crypto".to_owned()],
+        event_type: None,
+        tags: vec!["bitcoin".to_owned()],
+        level,
+        score: 0.5,
+        direction: tm_trading_domain::NewsDirection::Flat,
+        rights: tm_trading_domain::NewsItemRights {
+            allowed_display: display_allowed,
+            allowed_summarize: false,
+        },
+    })
+    .expect("valid news item")
+}
+
+fn news_source() -> NewNewsSource {
+    NewNewsSource {
+        source_id: "coindesk".to_owned(),
+        name: "CoinDesk".to_owned(),
+        provider: Some("CoinDesk".to_owned()),
+        transport: tm_trading_domain::NewsTransport::Rss,
+        feed_url: Some("https://example.com/feed".to_owned()),
+        trust_tier: tm_trading_domain::NewsTrustTier::T2Secondary,
+        market_groups: vec!["crypto".to_owned()],
+        languages: vec!["en".to_owned()],
+        license_status: tm_trading_domain::NewsLicenseStatus::Ok,
+        rights: tm_trading_domain::NewsRights {
+            allowed_store_metadata: true,
+            allowed_display: true,
+            allowed_summarize: false,
+            allowed_training: false,
+        },
+        enabled: true,
+        poll_interval_sec: 600,
+        retention_days: 7,
+        created_at: Utc::now(),
+    }
+}
+
+#[tokio::test]
+async fn news_endpoints_return_display_safe_stories_and_source_health() {
+    let state = state();
+    let app = router(state.clone());
+    let now = Utc::now();
+    let fresh = news_item(
+        "fresh-story",
+        NewsLevel::Med,
+        now - Duration::minutes(5),
+        true,
+    );
+    let stale = news_item(
+        "stale-story",
+        NewsLevel::Low,
+        now - Duration::hours(2),
+        true,
+    );
+    let restricted = news_item("restricted-story", NewsLevel::High, now, false);
+    state
+        .news_items
+        .upsert_seen(&[fresh.clone(), stale.clone(), restricted.clone()])
+        .await
+        .expect("seed news items");
+    state
+        .news_sources
+        .upsert_seed(news_source())
+        .await
+        .expect("seed news source");
+    state
+        .news_sources
+        .record_health("coindesk", now, 0, Some("http_error"))
+        .await
+        .expect("record source health");
+
+    let list = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/news", Some(USER_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(list.status(), StatusCode::OK);
+    let list = json_body(list).await;
+    assert_eq!(list["count"], 2);
+    assert_eq!(list["stale_after_seconds"], 3_600);
+    assert_eq!(list["items"][0]["id"], fresh.item_id());
+    assert_eq!(list["items"][0]["freshness"], "FRESH");
+    assert_eq!(
+        list["items"][0]["url"],
+        "https://example.com/fresh-story?utm_source=rss"
+    );
+    assert_eq!(list["items"][0]["published_at"], serde_json::Value::Null);
+    assert_eq!(list["items"][1]["freshness"], "STALE");
+
+    let filtered = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/news?level=LOW&market_group=crypto",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(filtered.status(), StatusCode::OK);
+    let filtered = json_body(filtered).await;
+    assert_eq!(filtered["count"], 1);
+    assert_eq!(filtered["items"][0]["id"], stale.item_id());
+
+    let detail = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/news/{}", fresh.item_id()),
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(detail.status(), StatusCode::OK);
+    assert_eq!(json_body(detail).await["title"], "Story fresh-story");
+
+    let hidden = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/news/{}", restricted.item_id()),
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(hidden.status(), StatusCode::NOT_FOUND);
+
+    let invalid_limit = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/news?limit=0",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(invalid_limit.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let sources = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/news/sources",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(sources.status(), StatusCode::OK);
+    let sources = json_body(sources).await;
+    assert_eq!(sources["count"], 1);
+    assert_eq!(sources["sources"][0]["id"], "coindesk");
+    assert_eq!(sources["sources"][0]["health_state"], "DOWN");
+    assert_eq!(sources["sources"][0]["last_error"], "http_error");
+    assert_eq!(sources["sources"][0]["transport"], "rss");
+
+    let agent = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/news", Some(AGENT_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    let anonymous = app
+        .oneshot(request("GET", "/api/v1/news", None, None))
         .await
         .expect("response");
     assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);

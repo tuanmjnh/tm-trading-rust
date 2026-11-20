@@ -4,6 +4,10 @@ use crate::error::ApiErrorResponse;
 use crate::market::{
     MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
 };
+use crate::news::{
+    NewsDirectionDto, NewsFreshnessDto, NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto,
+    NewsQueryDto, NewsSourceDto, NewsSourceListDto,
+};
 use crate::operation::{CreateOperationRequest, OperationResponse};
 use crate::provider::{
     CreateProviderInstanceRequest, ProviderDefinitionDto, ProviderHealthStateDto,
@@ -53,7 +57,10 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         market_overview,
         market_pulse,
         list_research_events,
-        get_research_event
+        get_research_event,
+        list_news,
+        get_news_item,
+        list_news_sources
     ),
     components(schemas(
         ApiVersionInfo,
@@ -88,7 +95,16 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         ResearchEventListDto,
         ResearchEventQueryDto,
         ResearchFreshnessDto,
-        ResearchQualityDto
+        ResearchQualityDto,
+        NewsItemDto,
+        NewsListDto,
+        NewsQueryDto,
+        NewsLevelDto,
+        NewsDirectionDto,
+        NewsFreshnessDto,
+        NewsSourceDto,
+        NewsSourceListDto,
+        NewsHealthStateDto
     )),
     tags(
         (name = "System", description = "Version and health endpoints"),
@@ -98,6 +114,7 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         (name = "Providers", description = "Provider catalog and configured instances"),
         (name = "Market", description = "Closed-candle market overview and pulse"),
         (name = "Research", description = "Owner-scoped deterministic research observations"),
+        (name = "News", description = "Rights-safe normalized news items and their source registry"),
         (name = "Agent", description = "Agent-only heartbeat and command endpoints")
     )
 )]
@@ -484,3 +501,52 @@ pub fn list_research_events() {}
     )
 )]
 pub fn get_research_event() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/news",
+    tag = "News",
+    params(
+        ("source_id" = Option<String>, Query, description = "Exact source identifier filter"),
+        ("market_group" = Option<String>, Query, description = "Exact market group filter"),
+        ("level" = Option<String>, Query, description = "Exact editorial level: HIGH, MED, or LOW"),
+        ("since" = Option<String>, Query, description = "Only items ingested at or after this RFC 3339 instant"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of items, 1 to 200, default 50")
+    ),
+    responses(
+        (status = 200, description = "Rights-safe normalized stories, newest ingestion first", body = NewsListDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 422, description = "The requested limit or level is invalid", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_news() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/news/{news_id}",
+    tag = "News",
+    params(("news_id" = String, Path, description = "Deterministic news item identifier")),
+    responses(
+        (status = 200, description = "One rights-safe normalized story", body = NewsItemDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown or non-displayable news item", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn get_news_item() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/news/sources",
+    tag = "News",
+    responses(
+        (status = 200, description = "Configured news sources with their observed health", body = NewsSourceListDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_news_sources() {}

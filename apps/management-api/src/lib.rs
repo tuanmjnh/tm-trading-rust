@@ -1,6 +1,7 @@
 mod auth;
 mod error;
 mod market;
+mod news;
 mod research;
 mod routes;
 mod state;
@@ -12,12 +13,13 @@ use utoipa::OpenApi;
 use tm_trading_contracts::ApiDoc;
 
 pub use auth::{
-    AuthContext, CAPABILITY_MARKET_READ, CAPABILITY_OPERATION_READ, CAPABILITY_PROVIDER_READ,
-    CAPABILITY_PROVIDER_WRITE, CAPABILITY_RESEARCH_READ, CAPABILITY_SERVICE_CONTROL,
-    CAPABILITY_SERVICE_READ, CAPABILITY_WATCHLIST_READ, CAPABILITY_WATCHLIST_WRITE, Principal,
+    AuthContext, CAPABILITY_MARKET_READ, CAPABILITY_NEWS_READ, CAPABILITY_OPERATION_READ,
+    CAPABILITY_PROVIDER_READ, CAPABILITY_PROVIDER_WRITE, CAPABILITY_RESEARCH_READ,
+    CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ, CAPABILITY_WATCHLIST_READ,
+    CAPABILITY_WATCHLIST_WRITE, Principal,
 };
 pub use error::ApiError;
-pub use state::{AppState, AuthConfig};
+pub use state::{AppState, AuthConfig, Repositories};
 
 /// Builds the Management API router for the shared `/api/v1` contract.
 pub fn router(state: AppState) -> Router {
@@ -78,6 +80,9 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/research/events/{event_id}",
             get(research::get_research_event),
         )
+        .route("/api/v1/news", get(news::list_news))
+        .route("/api/v1/news/sources", get(news::list_news_sources))
+        .route("/api/v1/news/{news_id}", get(news::get_news_item))
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(
             "/api/v1/agent/commands/claim",

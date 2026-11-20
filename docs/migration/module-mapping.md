@@ -237,7 +237,9 @@ The target uses one versioned namespace. Existing legacy paths are not aliased i
 | `GET /api/v1/agents` | New Agent read model, derived from registered heartbeats |
 | `GET /api/v1/events/stream` | Legacy operation stream; SSE-first |
 | `GET /api/v1/watchlists` | `server/api/v1/watchlists/index.get.ts` |
-| `GET /api/v1/news` | `server/api/v1/news/index.get.ts` |
+| `GET /api/v1/news` | `server/api/v1/news/index.get.ts`; bounded filters, display-rights gating, read-time freshness |
+| `GET /api/v1/news/{newsId}` | `server/api/v1/news/{id}.get.ts`; provenance preserved, non-displayable story is `404` |
+| `GET /api/v1/news/sources` | News source health read model over `news_sources` |
 | `GET /api/v1/research/events` | Replaces signal/research read models with explicit research-event semantics |
 | `GET /api/v1/dashboard/summary` | New aggregate read model over existing domain collections |
 
@@ -268,5 +270,5 @@ For each worker cutover:
 - The sample worker is intentionally not a market worker; its purpose is to prove lifecycle truth.
 - The in-memory repository is the first test implementation, not a production cache.
 - MongoDB operations/outbox schema is introduced before remote Agents, so local and remote modes use the same contract.
-- Market, watchlist, provider, candle, the first VSA research-event port, and the legacy-compatible News source registry are implemented; remaining research methods and later News Worker, AI, and notification planes continue incrementally.
+- Market, watchlist, provider, candle, the first VSA research-event port, the legacy-compatible News source registry and item store, the News Worker, and the news read API with its Desktop panel are implemented; remaining research methods, news scoring/clustering, AI, and notification planes continue incrementally.
 - Execution, paper trading, bot launch, exchange-demo, and autonomous-agent behavior are excluded.

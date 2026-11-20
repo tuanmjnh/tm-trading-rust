@@ -300,6 +300,147 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/news:
+    get:
+      tags:
+      - News
+      operationId: list_news
+      parameters:
+      - name: source_id
+        in: query
+        description: Exact source identifier filter
+        required: false
+        schema:
+          type: string
+      - name: market_group
+        in: query
+        description: Exact market group filter
+        required: false
+        schema:
+          type: string
+      - name: level
+        in: query
+        description: 'Exact editorial level: HIGH, MED, or LOW'
+        required: false
+        schema:
+          type: string
+      - name: since
+        in: query
+        description: Only items ingested at or after this RFC 3339 instant
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        description: Maximum number of items, 1 to 200, default 50
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+      responses:
+        '200':
+          description: Rights-safe normalized stories, newest ingestion first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewsListDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The requested limit or level is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/news/sources:
+    get:
+      tags:
+      - News
+      operationId: list_news_sources
+      responses:
+        '200':
+          description: Configured news sources with their observed health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewsSourceListDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/news/{news_id}:
+    get:
+      tags:
+      - News
+      operationId: get_news_item
+      parameters:
+      - name: news_id
+        in: path
+        description: Deterministic news item identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: One rights-safe normalized story
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewsItemDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown or non-displayable news item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/operations/{operation_id}:
     get:
       tags:
@@ -1453,6 +1594,251 @@ components:
           - number
           - 'null'
           format: double
+    NewsDirectionDto:
+      type: string
+      description: Direction the story is read as having for the market.
+      enum:
+      - POS
+      - NEG
+      - FLAT
+    NewsFreshnessDto:
+      type: string
+      description: |-
+        Whether a story is recent enough for a live desk.
+
+        Freshness is computed when the story is read, because it depends on the
+        current time rather than on the moment the story was written.
+      enum:
+      - FRESH
+      - STALE
+    NewsHealthStateDto:
+      type: string
+      description: Observed health of one news source.
+      enum:
+      - OK
+      - DEGRADED
+      - DOWN
+      - UNKNOWN
+    NewsItemDto:
+      type: object
+      description: One rights-safe normalized story.
+      required:
+      - id
+      - source_id
+      - url
+      - title
+      - excerpt
+      - language
+      - first_seen_at
+      - ingested_at
+      - market_group
+      - tags
+      - level
+      - direction
+      - score
+      - freshness
+      - age_seconds
+      properties:
+        age_seconds:
+          type: integer
+          format: int64
+        direction:
+          $ref: '#/components/schemas/NewsDirectionDto'
+        event_type:
+          type:
+          - string
+          - 'null'
+        excerpt:
+          type: string
+        first_seen_at:
+          type: string
+          format: date-time
+        freshness:
+          $ref: '#/components/schemas/NewsFreshnessDto'
+        id:
+          type: string
+        ingested_at:
+          type: string
+          format: date-time
+        language:
+          type: string
+        level:
+          $ref: '#/components/schemas/NewsLevelDto'
+        market_group:
+          type: string
+        published_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: Provider publication time; absent when the feed carries no usable date.
+        score:
+          type: number
+          format: double
+        source_id:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        title:
+          type: string
+        url:
+          type: string
+          description: Citation link exactly as the publisher exposed it.
+    NewsLevelDto:
+      type: string
+      description: Editorial significance of one story.
+      enum:
+      - HIGH
+      - MED
+      - LOW
+    NewsListDto:
+      type: object
+      description: A bounded list of normalized stories.
+      required:
+      - generated_at
+      - count
+      - stale_after_seconds
+      - items
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NewsItemDto'
+        stale_after_seconds:
+          type: integer
+          format: int64
+          description: Age after which a story is reported as stale.
+    NewsQueryDto:
+      type: object
+      description: Optional filters for a news list request.
+      properties:
+        level:
+          oneOf:
+          - $ref: '#/components/schemas/NewsLevelDto'
+          - type: 'null'
+        limit:
+          type:
+          - integer
+          - 'null'
+          description: Maximum number of items to return.
+          minimum: 0
+        market_group:
+          type:
+          - string
+          - 'null'
+        since:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: Only items ingested at or after this instant.
+        source_id:
+          type:
+          - string
+          - 'null'
+    NewsSourceDto:
+      type: object
+      description: One configured news source and the health it last reported.
+      required:
+      - id
+      - name
+      - transport
+      - trust_tier
+      - enabled
+      - market_groups
+      - languages
+      - poll_interval_sec
+      - retention_days
+      - health_state
+      - consecutive_errors
+      properties:
+        consecutive_errors:
+          type: integer
+          format: int32
+          minimum: 0
+        enabled:
+          type: boolean
+        feed_url:
+          type:
+          - string
+          - 'null'
+          description: Public feed endpoint; `null` when the source has no safe feed URL.
+        health_state:
+          $ref: '#/components/schemas/NewsHealthStateDto'
+        id:
+          type: string
+        languages:
+          type: array
+          items:
+            type: string
+        last_error:
+          type:
+          - string
+          - 'null'
+          description: Bounded diagnostic code; raw provider text is never returned.
+        last_fetch_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_item_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_ok_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        market_groups:
+          type: array
+          items:
+            type: string
+        name:
+          type: string
+        poll_interval_sec:
+          type: integer
+          format: int32
+          minimum: 0
+        provider:
+          type:
+          - string
+          - 'null'
+        retention_days:
+          type: integer
+          format: int32
+          minimum: 0
+        transport:
+          type: string
+        trust_tier:
+          type: string
+    NewsSourceListDto:
+      type: object
+      description: The configured news source registry.
+      required:
+      - generated_at
+      - count
+      - sources
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/NewsSourceDto'
     ObservedStateDto:
       type: string
       description: Canonical observed state of a service instance.
@@ -1956,5 +2342,7 @@ tags:
   description: Closed-candle market overview and pulse
 - name: Research
   description: Owner-scoped deterministic research observations
+- name: News
+  description: Rights-safe normalized news items and their source registry
 - name: Agent
   description: Agent-only heartbeat and command endpoints

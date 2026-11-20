@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod i18n;
+mod news;
 mod signal_center;
 mod slideover;
 
@@ -14,11 +15,12 @@ use futures_util::StreamExt;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
     MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
-    OperationActionDto, OperationResponse, OperationStatusDto, ResearchEventQueryDto,
+    NewsQueryDto, OperationActionDto, OperationResponse, OperationStatusDto, ResearchEventQueryDto,
     ServiceSnapshot, WatchlistDto,
 };
 
 use i18n::{Locale, UiStrings};
+use news::{NewsItemSlideover, NewsPanel, NewsPanelState};
 use signal_center::{ResearchEventSlideover, ResearchPanelState, SignalCenterPanel};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
@@ -77,6 +79,10 @@ enum UiAction {
         event_id: String,
     },
     CloseResearchEvent,
+    OpenNewsItem {
+        news_id: String,
+    },
+    CloseNewsItem,
 }
 
 #[derive(Clone)]
@@ -131,6 +137,7 @@ fn App() -> Element {
     let market_pulse = use_signal(|| Option::<MarketPulseDto>::None);
     let market_error = use_signal(|| Option::<String>::None);
     let research = use_signal(ResearchPanelState::default);
+    let news = use_signal(NewsPanelState::default);
 
     let client_task = client.clone();
     let actions = use_coroutine(move |mut actions: UnboundedReceiver<UiAction>| {
@@ -143,6 +150,7 @@ fn App() -> Element {
         let (mut market_overview, mut market_pulse, mut market_error) =
             (market_overview, market_pulse, market_error);
         let mut research = research;
+        let mut news = news;
         async move {
             loop {
                 tokio::select! {
@@ -194,10 +202,18 @@ fn App() -> Element {
                                 }
                             }
                             Some(UiAction::OpenResearchEvent { event_id }) => {
+                                news.write().close();
                                 research.write().open(event_id);
                             }
                             Some(UiAction::CloseResearchEvent) => {
                                 research.write().close();
+                            }
+                            Some(UiAction::OpenNewsItem { news_id }) => {
+                                research.write().close();
+                                news.write().open(news_id);
+                            }
+                            Some(UiAction::CloseNewsItem) => {
+                                news.write().close();
                             }
                             None => break,
                         }
@@ -249,6 +265,26 @@ fn App() -> Element {
                     }
                 }
 
+                let news_query = NewsQueryDto {
+                    limit: Some(50),
+                    ..NewsQueryDto::default()
+                };
+                match client.list_news(&news_query).await {
+                    Ok(list) => news.write().list_loaded(list),
+                    Err(error) => news.write().list_failed(error.to_string()),
+                }
+                match client.list_news_sources().await {
+                    Ok(list) => news.write().sources_loaded(list),
+                    Err(error) => news.write().sources_failed(error.to_string()),
+                }
+                let selected_news_id = news.read().selected_id.clone();
+                if let Some(news_id) = selected_news_id {
+                    match client.get_news_item(&news_id).await {
+                        Ok(item) => news.write().detail_loaded(item),
+                        Err(error) => news.write().detail_failed(&news_id, error.to_string()),
+                    }
+                }
+
                 if let Some(operation_id) = pending_operation() {
                     match client.get_operation(&operation_id).await {
                         Ok(current) => {
@@ -285,6 +321,9 @@ fn App() -> Element {
     let research_state = research();
     let research_open_sender = actions;
     let research_close_sender = actions;
+    let news_state = news();
+    let news_open_sender = actions;
+    let news_close_sender = actions;
     let status_class = current_operation
         .as_ref()
         .map(|current| operation_status_class(current.status))
@@ -570,6 +609,13 @@ fn App() -> Element {
                         research_open_sender.send(UiAction::OpenResearchEvent { event_id });
                     },
                 }
+                NewsPanel {
+                    state: news_state.clone(),
+                    strings: strings(),
+                    on_open: move |news_id| {
+                        news_open_sender.send(UiAction::OpenNewsItem { news_id });
+                    },
+                }
             }
             if research_state.selected_id.is_some() {
                 ResearchEventSlideover {
@@ -577,6 +623,15 @@ fn App() -> Element {
                     strings: strings(),
                     on_close: move |_| {
                         research_close_sender.send(UiAction::CloseResearchEvent);
+                    },
+                }
+            }
+            if news_state.selected_id.is_some() {
+                NewsItemSlideover {
+                    state: news_state,
+                    strings: strings(),
+                    on_close: move |_| {
+                        news_close_sender.send(UiAction::CloseNewsItem);
                     },
                 }
             }

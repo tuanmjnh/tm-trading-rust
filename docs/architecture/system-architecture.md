@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover. Phase 7 has the legacy-compatible News source registry, the legacy-compatible News item contract with memory/MongoDB repositories, the RSS/Atom/RDF provider crate, and the opt-in News Worker<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover. Phase 7 has the legacy-compatible News source registry, the legacy-compatible News item contract with memory/MongoDB repositories, the RSS/Atom/RDF provider crate, the opt-in News Worker, the owner-scoped news read API, and the Desktop News & Events panel with its story detail Slideover.<br>
 > Last updated: 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -27,7 +27,7 @@ Implemented:
 - a durable `service_instances` read model replaced per Agent heartbeat, so the Desktop keeps showing the last reported state across an API restart;
 - an Agent command channel that heartbeats per-Agent service snapshots and executes claimed operations;
 - a typed `api-client` crate that depends only on the versioned public contracts;
-- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, an owner-scoped watchlist editor, Market Overview, Market Pulse, and Signal Center panels, a research-event detail Slideover with evidence and provenance, and EN/VI localization;
+- a Dioxus Desktop Control Center with live service state, Start/Stop/Restart operations with in-flight status, connection state, an owner-scoped watchlist editor, Market Overview, Market Pulse, Signal Center, and News & Events panels, research-event and news-story detail Slideovers with their provenance, and EN/VI localization;
 - a provider catalog and provider instance configuration with bounded, read-only health probes;
 - an opt-in Market Worker that collects closed public bars from one provider definition, records the provider health it observed, and writes each multi-candle batch in one majority-write-concern transaction;
 - a dual-writer guard: the Market Worker refuses to start unless `TM_TRADING_MARKET_SOURCE_OF_TRUTH` is explicitly enabled, exiting with code `78` before any provider or candle access;
@@ -41,7 +41,8 @@ Implemented:
 - a legacy-compatible News source registry with a fail-closed license/rights gate and memory/MongoDB repositories that preserve `news_sources` field names, string `_id = sourceId`, insert-only seeded policy, independent health updates, and secret-free public feed URLs;
 - a legacy-compatible News item contract with memory/MongoDB repositories that preserve `news_items` field names, the deterministic `news_<sha1(canonicalUrl)>` identifier, canonical/origin URL duality, distinct publication/first-seen/ingestion times, a bounded rights-safe excerpt, material-change fingerprinting, and frozen observation times on re-ingest;
 - a dependency-free RSS 2.0/Atom/RDF adapter that extracts only title, canonical link, publication time, a plain-text bounded excerpt, and category tags, behind a fetch path with one timeout, a 2 MB ceiling, no redirect following, and safe-URL validation;
-- an opt-in News Worker that polls only due, license-allowed sources, upserts normalized items, records each source's observed health, reports a cycle without a successful poll as skipped or failed, and becomes ready only after a real collection.
+- an opt-in News Worker that polls only due, license-allowed sources, upserts normalized items, records each source's observed health, reports a cycle without a successful poll as skipped or failed, and becomes ready only after a real collection;
+- owner-scoped news reads at `GET /api/v1/news`, `GET /api/v1/news/{news_id}`, and `GET /api/v1/news/sources`, with bounded filters, read-time freshness, display-rights gating, and the exact `trading.news.read` capability.
 
 Not implemented:
 
@@ -50,8 +51,8 @@ Not implemented:
 - TM Hub token verification and permission mapping; local bearer credentials use an explicit local capability set;
 - durable Agent credential rotation;
 - TM Hub login, TOTP, and refresh flow in the Desktop client;
-- reusable data-backed panels beyond Market Overview, Market Pulse, and Signal Center;
-- News source and item APIs, the News & Events panel, and the AI Provider Center.
+- reusable data-backed panels beyond Market Overview, Market Pulse, Signal Center, and News & Events;
+- deterministic news scoring and clustering, and the AI Provider Center.
 
 ## 2. Target runtime and current implementation
 
@@ -117,7 +118,7 @@ Dependency rules:
 - `workers/research-worker` implements the same control protocol and runs one bounded VSA scan at a time over persisted closed candles. It requires its own write-authority flag, rejects missing or stale required input without publishing partial output, upserts deterministic owner-scoped events with source/input/producer/schema/quality provenance, and withholds readiness until a real scan succeeds. A cycle timeout or input failure revokes readiness; shutdown aborts an active scan and reports `drained: false`.
 - `apps/management-api` is the local Axum Management API. It binds to loopback only, is a command producer and read-model provider, never spawns a process, and never runs a continuous worker loop. User endpoints require a bearer credential that carries exact `trading.*` capabilities; Agent endpoints require the separate per-installation Agent credential and may only act as the Agent named in the request. Operations are durable and idempotent, and are claimed with an expiring lease and fencing token.
 - `apps/agent` additionally opens an outbound command channel to the Management API: it heartbeats its service read model, claims commands addressed to its own Agent identity, executes them against its own worker registry, and reports the real outcome. The Agent never accepts an executable path or command line from the API.
-- `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, operation creation/polling, watchlists, provider instances, market read models, and research events.
+- `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, operation creation/polling, watchlists, provider instances, market read models, research events, and news items with their source registry.
 - `apps/desktop` is a thin Dioxus view over `api-client`. It connects only to the Management API, never to MongoDB or a worker, and holds no credentials beyond the user bearer token. Every user-facing string comes from `apps/desktop/src/i18n.rs`.
 - Executable processes remain thin composition roots around these crates.
 
@@ -133,7 +134,7 @@ The Desktop app stores its WebView2 profile under `<exe_dir>/data/desktop`, over
 - API errors use stable typed codes and include a correlation ID.
 - The generated contract snapshot is [`docs/api/openapi.yaml`](../api/openapi.yaml).
 
-The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, the watchlist endpoints, the provider catalog and instance endpoints, the market overview and pulse read models, the owner-scoped research event reads, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
+The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, the watchlist endpoints, the provider catalog and instance endpoints, the market overview and pulse read models, the owner-scoped research event reads, the news item and news source reads, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
 
 ## 4. Service and operation model
 
@@ -198,9 +199,9 @@ Current defaults and variables:
 | `TM_HUB_URL` | `http://127.0.0.1:4000` | TM Hub base URL |
 | `TM_HUB_APP_ID` | unset | Dedicated Rust Hub application ID |
 | `TM_LOG_FORMAT` | `compact` | `compact` or `json` tracing output |
-| `TM_TRADING_STORE` | `memory` | `memory` or `mongodb` for operations, service snapshots, watchlists, providers, candles, and research events; production requires `mongodb` |
+| `TM_TRADING_STORE` | `memory` | `memory` or `mongodb` for operations, service snapshots, watchlists, providers, candles, research events, news sources, and news items; production requires `mongodb` |
 | `TM_TRADING_API_BIND` | `127.0.0.1:8787` | Management API bind; non-loopback is rejected in local mode |
-| `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read`, `trading.watchlist.read`, `trading.watchlist.write`, `trading.provider.read`, `trading.provider.write`, `trading.market.read`, and `trading.research.read` |
+| `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read`, `trading.watchlist.read`, `trading.watchlist.write`, `trading.provider.read`, `trading.provider.write`, `trading.market.read`, `trading.research.read`, and `trading.news.read` |
 | `TM_TRADING_AGENT_TOKEN` | required | Per-installation Agent-only bearer token; read from the environment, never the command line |
 | `TM_TRADING_LOCAL_API_SUBJECT` | `local-operator` | Subject recorded on locally authenticated operations |
 | `TM_TRADING_AGENT_ID` | `local-agent` | Agent identity the API expects on Agent endpoints |
@@ -282,6 +283,8 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Add the legacy-compatible News item domain and memory/MongoDB repositories with canonical-URL identity, frozen observation times, and material-change fingerprinting.
 - [x] Add the bounded RSS/Atom/RDF feed adapter with safe-URL validation and secret-free health codes.
 - [x] Implement the opt-in News Worker with interval-gated polls, per-source health, write-authority gating, and success-only readiness.
+- [x] Serve owner-scoped news reads at `GET /api/v1/news`, `GET /api/v1/news/{news_id}`, and `GET /api/v1/news/sources` behind `trading.news.read`.
+- [x] Build the Desktop News & Events panel and its story detail Slideover with independent loading, empty, error, and stale states and EN/VI localization.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

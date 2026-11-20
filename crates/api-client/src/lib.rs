@@ -4,10 +4,10 @@ use reqwest::Client;
 use thiserror::Error;
 use tm_trading_contracts::{
     CreateOperationRequest, CreateProviderInstanceRequest, CreateWatchlistRequest, HealthResponse,
-    MarketOverviewDto, MarketPulseDto, OperationActionDto, OperationResponse,
-    ProviderDefinitionDto, ProviderInstanceDto, ReplaceWatchlistSymbolsRequest, ResearchEventDto,
-    ResearchEventListDto, ResearchEventQueryDto, ServiceSnapshot, UpdateProviderInstanceRequest,
-    WatchlistDto,
+    MarketOverviewDto, MarketPulseDto, NewsItemDto, NewsListDto, NewsQueryDto, NewsSourceListDto,
+    OperationActionDto, OperationResponse, ProviderDefinitionDto, ProviderInstanceDto,
+    ReplaceWatchlistSymbolsRequest, ResearchEventDto, ResearchEventListDto, ResearchEventQueryDto,
+    ServiceSnapshot, UpdateProviderInstanceRequest, WatchlistDto,
 };
 
 /// Typed client for the versioned Management API contract.
@@ -386,6 +386,52 @@ impl ManagementApiClient {
                 message: error.to_string(),
             })?;
         Self::decode(response, &path).await
+    }
+
+    pub async fn list_news(&self, query: &NewsQueryDto) -> Result<NewsListDto, ApiClientError> {
+        let path = "/api/v1/news";
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .query(query)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn get_news_item(&self, news_id: &str) -> Result<NewsItemDto, ApiClientError> {
+        let path = format!("/api/v1/news/{news_id}");
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, &path).await
+    }
+
+    pub async fn list_news_sources(&self) -> Result<NewsSourceListDto, ApiClientError> {
+        let path = "/api/v1/news/sources";
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
     }
 
     async fn get_market<TResponse>(
