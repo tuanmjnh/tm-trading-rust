@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover. Phase 7 begins with the legacy-compatible News source registry and its memory/MongoDB repositories<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover. Phase 7 begins with the legacy-compatible News source registry and the legacy-compatible News item contract, each with memory/MongoDB repositories<br>
 > Last updated: 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -38,7 +38,8 @@ Implemented:
 - a `ResearchEvent` domain contract and memory/MongoDB repositories that preserve owner scope, method and producer versions, input snapshot identity, observation/detection/ingestion times, quality state and reasons, evidence, and context;
 - owner-scoped research event reads at `GET /api/v1/research/events` and `GET /api/v1/research/events/{event_id}`, with bounded filters, computed freshness, and the exact `trading.research.read` capability;
 - an opt-in Research Worker that scans only persisted closed candles, runs the deterministic VSA method, upserts owner-scoped research events with full provenance, enforces its own source-of-truth flag, and becomes ready only after a successful non-stale scan;
-- a legacy-compatible News source registry with a fail-closed license/rights gate and memory/MongoDB repositories that preserve `news_sources` field names, string `_id = sourceId`, insert-only seeded policy, independent health updates, and secret-free public feed URLs.
+- a legacy-compatible News source registry with a fail-closed license/rights gate and memory/MongoDB repositories that preserve `news_sources` field names, string `_id = sourceId`, insert-only seeded policy, independent health updates, and secret-free public feed URLs;
+- a legacy-compatible News item contract with memory/MongoDB repositories that preserve `news_items` field names, the deterministic `news_<sha1(canonicalUrl)>` identifier, canonical/origin URL duality, distinct publication/first-seen/ingestion times, a bounded rights-safe excerpt, material-change fingerprinting, and frozen observation times on re-ingest.
 
 Not implemented:
 
@@ -48,7 +49,7 @@ Not implemented:
 - durable Agent credential rotation;
 - TM Hub login, TOTP, and refresh flow in the Desktop client;
 - reusable data-backed panels beyond Market Overview, Market Pulse, and Signal Center;
-- RSS/Atom network collection, News Worker writes, News source APIs, and the News & Events panel.
+- RSS/Atom network collection, News Worker writes, News source and item APIs, and the News & Events panel.
 
 ## 2. Target runtime and current implementation
 
@@ -170,6 +171,8 @@ Verified live: after the Agent process is killed, and again after the Management
 
 `MongoNewsSourceRepository` implements `NewsSourceRepository` against the legacy `news_sources` collection from section 6.7, behind `InMemoryNewsSourceRepository` for the local default. `_id` remains the deterministic source identifier string and equals `sourceId`. Seeded policy uses `$setOnInsert`, so an operator's edit survives a later seed; `updatedAt` remains monotonic, and health and manual-retry writes touch only their own fields. Feed URLs reject embedded credentials, credential-like query parameters, private or metadata IP literals, and non-loopback plain HTTP. Legacy edge values are normalized to safe defaults, while an unsafe stored feed URL disables that source instead of hiding the registry. Health errors are reduced to bounded diagnostic codes. The collection contains no secret field.
 
+`MongoNewsItemRepository` implements `NewsItemRepository` against the legacy `news_items` collection from section 6.8, behind `InMemoryNewsItemRepository` for the local default. `_id` remains the deterministic `news_<sha1(canonicalUrl)>` string, so replaying a feed hits the same row instead of duplicating a story. Only the title and a 240-character excerpt are stored; the full article text never enters the record. `url` is the canonical identity and `originUrl` the untouched citation link, while `publishedAt`, `firstSeenAt`, and `ingestedAt` stay distinct and a missing publication time is never replaced by the ingestion time. A re-observation freezes `firstSeenAt` and `ingestedAt`; the envelope changes only when the material content fingerprint differs, and then `updatedAt` advances without moving backwards. Legacy rows with missing optional fields load with the legacy defaults, and an unknown schema stamp is rejected as corrupt. The two query indexes from the legacy model are created at startup; the retention TTL index stays owned by the legacy collection so this service never deletes rows.
+
 ## 6. Configuration and security
 
 Configuration is read from process environment variables with local development defaults. Production mode fails closed unless an explicit database URI, HTTPS TM Hub URL, and Hub application ID are supplied. Database URIs are redacted from debug output.
@@ -261,6 +264,7 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Build the Desktop Signal Center from the owner-scoped research event API, with independent loading, empty, error, and stale states.
 - [x] Add the research-event detail Slideover with computed freshness, direction, quality reasons, evidence, and full source/producer/schema/input provenance.
 - [x] Add the legacy-compatible News source domain and memory/MongoDB repositories with insert-only policy seeds, independent health, and fail-closed license/rights handling.
+- [x] Add the legacy-compatible News item domain and memory/MongoDB repositories with canonical-URL identity, frozen observation times, and material-change fingerprinting.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

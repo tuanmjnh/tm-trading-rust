@@ -118,6 +118,7 @@ impl From<RepositoryError> for ApiError {
                 Self::NotFound("news source was not found".to_owned())
             }
             RepositoryError::NewsSource(error) => Self::UnprocessableEntity(error.to_string()),
+            RepositoryError::NewsItem(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())
             }

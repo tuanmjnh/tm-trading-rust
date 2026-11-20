@@ -6,9 +6,9 @@ use thiserror::Error;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{
-    Candle, CandleError, NewNewsSource, NewsSource, NewsSourceError, Operation, OperationError,
-    OperationId, ProviderInstance, ProviderInstanceError, ResearchEvent, ResearchEventError,
-    Watchlist, WatchlistError,
+    Candle, CandleError, NewNewsSource, NewsItem, NewsItemError, NewsLevel, NewsSource,
+    NewsSourceError, Operation, OperationError, OperationId, ProviderInstance,
+    ProviderInstanceError, ResearchEvent, ResearchEventError, Watchlist, WatchlistError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,6 +255,79 @@ pub trait NewsSourceRepository: Send + Sync {
     ) -> Result<NewsSource, RepositoryError>;
 }
 
+/// How many of a batch were inserted, materially updated, or unchanged.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NewsItemUpsertOutcome {
+    pub inserted: usize,
+    pub updated: usize,
+    pub unchanged: usize,
+}
+
+/// Filter of a news item read.
+///
+/// Every field is optional except the bound; an empty filter returns the newest
+/// items. Publication time is not used for ordering because it may be absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewsItemQuery {
+    pub source_id: Option<String>,
+    pub market_group: Option<String>,
+    pub level: Option<NewsLevel>,
+    /// Only items ingested at or after this instant.
+    pub since: Option<DateTime<Utc>>,
+    /// Maximum number of items to return.
+    pub limit: usize,
+}
+
+/// Default number of news items a read returns.
+pub const DEFAULT_NEWS_ITEM_LIMIT: usize = 50;
+
+impl Default for NewsItemQuery {
+    fn default() -> Self {
+        Self {
+            source_id: None,
+            market_group: None,
+            level: None,
+            since: None,
+            limit: DEFAULT_NEWS_ITEM_LIMIT,
+        }
+    }
+}
+
+impl NewsItemQuery {
+    /// Whether one item satisfies the filter.
+    #[must_use]
+    pub fn matches(&self, item: &NewsItem) -> bool {
+        self.source_id
+            .as_ref()
+            .is_none_or(|source| source == item.source_id())
+            && self
+                .market_group
+                .as_ref()
+                .is_none_or(|group| group == item.market_group())
+            && self.level.is_none_or(|level| level == item.level())
+            && self.since.is_none_or(|since| item.ingested_at() >= since)
+    }
+}
+
+/// Durable store for normalized, rights-safe news items.
+///
+/// The identifier is derived from the canonical article URL, so replaying the
+/// same feed never duplicates a story. Re-observation freezes the original
+/// observation and ingestion times, and only a material content change updates
+/// the envelope.
+#[async_trait]
+pub trait NewsItemRepository: Send + Sync {
+    async fn upsert_seen(
+        &self,
+        items: &[NewsItem],
+    ) -> Result<NewsItemUpsertOutcome, RepositoryError>;
+
+    /// Newest ingested items first.
+    async fn list(&self, query: &NewsItemQuery) -> Result<Vec<NewsItem>, RepositoryError>;
+
+    async fn get(&self, item_id: &str) -> Result<Option<NewsItem>, RepositoryError>;
+}
+
 /// Configured provider instances, separate from the static adapter catalog.
 ///
 /// Every method records configuration or observed health; the repository never calls a
@@ -340,6 +413,8 @@ pub enum RepositoryError {
     NewsSourceNotFound,
     #[error(transparent)]
     NewsSource(#[from] NewsSourceError),
+    #[error(transparent)]
+    NewsItem(#[from] NewsItemError),
     #[error(transparent)]
     ProviderInstance(#[from] ProviderInstanceError),
     #[error(transparent)]

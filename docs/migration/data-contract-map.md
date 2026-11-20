@@ -325,6 +325,13 @@ Rules:
 - A material update first appends `news_item_revisions` and then updates the envelope.
 - `ingestedAt` remains frozen on re-ingest and is the declared TTL base.
 
+Implementation: `NewsItemRepository` has an in-memory and a MongoDB adapter over the
+existing `news_items` collection, matching the legacy field names and the string
+`news_<sha1(canonicalUrl)>` `_id`. The MongoDB adapter creates only the two query indexes
+from the legacy model; the retention TTL index remains owned by the legacy collection so
+the Rust service never deletes rows. Legacy rows with missing optional fields load with the
+legacy defaults, and a row carrying an unknown `schemaVersion` is rejected as corrupt.
+
 ### 6.9 `news_market_events`
 
 Source: `engine/models/marketEvent.mjs`.

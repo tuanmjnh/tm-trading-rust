@@ -5656,6 +5656,7 @@ name = "tm-trading-domain"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "sha1 0.10.7",
  "thiserror 2.0.21",
  "url",
  "uuid",

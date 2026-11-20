@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 chrono.workspace = true
+sha1.workspace = true
 thiserror.workspace = true
 url.workspace = true
 uuid.workspace = true
