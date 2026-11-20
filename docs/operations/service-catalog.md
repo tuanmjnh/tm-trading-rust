@@ -1,6 +1,6 @@
 # Service Catalog
 
-> Status: Phase 2 sample-worker runtime implemented and hardened on 2026-11-18; Phase 5 market-worker runtime implemented on 2026-11-20<br>
+> Status: Phase 2 sample-worker runtime implemented and hardened on 2026-11-18; Phase 5 market-worker runtime implemented on 2026-11-20; Phase 6 research-worker runtime implemented on 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## `sample-worker`
@@ -115,5 +115,59 @@ The worker writes only `state='closed'` bars keyed by `{symbol}:{timeframe}:{ope
 
 - REST polling only; no WebSocket streams.
 - Binance and OKX are the only adapters.
-- Candle rows are written but not yet served by a Management API read model or a Desktop panel.
+- Candle rows are served by the Market Overview and Market Pulse API read models and Desktop panels.
+- Unix runtime shutdown and descendant-containment drills remain unverified.
+
+## `research-worker`
+
+| Field | Value |
+|---|---|
+| Service definition ID | `research-worker` |
+| Executable | `tm-trading-research-worker.exe` on Windows; `tm-trading-research-worker` on other platforms |
+| Process owner | The single Host Agent for the host |
+| Purpose | Scans persisted closed candles with the deterministic VSA method and stores owner-scoped research events with provenance |
+| IPC schema | `worker.v2` |
+| Control channel | One JSON object per line over the worker stdin/stdout pipes |
+| Shutdown | The Agent sends an explicit `shutdown` command; the worker aborts an in-flight scan, reports `stopped`, and exits |
+
+The worker is opt-in. It is registered only when `TM_TRADING_RESEARCH_WORKER_ENABLED=1`; otherwise the Agent does not launch it.
+
+### Configuration
+
+| Variable | Meaning |
+|---|---|
+| `TM_DATABASE_URI` | TLS MongoDB URI; only the market and research workers receive it |
+| `TM_DATABASE_NAME` | Database name, default `tm-trading-rust` |
+| `TM_TRADING_RESEARCH_OWNER_SCOPE` | Required owner scope for every event |
+| `TM_TRADING_RESEARCH_SYMBOLS` | Comma-separated symbols, required |
+| `TM_TRADING_RESEARCH_TIMEFRAME` | Candle timeframe, default `1m` |
+| `TM_TRADING_RESEARCH_BARS` | Closed candles read per symbol, default `120` |
+| `TM_TRADING_RESEARCH_CYCLE_MS` | Delay between completed scans |
+| `TM_TRADING_RESEARCH_CYCLE_TIMEOUT_MS` | Hard deadline for one scan |
+| `TM_TRADING_RESEARCH_HEARTBEAT_MS` | Heartbeat interval |
+| `TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` | `1`/`true` allows research event writes; defaults off |
+
+`TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` is deliberately off by default. With it disabled the worker exits with code `78` before opening MongoDB or writing an event, so a cutover installation cannot become a second writer.
+
+### Readiness evidence
+
+| Check | Required | Meaning |
+|---|---:|---|
+| `process-alive` | Yes | The Agent still owns a live child process |
+| `capability-verified` | Yes | A bounded, non-skipped research scan completed successfully |
+| `recent-heartbeat` | Yes | A heartbeat was observed within 30 seconds |
+| `dependencies-reachable` | Yes | MongoDB and the candle store were reachable |
+| `sink-writable` | Yes | The research event store accepted the scan output |
+| `recent-success` | Yes | A successful scan completed within 10 minutes |
+
+The worker remains `NOT_READY` while the required candle window is missing, stale, or not closed. A skipped or failed cycle is never recorded as a success, and any non-success cycle revokes the previously verified capability.
+
+### Scan and write path
+
+Every symbol is read and validated before any event is written, so one invalid symbol cannot leave a partially published cycle. Each event keeps the candle source, provider method, deterministic input snapshot ID, producer/schema versions, quality state and reasons, evidence, context, observation/detection time, and ingestion time. The deterministic event ID makes replaying the same window an upsert rather than a duplicate.
+
+### Current limitations
+
+- Only the VSA/Wyckoff method is ported; additional deterministic research methods remain incremental work.
+- The owner scope is installation configuration; multi-tenant identity binding to TM Hub is not yet available.
 - Unix runtime shutdown and descendant-containment drills remain unverified.

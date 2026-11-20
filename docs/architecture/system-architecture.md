@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, and the owner-scoped research event API; the Research Worker and Signal Center remain<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, and the opt-in Research Worker runtime; the Desktop Signal Center remains<br>
 > Last updated: 2026-11-20<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -36,7 +36,8 @@ Implemented:
 - Desktop Market Overview and Market Pulse panels reading that API through `api-client`, with EN/VI localization;
 - a pure `research-engine` crate with legacy-matched technical-analysis primitives, the canonical indicator catalog, and the VSA/Wyckoff method (method 0), compared against committed golden fixtures;
 - a `ResearchEvent` domain contract and memory/MongoDB repositories that preserve owner scope, method and producer versions, input snapshot identity, observation/detection/ingestion times, quality state and reasons, evidence, and context;
-- owner-scoped research event reads at `GET /api/v1/research/events` and `GET /api/v1/research/events/{event_id}`, with bounded filters, computed freshness, and the exact `trading.research.read` capability.
+- owner-scoped research event reads at `GET /api/v1/research/events` and `GET /api/v1/research/events/{event_id}`, with bounded filters, computed freshness, and the exact `trading.research.read` capability;
+- an opt-in Research Worker that scans only persisted closed candles, runs the deterministic VSA method, upserts owner-scoped research events with full provenance, enforces its own source-of-truth flag, and becomes ready only after a successful non-stale scan.
 
 Not implemented:
 
@@ -45,7 +46,6 @@ Not implemented:
 - TM Hub token verification and capability enforcement (local bearer credentials are used today);
 - durable Agent credential rotation;
 - TM Hub login, TOTP, and refresh flow in the Desktop client;
-- the Research Worker that turns closed-candle input into persisted research events;
 - the Desktop Signal Center and research-event detail Slideover.
 
 ## 2. Target runtime and current implementation
@@ -79,6 +79,9 @@ tm-trading-market-providers -> tm-trading-domain  (read-only public data)
         +-> tm-trading-market-worker   (bounded collection cycles, agent-owned)
 
 tm-trading-research-engine  (pure deterministic calculations; no I/O or clock)
+        |
+        +-> tm-trading-research-worker -> tm-trading-storage
+                (bounded closed-candle scans, agent-owned)
 
 tm-trading-agent-protocol -> tm-trading-supervisor-core -> tm-trading-agent
         |                                      |
@@ -100,6 +103,7 @@ Dependency rules:
 - `apps/agent` is the sole OS process owner for workers, uses a static executable registry, clears inherited child environment before adding an allowlist, and never accepts arbitrary executable paths or arguments. It holds an exclusive state-directory lock, validates the worker's PID, executable path, and executable version during the `worker.v2` handshake, uses a Windows Job Object or Unix process group, and isolates a rejected worker without stopping other workers. On Windows the worker is spawned with `DETACHED_PROCESS` so console control events reach only the Agent, which drains the worker over the explicit control channel. Windows Job Object descendant containment is implemented; Unix forced termination targets the process group, while descendant cleanup after an abrupt Agent loss remains unverified on a Unix runtime.
 - `workers/sample-worker` implements the versioned control protocol, performs its capability self-check before readiness, and reports explicit drain status.
 - `workers/market-worker` implements the same control protocol and runs one bounded collection cycle at a time in a spawned task, so heartbeats and control commands stay responsive. It requires the write-authority flag, selects a bounded set of provider instances from MongoDB, persists only closed bars, records observed provider health, and reports a skipped cycle as skipped rather than successful. On shutdown it aborts an in-flight cycle and reports `drained: false`.
+- `workers/research-worker` implements the same control protocol and runs one bounded VSA scan at a time over persisted closed candles. It requires its own write-authority flag, rejects missing or stale required input without publishing partial output, upserts deterministic owner-scoped events with source/input/producer/schema/quality provenance, and withholds readiness until a real scan succeeds. A cycle timeout or input failure revokes readiness; shutdown aborts an active scan and reports `drained: false`.
 - `apps/management-api` is the local Axum Management API. It binds to loopback only, is a command producer and read-model provider, never spawns a process, and never runs a continuous worker loop. User endpoints require a bearer credential that carries exact `trading.*` capabilities; Agent endpoints require the separate per-installation Agent credential and may only act as the Agent named in the request. Operations are durable and idempotent, and are claimed with an expiring lease and fencing token.
 - `apps/agent` additionally opens an outbound command channel to the Management API: it heartbeats its service read model, claims commands addressed to its own Agent identity, executes them against its own worker registry, and reports the real outcome. The Agent never accepts an executable path or command line from the API.
 - `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, operation creation/polling, watchlists, provider instances, market read models, and research events.
@@ -196,6 +200,15 @@ Current defaults and variables:
 | `TM_TRADING_MARKET_HEARTBEAT_MS` | `5000` | Market Worker heartbeat interval |
 | `TM_TRADING_MARKET_PROVIDER_ID` | unset | Provider definition the Market Worker uses; required when the enabled set is ambiguous |
 | `TM_TRADING_MARKET_SOURCE_OF_TRUTH` | off | `1` authorizes candle writes; without it the worker exits with code `78` |
+| `TM_TRADING_RESEARCH_WORKER_ENABLED` | unset | `1` registers the Research Worker with the Agent |
+| `TM_TRADING_RESEARCH_OWNER_SCOPE` | unset | Required owner scope written to every research event |
+| `TM_TRADING_RESEARCH_SYMBOLS` | unset | Comma-separated symbols the Research Worker scans |
+| `TM_TRADING_RESEARCH_TIMEFRAME` | `1m` | Research candle timeframe |
+| `TM_TRADING_RESEARCH_BARS` | `120` | Closed candles read per symbol and scan |
+| `TM_TRADING_RESEARCH_CYCLE_MS` | `60000` | Delay between completed scan cycles |
+| `TM_TRADING_RESEARCH_CYCLE_TIMEOUT_MS` | `30000` | Hard deadline for one research scan |
+| `TM_TRADING_RESEARCH_HEARTBEAT_MS` | `5000` | Research Worker heartbeat interval |
+| `TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` | off | `1` authorizes research event writes; without it the worker exits with code `78` |
 | `TM_TRADING_LOCALE` | `en` | Desktop initial locale (`en` or `vi`) |
 
 TM Hub remains authoritative for human identity, sessions, RBAC, routes, and shared configuration. Until Hub verification is wired, the Management API authenticates two local bearer credentials with an exact-match comparison: a user credential that carries `trading.service.read`, `trading.service.control`, and `trading.operation.read`, and a separate Agent credential that may only act as the Agent named in the request. A missing or invalid credential is `401`; a credential used on an endpoint of the other kind is `403`. The Hub-enforced `trading.*` capability set documented in the TM Hub integration map replaces this local mode without changing the endpoint contracts.
@@ -240,6 +253,7 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Port the VSA/Wyckoff method (method 0) with a legacy-generated scenario fixture.
 - [x] Define the research event contract and preserve schema, producer, input, source, and quality provenance.
 - [x] Add the memory/MongoDB research event repositories and owner-scoped research event API reads.
+- [x] Implement the opt-in Research Worker with write-authority gating, bounded scans, stale-input rejection, provenance-preserving upserts, and success-only readiness.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

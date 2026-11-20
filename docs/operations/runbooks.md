@@ -284,6 +284,40 @@ a replica set; a standalone `mongod` cannot accept the batch path.
 - A cycle that exceeds `TM_TRADING_MARKET_CYCLE_TIMEOUT_MS` is cancelled and reported as a timeout.
 - An Agent shutdown aborts an in-flight cycle and reports `drained: false`; pending operations also prevent a drained result.
 
+## Run the Research Worker
+
+The Research Worker is opt-in and runs under the Agent. It reads only persisted closed candles, so enable the Market Worker first and wait for fresh `1m` bars. The database URI is passed only to workers that need domain storage.
+
+```powershell
+cargo build -p tm-trading-agent -p tm-trading-sample-worker -p tm-trading-market-worker -p tm-trading-research-worker
+
+$env:TM_TRADING_RESEARCH_WORKER_ENABLED = "1"
+$env:TM_TRADING_RESEARCH_OWNER_SCOPE = "local-operator"
+$env:TM_TRADING_RESEARCH_SYMBOLS = "BTCUSDT,ETHUSDT"
+$env:TM_TRADING_RESEARCH_TIMEFRAME = "1m"
+$env:TM_TRADING_RESEARCH_SOURCE_OF_TRUTH = "1"
+$env:TM_DATABASE_URI = "mongodb://localhost:27018/?tls=true&tlsCAFile=D:/certs/ca.pem"
+$env:TM_DATABASE_NAME = "tm-trading-rust"
+.\target\debug\tm-trading-agent.exe --worker-dir .\target\debug --state-dir .\target\tmp\agent-local
+```
+
+Expected result:
+
+- `GET /api/v1/services` lists `research-worker` alongside the other enabled workers;
+- `research-worker` stays `NOT_READY` until one bounded scan completes over fresh closed candles;
+- a successful scan upserts deterministic, owner-scoped VSA events into `research_events` with source, input, producer, schema, and quality provenance;
+- replaying the same window does not create duplicate events.
+
+With `TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` unset or `0`, the worker exits with code `78` before opening MongoDB. That is the dual-writer guard, not a runtime failure to retry.
+
+### Research Worker failure handling
+
+- A missing candle window is reported as skipped, never as successful.
+- A stale or not-yet-closed candle fails the cycle and revokes readiness before any event is written.
+- A scan that exceeds `TM_TRADING_RESEARCH_CYCLE_TIMEOUT_MS` is cancelled and reported as a timeout.
+- A storage failure ends the cycle and revokes readiness.
+- An Agent shutdown aborts an in-flight scan and reports `drained: false`.
+
 ## Market read model
 
 The Management API serves the closed candles written by the Market Worker:

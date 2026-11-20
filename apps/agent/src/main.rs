@@ -36,7 +36,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         &cli.agent_id,
         worker_dir,
         state_dir,
-        WorkerRegistry::local_with_version(WORKER_EXECUTABLE_VERSION, market_worker_enabled()),
+        WorkerRegistry::local_with_version(
+            WORKER_EXECUTABLE_VERSION,
+            worker_enabled("TM_TRADING_MARKET_WORKER_ENABLED"),
+            worker_enabled("TM_TRADING_RESEARCH_WORKER_ENABLED"),
+        ),
     )?;
     agent.spawn_shutdown_listener();
     if let Some(crash_after_ms) = cli.crash_after_ms {
@@ -251,10 +255,10 @@ fn default_worker_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// The market worker is registered only when it is explicitly enabled, so a default
-/// installation does not run a service that cannot collect anything.
-fn market_worker_enabled() -> bool {
-    env::var("TM_TRADING_MARKET_WORKER_ENABLED")
+/// Domain workers are registered only when explicitly enabled, so a default installation
+/// does not run a service that cannot collect or scan anything.
+fn worker_enabled(name: &str) -> bool {
+    env::var(name)
         .map(|value| {
             matches!(
                 value.trim().to_ascii_lowercase().as_str(),

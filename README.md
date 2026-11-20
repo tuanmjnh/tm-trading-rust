@@ -6,15 +6,9 @@ The authoritative product and architecture specification is [`docs/TM-TRADING-RU
 
 ## Current status
 
-The Phase 0 migration audit, Phase 1 Rust workspace foundation, and the Phase 2 local runtime slice are implemented. The workspace now contains shared domain, API-contract, configuration, observability, and storage crates, an independent hardened Host Agent, a sample worker, and the first generated OpenAPI snapshot.
+The implemented platform now includes the Axum Management API, typed API client, Dioxus Desktop Control Center and market panels, independent Host Agent, opt-in Market and Research workers, MongoDB-backed durable operations, provider configuration, owner-scoped watchlists and research-event reads, and the deterministic TA/indicator/VSA research engine.
 
-The next implementation slice exposes durable operations and service snapshots through the Axum API. The full milestone will prove this path:
-
-```text
-Dioxus Desktop -> Axum Management API -> independent Host Agent -> sample worker
-```
-
-No executable Management API or Desktop client exists yet. The project will reuse the existing MongoDB data where practical and will not perform a destructive migration.
+The next Phase 6 slice is the Desktop Signal Center and research-event detail Slideover. The project continues to reuse the existing MongoDB data where practical and does not perform a destructive migration.
 
 ## Product boundary
 

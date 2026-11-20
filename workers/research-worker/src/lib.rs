@@ -4,10 +4,11 @@
 //! and stores observations with source, input, producer, schema, and quality provenance.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, TimeZone, Utc};
 use thiserror::Error;
+use tm_trading_agent_protocol::{WORKER_SCHEMA_VERSION, WorkerEvidence, WorkerMessage};
 use tm_trading_domain::{
     Candle, NewResearchEvent, ResearchEvent, ResearchEventError, ResearchQuality, input_snapshot_id,
 };
@@ -18,6 +19,32 @@ use tm_trading_storage::{CandleRepository, RepositoryError, ResearchEventReposit
 
 /// Version of the VSA observation contract produced by this worker.
 pub const METHOD_VERSION: &str = "1";
+/// Canonical timeframe used when none is configured.
+pub const DEFAULT_TIMEFRAME: &str = "1m";
+/// Closed candles read per symbol and cycle.
+pub const DEFAULT_BARS: usize = 120;
+/// Upper bound on closed candles read per symbol and cycle.
+pub const MAX_BARS: usize = 1_000;
+/// Upper bound on configured symbols, so one cycle stays bounded.
+pub const MAX_SYMBOLS: usize = 50;
+/// Default delay between two scan cycles.
+pub const DEFAULT_CYCLE_INTERVAL: Duration = Duration::from_secs(60);
+/// Shortest accepted cycle delay.
+pub const MIN_CYCLE_INTERVAL: Duration = Duration::from_secs(5);
+/// Longest accepted cycle delay.
+pub const MAX_CYCLE_INTERVAL: Duration = Duration::from_secs(300);
+/// Default delay between two heartbeats.
+pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+/// Shortest accepted heartbeat delay.
+pub const MIN_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(100);
+/// Longest accepted heartbeat delay.
+pub const MAX_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(300);
+/// Default deadline for one complete research scan.
+pub const DEFAULT_CYCLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Shortest accepted scan deadline.
+pub const MIN_CYCLE_TIMEOUT: Duration = Duration::from_secs(1);
+/// Longest accepted scan deadline.
+pub const MAX_CYCLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Configuration for one deterministic research scan.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +68,125 @@ pub struct ResearchWorkerConfig {
     /// The default is `false` so a Rust worker cannot dual-write with the legacy
     /// producer during cutover.
     pub source_of_truth: bool,
+}
+
+impl ResearchWorkerConfig {
+    /// Reads the configuration from the environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a required value is missing or a supplied value is invalid.
+    /// Write authority remains off unless it is explicitly enabled.
+    pub fn from_env() -> Result<Self, ResearchWorkerConfigError> {
+        let owner_scope = std::env::var("TM_TRADING_RESEARCH_OWNER_SCOPE").unwrap_or_default();
+        let owner_scope = owner_scope.trim().to_owned();
+        if owner_scope.is_empty() {
+            return Err(ResearchWorkerConfigError::MissingOwnerScope);
+        }
+        let symbols =
+            parse_symbols(&std::env::var("TM_TRADING_RESEARCH_SYMBOLS").unwrap_or_default())?;
+        if symbols.is_empty() {
+            return Err(ResearchWorkerConfigError::NoSymbols);
+        }
+        let timeframe = std::env::var("TM_TRADING_RESEARCH_TIMEFRAME")
+            .ok()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| DEFAULT_TIMEFRAME.to_owned());
+        timeframe_millis(&timeframe).map_err(|_| ResearchWorkerConfigError::InvalidTimeframe)?;
+        let bars = parse_bars(&std::env::var("TM_TRADING_RESEARCH_BARS").unwrap_or_default())?;
+        let cycle_interval = parse_duration(
+            "TM_TRADING_RESEARCH_CYCLE_MS",
+            DEFAULT_CYCLE_INTERVAL,
+            MIN_CYCLE_INTERVAL,
+            MAX_CYCLE_INTERVAL,
+        )?;
+        let heartbeat_interval = parse_duration(
+            "TM_TRADING_RESEARCH_HEARTBEAT_MS",
+            DEFAULT_HEARTBEAT_INTERVAL,
+            MIN_HEARTBEAT_INTERVAL,
+            MAX_HEARTBEAT_INTERVAL,
+        )?;
+        let cycle_timeout = parse_duration(
+            "TM_TRADING_RESEARCH_CYCLE_TIMEOUT_MS",
+            DEFAULT_CYCLE_TIMEOUT,
+            MIN_CYCLE_TIMEOUT,
+            MAX_CYCLE_TIMEOUT,
+        )?;
+        let source_of_truth = parse_bool("TM_TRADING_RESEARCH_SOURCE_OF_TRUTH", false)?;
+
+        Ok(Self {
+            owner_scope,
+            symbols,
+            timeframe,
+            bars,
+            cycle_interval,
+            heartbeat_interval,
+            cycle_timeout,
+            source_of_truth,
+        })
+    }
+}
+
+fn parse_symbols(value: &str) -> Result<Vec<String>, ResearchWorkerConfigError> {
+    let mut symbols = Vec::new();
+    for symbol in value.split(',') {
+        let symbol = symbol.trim();
+        if symbol.is_empty() {
+            continue;
+        }
+        if !symbols.iter().any(|existing| existing == symbol) {
+            symbols.push(symbol.to_owned());
+        }
+    }
+    if symbols.len() > MAX_SYMBOLS {
+        return Err(ResearchWorkerConfigError::TooManySymbols);
+    }
+    Ok(symbols)
+}
+
+fn parse_bars(value: &str) -> Result<usize, ResearchWorkerConfigError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(DEFAULT_BARS);
+    }
+    let bars: usize = value
+        .parse()
+        .map_err(|_| ResearchWorkerConfigError::InvalidBars)?;
+    if bars == 0 || bars > MAX_BARS {
+        return Err(ResearchWorkerConfigError::InvalidBars);
+    }
+    Ok(bars)
+}
+
+fn parse_duration(
+    name: &'static str,
+    default: Duration,
+    minimum: Duration,
+    maximum: Duration,
+) -> Result<Duration, ResearchWorkerConfigError> {
+    let value = std::env::var(name).unwrap_or_default();
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(default);
+    }
+    let millis: u64 = value
+        .parse()
+        .map_err(|_| ResearchWorkerConfigError::InvalidDuration(name))?;
+    Ok(Duration::from_millis(millis).clamp(minimum, maximum))
+}
+
+fn parse_bool(name: &'static str, default: bool) -> Result<bool, ResearchWorkerConfigError> {
+    let value = std::env::var(name).unwrap_or_default();
+    let value = value.trim().to_ascii_lowercase();
+    if value.is_empty() {
+        return Ok(default);
+    }
+    match value.as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(ResearchWorkerConfigError::InvalidBoolean(name)),
+    }
 }
 
 /// Result of one complete research scan.
@@ -74,6 +220,289 @@ pub enum ResearchWorkerError {
     InputNotClosed { symbol: String },
     #[error("symbol '{symbol}' contains an invalid timestamp")]
     InvalidTimestamp { symbol: String },
+}
+
+/// Invalid Research Worker configuration.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum ResearchWorkerConfigError {
+    #[error("TM_TRADING_RESEARCH_OWNER_SCOPE must not be empty")]
+    MissingOwnerScope,
+    #[error("TM_TRADING_RESEARCH_SYMBOLS must list at least one symbol")]
+    NoSymbols,
+    #[error("TM_TRADING_RESEARCH_SYMBOLS lists more than {MAX_SYMBOLS} symbols")]
+    TooManySymbols,
+    #[error("TM_TRADING_RESEARCH_TIMEFRAME is not a supported timeframe")]
+    InvalidTimeframe,
+    #[error("TM_TRADING_RESEARCH_BARS must be between 1 and {MAX_BARS}")]
+    InvalidBars,
+    #[error("{0} is not a valid number of milliseconds")]
+    InvalidDuration(&'static str),
+    #[error("{0} must be a boolean value")]
+    InvalidBoolean(&'static str),
+}
+
+/// Outcome of one cycle, ready to be reported over the worker protocol.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycleResult {
+    pub ok: bool,
+    pub skipped: Option<String>,
+    pub duration_ms: u64,
+    pub output_count: Option<u64>,
+    pub error: Option<String>,
+    pub summary: Option<String>,
+    pub dependencies_reachable: Option<bool>,
+    pub sink_writable: Option<bool>,
+}
+
+impl CycleResult {
+    /// A cycle that completed a bounded scan and published its observations.
+    #[must_use]
+    pub fn success(outcome: ResearchScanOutcome, duration_ms: u64) -> Self {
+        Self {
+            ok: true,
+            skipped: None,
+            duration_ms,
+            output_count: Some(outcome.detected_events as u64),
+            error: None,
+            summary: Some(format!(
+                "scanned {} candle(s) across {} symbol(s); detected {} research event(s), inserted {} and found {} existing",
+                outcome.scanned_candles,
+                outcome.scanned_symbols,
+                outcome.detected_events,
+                outcome.inserted_events,
+                outcome.existing_events,
+            )),
+            dependencies_reachable: Some(true),
+            sink_writable: Some(true),
+        }
+    }
+
+    /// A cycle that did no work; it is not a success.
+    #[must_use]
+    pub fn skipped(reason: &str) -> Self {
+        Self {
+            ok: false,
+            skipped: Some(reason.to_owned()),
+            duration_ms: 0,
+            output_count: None,
+            error: None,
+            summary: None,
+            dependencies_reachable: Some(true),
+            sink_writable: None,
+        }
+    }
+
+    /// A cycle whose required input was absent, stale, or invalid.
+    #[must_use]
+    pub fn input_failure(message: String) -> Self {
+        Self {
+            ok: false,
+            skipped: None,
+            duration_ms: 0,
+            output_count: None,
+            error: Some(message),
+            summary: None,
+            dependencies_reachable: Some(true),
+            sink_writable: None,
+        }
+    }
+
+    /// A cycle that could not read or write the store.
+    #[must_use]
+    pub fn storage_failure(message: String) -> Self {
+        Self {
+            ok: false,
+            skipped: None,
+            duration_ms: 0,
+            output_count: None,
+            error: Some(message),
+            summary: None,
+            dependencies_reachable: None,
+            sink_writable: Some(false),
+        }
+    }
+
+    /// A cycle that exceeded its overall deadline.
+    #[must_use]
+    pub fn timeout(message: String) -> Self {
+        Self {
+            ok: false,
+            skipped: None,
+            duration_ms: 0,
+            output_count: None,
+            error: Some(message),
+            summary: None,
+            dependencies_reachable: Some(false),
+            sink_writable: Some(false),
+        }
+    }
+
+    /// A cycle rejected before any work was attempted.
+    #[must_use]
+    pub fn failure(message: String) -> Self {
+        Self {
+            ok: false,
+            skipped: None,
+            duration_ms: 0,
+            output_count: None,
+            error: Some(message),
+            summary: None,
+            dependencies_reachable: None,
+            sink_writable: None,
+        }
+    }
+}
+
+/// The worker state that produces protocol messages.
+#[derive(Debug)]
+pub struct ResearchWorker {
+    instance_id: String,
+    executable_path: String,
+    config: ResearchWorkerConfig,
+    evidence: WorkerEvidence,
+}
+
+impl ResearchWorker {
+    #[must_use]
+    pub fn new(instance_id: &str, config: ResearchWorkerConfig) -> Self {
+        let executable_path = std::env::current_exe()
+            .ok()
+            .and_then(|path| std::fs::canonicalize(path).ok())
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Self {
+            instance_id: instance_id.to_owned(),
+            executable_path,
+            config,
+            evidence: WorkerEvidence::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn config(&self) -> &ResearchWorkerConfig {
+        &self.config
+    }
+
+    #[must_use]
+    pub fn evidence(&self) -> &WorkerEvidence {
+        &self.evidence
+    }
+
+    /// Records whether the storage dependency was reachable at startup.
+    pub fn record_dependencies_reachable(&mut self, reachable: bool) {
+        self.evidence.dependencies_reachable = Some(reachable);
+    }
+
+    #[must_use]
+    pub fn hello(&self, pid: u32, at: DateTime<Utc>) -> WorkerMessage {
+        WorkerMessage::Hello {
+            instance_id: self.instance_id.clone(),
+            at,
+            pid,
+            executable_path: self.executable_path.clone(),
+            executable_version: env!("CARGO_PKG_VERSION").to_owned(),
+            schema_version: WORKER_SCHEMA_VERSION.to_owned(),
+        }
+    }
+
+    /// Reports readiness only after a successful, non-skipped research scan.
+    #[must_use]
+    pub fn ready_after_success(&self, at: DateTime<Utc>) -> Option<WorkerMessage> {
+        if self.evidence.capability_verified != Some(true)
+            || self.evidence.last_success_at.is_none()
+        {
+            return None;
+        }
+        Some(WorkerMessage::Ready {
+            instance_id: self.instance_id.clone(),
+            at,
+            evidence: self.evidence.clone(),
+        })
+    }
+
+    #[must_use]
+    pub fn heartbeat(&self, at: DateTime<Utc>) -> WorkerMessage {
+        WorkerMessage::Heartbeat {
+            instance_id: self.instance_id.clone(),
+            at,
+            evidence: self.evidence.clone(),
+        }
+    }
+
+    /// Applies one cycle result to the evidence and reports it.
+    pub fn cycle(&mut self, at: DateTime<Utc>, result: CycleResult) -> WorkerMessage {
+        self.apply(&result, at);
+        WorkerMessage::Cycle {
+            instance_id: self.instance_id.clone(),
+            at,
+            ok: result.ok,
+            skipped: result.skipped,
+            duration_ms: result.duration_ms,
+            output_count: result.output_count,
+            evidence: self.evidence.clone(),
+            error: result.error,
+            summary: result.summary,
+        }
+    }
+
+    /// Applies one operation result to the evidence and reports it.
+    pub fn operation_result(
+        &mut self,
+        operation_id: &str,
+        at: DateTime<Utc>,
+        result: CycleResult,
+    ) -> WorkerMessage {
+        self.apply(&result, at);
+        WorkerMessage::OperationResult {
+            instance_id: self.instance_id.clone(),
+            operation_id: operation_id.to_owned(),
+            ok: result.ok,
+            result: tm_trading_agent_protocol::WorkerResult {
+                duration_ms: result.duration_ms,
+                output_count: result.output_count,
+                skipped: result.skipped,
+                summary: result.summary,
+            },
+            evidence: self.evidence.clone(),
+            error: result.error,
+        }
+    }
+
+    #[must_use]
+    pub fn stopping(&self, at: DateTime<Utc>, reason: &str) -> WorkerMessage {
+        WorkerMessage::Stopping {
+            instance_id: self.instance_id.clone(),
+            at,
+            reason: reason.to_owned(),
+        }
+    }
+
+    #[must_use]
+    pub fn stopped(&self, at: DateTime<Utc>, reason: &str, drained: bool) -> WorkerMessage {
+        WorkerMessage::Stopped {
+            instance_id: self.instance_id.clone(),
+            at,
+            reason: reason.to_owned(),
+            drained,
+        }
+    }
+
+    fn apply(&mut self, result: &CycleResult, at: DateTime<Utc>) {
+        if let Some(reachable) = result.dependencies_reachable {
+            self.evidence.dependencies_reachable = Some(reachable);
+        }
+        if let Some(writable) = result.sink_writable {
+            self.evidence.sink_writable = Some(writable);
+        }
+        if result.ok && result.skipped.is_none() && result.error.is_none() {
+            self.evidence.last_success_at = Some(at);
+            self.evidence.last_output_count = result.output_count;
+            self.evidence.last_event_at = Some(at);
+            self.evidence.capability_verified = Some(true);
+        } else {
+            self.evidence.capability_verified = Some(false);
+        }
+    }
 }
 
 /// Scans the configured symbols and stores the observations found in their closed candles.
@@ -226,6 +655,53 @@ pub async fn scan_research_events(
     Ok(outcome)
 }
 
+/// Runs one bounded research cycle and converts every failure into an explicit outcome.
+pub async fn run_research_cycle(
+    candle_repository: &dyn CandleRepository,
+    event_repository: &dyn ResearchEventRepository,
+    config: &ResearchWorkerConfig,
+    now: DateTime<Utc>,
+) -> CycleResult {
+    let started = Instant::now();
+    match tokio::time::timeout(
+        config.cycle_timeout,
+        scan_research_events(candle_repository, event_repository, config, now),
+    )
+    .await
+    {
+        Ok(Ok(outcome)) => {
+            let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            CycleResult::success(outcome, duration_ms)
+        }
+        Ok(Err(error)) => {
+            let message = error.to_string();
+            match error {
+                ResearchWorkerError::Storage(error) => {
+                    CycleResult::storage_failure(error.to_string())
+                }
+                ResearchWorkerError::Event(error) => CycleResult::input_failure(error.to_string()),
+                ResearchWorkerError::NoClosedCandles { .. } => {
+                    CycleResult::skipped("no closed candles are available for the research window")
+                }
+                ResearchWorkerError::WriteAuthorityDisabled => CycleResult::skipped(
+                    "the research worker is not the source of truth for research event writes",
+                ),
+                ResearchWorkerError::NoSymbols => {
+                    CycleResult::skipped("no research symbols are configured")
+                }
+                ResearchWorkerError::StaleInput { .. }
+                | ResearchWorkerError::InputNotClosed { .. }
+                | ResearchWorkerError::InvalidTimestamp { .. }
+                | ResearchWorkerError::InvalidTimeframe(_) => CycleResult::input_failure(message),
+            }
+        }
+        Err(_) => CycleResult::timeout(format!(
+            "research scan cycle exceeded its {} ms deadline",
+            u64::try_from(config.cycle_timeout.as_millis()).unwrap_or(u64::MAX)
+        )),
+    }
+}
+
 fn timestamp_for(symbol: &str, millis: i64) -> Result<DateTime<Utc>, ResearchWorkerError> {
     Utc.timestamp_millis_opt(millis)
         .single()
@@ -312,6 +788,31 @@ mod tests {
         Utc.timestamp_millis_opt(candles.last().expect("last candle").close_time())
             .single()
             .expect("valid timestamp")
+    }
+
+    struct PendingCandleRepository;
+
+    #[async_trait::async_trait]
+    impl CandleRepository for PendingCandleRepository {
+        async fn upsert_closed(
+            &self,
+            _candles: &[Candle],
+        ) -> Result<tm_trading_storage::CandleUpsertOutcome, RepositoryError> {
+            Ok(tm_trading_storage::CandleUpsertOutcome::default())
+        }
+
+        async fn recent(
+            &self,
+            _symbol: &str,
+            _timeframe: &str,
+            _limit: usize,
+        ) -> Result<Vec<Candle>, RepositoryError> {
+            std::future::pending().await
+        }
+
+        async fn get(&self, _candle_id: &str) -> Result<Option<Candle>, RepositoryError> {
+            Ok(None)
+        }
     }
 
     #[tokio::test]
@@ -460,5 +961,102 @@ mod tests {
             .await
             .expect("list events");
         assert!(stored.is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_symbols_is_not_a_successful_scan() {
+        let candle_repository = InMemoryCandleRepository::new();
+        let event_repository = InMemoryResearchEventRepository::new();
+        let mut settings = config();
+        settings.symbols.clear();
+
+        let result =
+            scan_research_events(&candle_repository, &event_repository, &settings, Utc::now())
+                .await;
+
+        assert!(matches!(result, Err(ResearchWorkerError::NoSymbols)));
+    }
+
+    #[tokio::test]
+    async fn a_candle_that_is_not_closed_is_rejected() {
+        let candles = fixture_candles();
+        let candle_repository = InMemoryCandleRepository::new();
+        candle_repository
+            .upsert_closed(&candles)
+            .await
+            .expect("seed candles");
+        let event_repository = InMemoryResearchEventRepository::new();
+
+        let result = scan_research_events(
+            &candle_repository,
+            &event_repository,
+            &config(),
+            latest_time(&candles) - chrono::Duration::seconds(1),
+        )
+        .await;
+
+        assert!(matches!(
+            result,
+            Err(ResearchWorkerError::InputNotClosed { symbol }) if symbol == "BTCUSDT"
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_missing_window_is_reported_as_skipped() {
+        let candle_repository = InMemoryCandleRepository::new();
+        let event_repository = InMemoryResearchEventRepository::new();
+
+        let result =
+            run_research_cycle(&candle_repository, &event_repository, &config(), Utc::now()).await;
+
+        assert!(!result.ok);
+        assert!(result.skipped.is_some());
+        assert!(result.output_count.is_none());
+    }
+
+    #[test]
+    fn readiness_requires_a_successful_scan() {
+        let mut worker = ResearchWorker::new("research-worker@test:1", config());
+        worker.record_dependencies_reachable(true);
+        assert!(worker.ready_after_success(Utc::now()).is_none());
+
+        let result = CycleResult::success(
+            ResearchScanOutcome {
+                scanned_symbols: 1,
+                scanned_candles: 120,
+                detected_events: 5,
+                inserted_events: 5,
+                existing_events: 0,
+            },
+            10,
+        );
+        worker.cycle(Utc::now(), result);
+
+        assert!(worker.ready_after_success(Utc::now()).is_some());
+    }
+
+    #[tokio::test]
+    async fn an_overdue_scan_is_cancelled_and_reported_as_not_ready() {
+        let event_repository = InMemoryResearchEventRepository::new();
+        let mut settings = config();
+        settings.cycle_timeout = Duration::from_millis(10);
+
+        let result = run_research_cycle(
+            &PendingCandleRepository,
+            &event_repository,
+            &settings,
+            Utc::now(),
+        )
+        .await;
+
+        assert!(!result.ok);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("deadline"))
+        );
+        assert_eq!(result.dependencies_reachable, Some(false));
+        assert_eq!(result.sink_writable, Some(false));
     }
 }

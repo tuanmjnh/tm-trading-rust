@@ -79,7 +79,7 @@ Create these only when their owning slice begins:
 | `engine/ta.mjs` | `crates/research-engine` | Port, primitives done | Deterministic outputs and numeric edge cases; goldens are generated from the legacy module by `crates/research-engine/tests/fixtures/generate_vectors.mjs` |
 | `engine/indicators.mjs` | `crates/research-engine` | Port, catalog done | Preserve ids, definition versions, parameter names/bounds, output keys, and warmup behavior |
 | `engine/methods/vsa.mjs` | `crates/research-engine` | Port, method 0 done | Pine parity remains the acceptance source; events, setups, flags and per-bar series are compared against a legacy-generated scenario fixture |
-| `engine/models/signal.mjs` | `crates/domain` + `crates/storage` + `crates/contracts` | New Rust event contract done; legacy reader later | Preserve legacy rows read-only; new `research_events` rows carry explicit quality and provenance |
+| `engine/models/signal.mjs` | `crates/domain` + `crates/storage` + `crates/contracts` | New Rust event contract, repository, API, and Research Worker done; legacy reader later | Preserve legacy rows read-only; new `research_events` rows carry explicit quality and provenance |
 | `engine/methods/priceAction.mjs`, `trend.mjs`, `orderflow.mjs` | `crates/research-engine` | Port one method at a time | Each method needs approved fixtures and version stamp |
 | `engine/version.mjs` | `crates/domain` + research engine | Port | Preserve engine version, params hash, data hash, universe snapshot, Git revision |
 | `engine/keys.mjs` | `crates/domain` | Port retained keys | Deterministic key derivation must remain stable for existing records |
@@ -103,7 +103,7 @@ Create these only when their owning slice begins:
 | `services/slo.mjs` | `crates/observability` | Defer | Add only with measured operational need |
 | `services/run.mjs` | None as a second runner | Remove from target design | Only the Agent owns worker lifecycle |
 | `services/funding.mjs`, `scanner.mjs`, `news.mjs`, `regime.mjs`, `liquidation.mjs`, `confluence.mjs`, `crossScan.mjs`, `macro.mjs` | Domain services + `workers/market-worker`, `workers/research-worker`, `workers/news-worker` | Port incrementally | Keep output contracts, source provenance, deterministic parts |
-| `services/signalProducer.mjs` | `workers/research-worker` | Port later | Research event only; no order path |
+| `services/signalProducer.mjs` | `workers/research-worker` | Ported: VSA research-event slice | Research event only; no order path |
 | `services/alertRules.mjs` | `workers/research-worker` + notification core | Port later | Rule identity and owner scope remain durable |
 | `services/outboxDrain.mjs` | `workers/notification-worker` | Port later | Dedicated outbox consumer remains independently observable |
 | `services/aiAgentWorker.mjs`, `aiReviewWorker.mjs` | `workers/ai-worker` | Port later as read-only | No autonomous execution |
@@ -268,5 +268,5 @@ For each worker cutover:
 - The sample worker is intentionally not a market worker; its purpose is to prove lifecycle truth.
 - The in-memory repository is the first test implementation, not a production cache.
 - MongoDB operations/outbox schema is introduced before remote Agents, so local and remote modes use the same contract.
-- Domain/research/data ports wait until process/API architecture is verified.
+- Market, watchlist, provider, candle, and the first VSA research-event ports are implemented; remaining research methods and later news/AI/notification planes continue incrementally.
 - Execution, paper trading, bot launch, exchange-demo, and autonomous-agent behavior are excluded.

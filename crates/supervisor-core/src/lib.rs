@@ -9,6 +9,7 @@ use tm_trading_domain::{DesiredState, ObservedState, Readiness};
 
 pub const SAMPLE_WORKER_ID: &str = "sample-worker";
 pub const MARKET_WORKER_ID: &str = "market-worker";
+pub const RESEARCH_WORKER_ID: &str = "research-worker";
 pub const MAX_LOG_ENTRIES: usize = 100;
 pub const MAX_LOG_LINE_CHARS: usize = 1_000;
 const FUTURE_TIMESTAMP_SKEW: Duration = Duration::from_secs(5);
@@ -93,14 +94,15 @@ impl WorkerRegistry {
         }
     }
 
-    /// Registry for the local Agent: the sample worker plus the market worker.
+    /// Registry for the local Agent: the sample worker plus the enabled domain workers.
     ///
-    /// The market worker is registered only when it is enabled, so a default installation
-    /// does not run a service that cannot collect anything.
+    /// Domain workers are registered only when explicitly enabled, so a default installation
+    /// does not run a service that cannot collect or scan anything.
     #[must_use]
     pub fn local_with_version(
         executable_version: &'static str,
         market_worker_enabled: bool,
+        research_worker_enabled: bool,
     ) -> Self {
         let mut sample = sample_worker_definition();
         sample.executable_version = executable_version;
@@ -109,6 +111,11 @@ impl WorkerRegistry {
             let mut market = market_worker_definition();
             market.executable_version = executable_version;
             workers.push(market);
+        }
+        if research_worker_enabled {
+            let mut research = research_worker_definition();
+            research.executable_version = executable_version;
+            workers.push(research);
         }
         Self { workers }
     }
@@ -555,6 +562,54 @@ pub fn market_worker_definition() -> WorkerDefinition {
 }
 
 #[must_use]
+pub fn research_worker_definition() -> WorkerDefinition {
+    WorkerDefinition {
+        id: RESEARCH_WORKER_ID,
+        executable_name: if cfg!(windows) {
+            "tm-trading-research-worker.exe"
+        } else {
+            "tm-trading-research-worker"
+        },
+        executable_version: env!("CARGO_PKG_VERSION"),
+        readiness_rules: vec![
+            ReadinessRule {
+                id: "process-alive",
+                required: true,
+                max_age: None,
+            },
+            ReadinessRule {
+                id: "capability-verified",
+                required: true,
+                max_age: None,
+            },
+            ReadinessRule {
+                id: "recent-heartbeat",
+                required: true,
+                max_age: Some(Duration::from_secs(30)),
+            },
+            ReadinessRule {
+                id: "dependencies-reachable",
+                required: true,
+                max_age: None,
+            },
+            ReadinessRule {
+                id: "sink-writable",
+                required: true,
+                max_age: None,
+            },
+            ReadinessRule {
+                id: "recent-success",
+                required: true,
+                max_age: Some(Duration::from_secs(600)),
+            },
+        ],
+        startup_timeout: Duration::from_secs(120),
+        stop_grace: Duration::from_secs(15),
+        max_restart_attempts: 5,
+    }
+}
+
+#[must_use]
 pub fn evaluate_readiness(
     definition: &WorkerDefinition,
     process_alive: Option<bool>,
@@ -668,18 +723,30 @@ mod tests {
     }
 
     #[test]
-    fn the_market_worker_is_only_registered_when_it_is_enabled() {
-        let disabled = WorkerRegistry::local_with_version("0.1.0", false);
+    fn domain_workers_are_only_registered_when_they_are_enabled() {
+        let disabled = WorkerRegistry::local_with_version("0.1.0", false, false);
         assert_eq!(disabled.iter().count(), 1);
         assert!(disabled.get(SAMPLE_WORKER_ID).is_some());
         assert!(disabled.get(MARKET_WORKER_ID).is_none());
+        assert!(disabled.get(RESEARCH_WORKER_ID).is_none());
 
-        let enabled = WorkerRegistry::local_with_version("0.1.0", true);
-        assert_eq!(enabled.iter().count(), 2);
-        let market = enabled.get(MARKET_WORKER_ID).expect("market worker");
+        let market = WorkerRegistry::local_with_version("0.1.0", true, false);
+        assert_eq!(market.iter().count(), 2);
+        let market = market.get(MARKET_WORKER_ID).expect("market worker");
         assert_eq!(market.executable_version, "0.1.0");
         assert!(
             market
+                .readiness_rules
+                .iter()
+                .any(|rule| rule.id == "recent-success" && rule.required)
+        );
+
+        let research = WorkerRegistry::local_with_version("0.1.0", false, true);
+        assert_eq!(research.iter().count(), 2);
+        let research = research.get(RESEARCH_WORKER_ID).expect("research worker");
+        assert_eq!(research.executable_version, "0.1.0");
+        assert!(
+            research
                 .readiness_rules
                 .iter()
                 .any(|rule| rule.id == "recent-success" && rule.required)
