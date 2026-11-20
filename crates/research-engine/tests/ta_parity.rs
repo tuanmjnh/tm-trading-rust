@@ -3,7 +3,7 @@
 //! The hand-computed cases are copied from the legacy `engine/test.mjs`, where
 //! each expected value is derived from the Pine Script definition. The
 //! differential fixture is generated from `engine/ta.mjs` itself by
-//! `fixtures/generate_ta_vectors.mjs`, so a porting mistake that still looks
+//! `fixtures/generate_vectors.mjs`, so a porting mistake that still looks
 //! plausible fails here.
 
 use serde_json::Value;
@@ -21,7 +21,9 @@ fn closed(value: Option<f64>, expected: f64) {
 
 fn bars(rows: &[(f64, f64, f64, f64, f64)]) -> Vec<Bar> {
     rows.iter()
-        .map(|&(open, high, low, close, volume)| Bar {
+        .enumerate()
+        .map(|(i, &(open, high, low, close, volume))| Bar {
+            time: i as i64 * 60_000,
             open,
             high,
             low,
@@ -243,6 +245,7 @@ fn ported_primitives_match_the_legacy_engine() {
         .expect("bars")
         .iter()
         .map(|bar| Bar {
+            time: bar["time"].as_i64().expect("time"),
             open: bar["open"].as_f64().expect("open"),
             high: bar["high"].as_f64().expect("high"),
             low: bar["low"].as_f64().expect("low"),
@@ -345,4 +348,95 @@ fn ported_primitives_match_the_legacy_engine() {
         &expected.middle,
         &fixture_series(legacy, &["middle"]),
     );
+}
+
+#[test]
+fn sessions_and_volume_buckets_match_the_legacy_engine() {
+    let fixture: Value = serde_json::from_str(VECTORS).expect("fixture is valid JSON");
+
+    for case in fixture["sessions"].as_array().expect("sessions") {
+        let case = case.as_array().expect("session case");
+        let time_ms = case[0].as_i64().expect("timeMs");
+        let session = case[1].as_str().expect("session");
+        let timezone = case[2].as_str().expect("timezone");
+        let expected = case[3].as_bool().expect("expected");
+        assert_eq!(
+            ta::session_ok(time_ms, session, timezone),
+            expected,
+            "session_ok({time_ms}, {session}, {timezone})"
+        );
+    }
+
+    let ratios = ta::VsaRatios {
+        purple: 2.2,
+        very_high: 1.8,
+        high: 1.2,
+        normal: 0.8,
+        low: 0.4,
+    };
+    for case in fixture["buckets"].as_array().expect("buckets") {
+        let case = case.as_array().expect("bucket case");
+        let volume = case[0].as_f64().expect("volume");
+        let average = case[1].as_f64();
+        let expected = case[2].as_str().expect("bucket");
+        assert_eq!(
+            ta::vsa_bucket(volume, average, &ratios).label(),
+            expected,
+            "vsa_bucket({volume}, {average:?})"
+        );
+    }
+}
+
+#[test]
+fn a_session_wraps_midnight_and_rejects_a_bad_definition() {
+    // 2026-01-01T23:30:00Z.
+    let late = 1_767_319_800_000;
+    assert!(ta::session_ok(late, "2200-0600", "UTC"));
+    assert!(!ta::session_ok(late, "0800-1600", "UTC"));
+
+    // 2026-01-01T12:00:00Z is 19:00 in Ho Chi Minh City (UTC+7).
+    let noon = 1_767_268_800_000;
+    assert!(ta::session_ok(noon, "1800-2000", "Asia/Ho_Chi_Minh"));
+    assert!(!ta::session_ok(noon, "1800-2000", "UTC"));
+    assert!(!ta::session_ok(noon, "1800-2000", "Not/AZone"));
+
+    assert!(
+        !ta::session_ok(noon, "8-16", "UTC"),
+        "a bad session is closed"
+    );
+    assert!(!ta::session_ok(noon, "0800-1600-2000", "UTC"));
+    assert!(
+        !ta::session_ok(noon, "0000-0000", "UTC"),
+        "an empty window is closed"
+    );
+}
+
+#[test]
+fn an_unknown_volume_average_is_very_low() {
+    let ratios = ta::VsaRatios {
+        purple: 2.2,
+        very_high: 1.8,
+        high: 1.2,
+        normal: 0.8,
+        low: 0.4,
+    };
+    assert_eq!(ta::vsa_bucket(10.0, None, &ratios), ta::VsaBucket::VeryLow);
+    assert_eq!(
+        ta::vsa_bucket(10.0, Some(0.0), &ratios),
+        ta::VsaBucket::VeryLow
+    );
+    assert_eq!(
+        ta::vsa_bucket(225.0, Some(100.0), &ratios),
+        ta::VsaBucket::Purple
+    );
+    assert_eq!(
+        ta::vsa_bucket(220.0, Some(100.0), &ratios),
+        ta::VsaBucket::VeryHigh,
+        "100 * 2.2 is 220.00000000000003 in binary, and Pine compares floats"
+    );
+    assert_eq!(
+        ta::vsa_bucket(219.9, Some(100.0), &ratios),
+        ta::VsaBucket::VeryHigh
+    );
+    assert_eq!(ta::VsaBucket::Purple.label(), "TIM");
 }

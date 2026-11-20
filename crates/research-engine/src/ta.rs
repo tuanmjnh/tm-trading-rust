@@ -5,6 +5,9 @@
 //! legacy implementation returns `null`. Nothing is smoothed, seeded, or
 //! clamped "more sensibly": parity with the approved fixtures is the contract.
 
+use chrono::{DateTime, Timelike, Utc};
+use chrono_tz::Tz;
+
 use crate::Bar;
 
 /// Simple moving average. `na` until `length` finite values are available.
@@ -510,4 +513,120 @@ fn extreme(values: &[Option<f64>], length: usize, pick: fn(f64, f64) -> f64) -> 
         *slot = current;
     }
     out
+}
+
+/// Pine `f_sessionOk`: whether `time_ms` falls inside `session`.
+///
+/// `session` is `"HHMM-HHMM"` and may wrap midnight (`"2200-0600"`). `timezone`
+/// is an IANA name or `UTC`; a blank value means `UTC`, as in the legacy engine.
+///
+/// An unparseable session or an unknown timezone returns `false`. The legacy
+/// engine threw for an unknown zone; returning "outside the session" is the safe
+/// direction because it suppresses signals instead of ignoring the filter.
+///
+/// Known limit, inherited from the legacy engine: only the local time of day is
+/// checked, so Pine's exchange holidays and non-trading days are not modelled.
+#[must_use]
+pub fn session_ok(time_ms: i64, session: &str, timezone: &str) -> bool {
+    let Some((start, end)) = session_bounds(session) else {
+        return false;
+    };
+    let Some(minutes) = local_minutes(time_ms, timezone) else {
+        return false;
+    };
+    if start <= end {
+        minutes >= start && minutes < end
+    } else {
+        minutes >= start || minutes < end
+    }
+}
+
+/// Volume bucket from Pine `f_vsaName`, ordered from lowest to highest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VsaBucket {
+    VeryLow,
+    Low,
+    Normal,
+    High,
+    VeryHigh,
+    Purple,
+}
+
+impl VsaBucket {
+    /// The label the legacy engine and stored documents use.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::VeryLow => "VeryLow",
+            Self::Low => "Low",
+            Self::Normal => "Normal",
+            Self::High => "High",
+            Self::VeryHigh => "VeryHigh",
+            Self::Purple => "TIM",
+        }
+    }
+}
+
+/// The five volume/average ratios that separate [`VsaBucket`] values.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VsaRatios {
+    pub purple: f64,
+    pub very_high: f64,
+    pub high: f64,
+    pub normal: f64,
+    pub low: f64,
+}
+
+/// Pine `f_vsaName`: the bucket of `volume` against its moving average.
+///
+/// A missing or non-positive average is `VeryLow`, matching Pine's fall-through
+/// on `na` comparisons rather than returning `na`.
+#[must_use]
+pub fn vsa_bucket(volume: f64, average: Option<f64>, ratios: &VsaRatios) -> VsaBucket {
+    let Some(average) = average.filter(|average| average.is_finite() && *average > 0.0) else {
+        return VsaBucket::VeryLow;
+    };
+    let scaled = |ratio: f64| average * ratio;
+    if volume >= scaled(ratios.purple) {
+        VsaBucket::Purple
+    } else if volume >= scaled(ratios.very_high) {
+        VsaBucket::VeryHigh
+    } else if volume >= scaled(ratios.high) {
+        VsaBucket::High
+    } else if volume >= scaled(ratios.normal) {
+        VsaBucket::Normal
+    } else if volume >= scaled(ratios.low) {
+        VsaBucket::Low
+    } else {
+        VsaBucket::VeryLow
+    }
+}
+
+fn session_bounds(session: &str) -> Option<(i64, i64)> {
+    let (start, end) = session.trim().split_once('-')?;
+    Some((hhmm(start)?, hhmm(end)?))
+}
+
+fn hhmm(value: &str) -> Option<i64> {
+    let digits: String = value
+        .chars()
+        .filter(|character| *character != ':')
+        .collect();
+    if digits.len() != 4 || !digits.chars().all(|character| character.is_ascii_digit()) {
+        return None;
+    }
+    let hours = digits.get(..2)?.parse::<i64>().ok()?;
+    let minutes = digits.get(2..)?.parse::<i64>().ok()?;
+    Some(hours * 60 + minutes)
+}
+
+fn local_minutes(time_ms: i64, timezone: &str) -> Option<i64> {
+    let name = timezone.trim();
+    let zone = if name.is_empty() || name.eq_ignore_ascii_case("UTC") {
+        Tz::UTC
+    } else {
+        name.parse::<Tz>().ok()?
+    };
+    let at = DateTime::<Utc>::from_timestamp_millis(time_ms)?.with_timezone(&zone);
+    Some(i64::from(at.hour()) * 60 + i64::from(at.minute()))
 }

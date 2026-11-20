@@ -85,7 +85,7 @@ Dependency rules:
 - `contracts` contains public DTOs only and has no BSON models.
 - `storage` implements repository behavior behind traits and translates errors at its boundary.
 - `market-providers` depends only on `domain` and HTTP; it never holds credentials and never reaches a private or order endpoint.
-- `research-engine` is a pure calculation crate: no I/O, no clock, no provider or storage dependency, so any result can be replayed from stored bars. Its primitives keep the legacy `engine/ta.mjs` warmup and `na` rules, its indicator registry keeps the legacy ids, versions, parameter bounds, and output keys, and the parity suites compare both against goldens generated from those modules.
+- `research-engine` is a pure calculation crate: no I/O, no clock, no provider or storage dependency, so any result can be replayed from stored bars. Its primitives keep the legacy `engine/ta.mjs` warmup and `na` rules, its indicator registry keeps the legacy ids, versions, parameter bounds, and output keys, and its VSA method keeps the legacy per-bar execution order and event semantics. The parity suites compare every one of them against goldens generated from those modules.
 - `config` owns typed environment parsing and validation.
 - `observability` owns tracing setup and correlation spans.
 - `agent-protocol` owns the versioned worker IPC messages and explicit control commands.
@@ -229,6 +229,8 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Add the Desktop Market Overview and Market Pulse panels with EN/VI localization.
 - [x] Port the legacy technical-analysis primitives into `crates/research-engine` with hand-computed and legacy-generated goldens.
 - [x] Port the canonical indicator registry with clamped parameters and legacy-matched outputs.
+- [x] Port the session filter and the VSA volume buckets from `engine/ta.mjs`.
+- [x] Port the VSA/Wyckoff method (method 0) with a legacy-generated scenario fixture.
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification

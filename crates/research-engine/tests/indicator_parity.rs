@@ -19,6 +19,7 @@ fn fixture_bars(fixture: &Value) -> Vec<Bar> {
         .expect("bars")
         .iter()
         .map(|bar| Bar {
+            time: bar["time"].as_i64().expect("time"),
             open: bar["open"].as_f64().expect("open"),
             high: bar["high"].as_f64().expect("high"),
             low: bar["low"].as_f64().expect("low"),
