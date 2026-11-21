@@ -3,13 +3,12 @@ use std::time::Duration;
 use reqwest::Client;
 use thiserror::Error;
 use tm_trading_contracts::{
-    AiProviderProfileListDto, CreateOperationRequest,
+    AiProviderProfileDto, AiProviderProfileListDto, CreateOperationRequest,
     CreateProviderInstanceRequest, CreateWatchlistRequest, HealthResponse, MarketOverviewDto,
-    MarketPulseDto, NewsClusterListDto, NewsClusterQueryDto, NewsItemDto,
-    NewsListDto, NewsQueryDto, NewsSourceListDto, OperationActionDto, OperationResponse,
-    ProviderDefinitionDto, ProviderInstanceDto, ReplaceWatchlistSymbolsRequest, ResearchEventDto,
-    ResearchEventListDto, ResearchEventQueryDto, ServiceSnapshot, UpdateProviderInstanceRequest,
-    WatchlistDto,
+    MarketPulseDto, NewsClusterListDto, NewsClusterQueryDto, NewsItemDto, NewsListDto,
+    NewsQueryDto, NewsSourceListDto, OperationActionDto, OperationResponse, ProviderDefinitionDto,
+    ProviderInstanceDto, ReplaceWatchlistSymbolsRequest, ResearchEventDto, ResearchEventListDto,
+    ResearchEventQueryDto, ServiceSnapshot, UpdateProviderInstanceRequest, WatchlistDto,
 };
 
 /// Typed client for the versioned Management API contract.
@@ -470,6 +469,24 @@ impl ManagementApiClient {
                 message: error.to_string(),
             })?;
         Self::decode(response, path).await
+    }
+
+    pub async fn test_ai_provider_profile(
+        &self,
+        id: &str,
+    ) -> Result<AiProviderProfileDto, ApiClientError> {
+        let path = format!("/api/v1/ai-providers/{}/test", id);
+        let response = self
+            .http
+            .post(format!("{}{}", self.base_url, path))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, &path).await
     }
 
     async fn get_market<TResponse>(

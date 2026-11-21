@@ -5602,6 +5602,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tm-trading-ai-providers"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "url",
+]
+
+[[package]]
 name = "tm-trading-api-client"
 version = "0.1.0"
 dependencies = [
@@ -5672,6 +5684,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tm-trading-ai-providers",
  "tm-trading-config",
  "tm-trading-contracts",
  "tm-trading-domain",

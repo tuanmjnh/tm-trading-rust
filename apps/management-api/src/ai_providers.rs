@@ -5,9 +5,7 @@ use tm_trading_contracts::{
     AiProviderProfileDto, AiProviderProfileListDto, NewAiProviderProfileDto,
     UpdateAiProviderProfileDto,
 };
-use tm_trading_domain::{
-    AiProviderKind, AiProviderProfile, NewAiProviderProfile,
-};
+use tm_trading_domain::{AiProviderKind, AiProviderProfile, NewAiProviderProfile};
 
 use crate::auth::{CAPABILITY_AI_READ, CAPABILITY_AI_WRITE};
 use crate::error::ApiError;
@@ -86,7 +84,8 @@ pub async fn update_ai_provider_profile(
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::NotFound("ai provider profile was not found".to_owned()))?;
-    let updated = existing.clone()
+    let updated = existing
+        .clone()
         .with_settings(
             request
                 .display_name
@@ -144,4 +143,54 @@ fn to_dto(profile: &AiProviderProfile) -> AiProviderProfileDto {
         created_at: profile.created_at(),
         updated_at: profile.updated_at(),
     }
+}
+
+pub async fn test_ai_provider_profile(
+    State(state): State<AppState>,
+    auth: crate::auth::AuthContext,
+    Path(id): Path<String>,
+) -> Result<Json<AiProviderProfileDto>, ApiError> {
+    auth.require_capability(CAPABILITY_AI_WRITE)?;
+    let profile = state
+        .ai_provider_profiles
+        .get(&id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound("ai provider profile was not found".to_owned()))?;
+
+    let observed_at = Utc::now();
+    let result = run_health_test(&profile).await;
+    let (healthy, error_code) = match result {
+        Ok(_) => (true, None),
+        Err(error) => (false, Some(error.code().to_owned())),
+    };
+    let updated = profile.with_health(observed_at, healthy, error_code.as_deref());
+    state
+        .ai_provider_profiles
+        .upsert(&updated)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(to_dto(&updated)))
+}
+
+async fn run_health_test(
+    profile: &AiProviderProfile,
+) -> Result<tm_trading_ai_providers::AiProviderHealth, tm_trading_ai_providers::AiProviderError> {
+    tm_trading_ai_providers::validate_ai_provider_base_url(profile.base_url())?;
+    let api_key = std::env::var(profile.api_key_env())
+        .map_err(|_| tm_trading_ai_providers::AiProviderError::MissingApiKey)?;
+    let adapter = match profile.kind() {
+        AiProviderKind::OpenAiCompatible | AiProviderKind::OpenAi | AiProviderKind::OpenRouter => {
+            tm_trading_ai_providers::OpenAiCompatibleProvider::new(
+                profile.base_url(),
+                profile.default_model(),
+                &api_key,
+                std::time::Duration::from_millis(profile.timeout_ms()),
+            )?
+        }
+        AiProviderKind::Anthropic | AiProviderKind::Gemini => {
+            return Err(tm_trading_ai_providers::AiProviderError::UnsupportedKind);
+        }
+    };
+    tm_trading_ai_providers::AiProvider::health(&adapter).await
 }

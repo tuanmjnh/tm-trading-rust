@@ -96,6 +96,10 @@ pub fn router(state: AppState) -> Router {
                 .patch(ai_providers::update_ai_provider_profile)
                 .delete(ai_providers::delete_ai_provider_profile),
         )
+        .route(
+            "/api/v1/ai-providers/{id}/test",
+            post(ai_providers::test_ai_provider_profile),
+        )
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(
             "/api/v1/agent/commands/claim",

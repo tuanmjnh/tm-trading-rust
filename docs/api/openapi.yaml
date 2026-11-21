@@ -194,6 +194,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai-providers/{id}/test:
+    post:
+      tags:
+      - AI
+      operationId: test_ai_provider_profile
+      parameters:
+      - name: id
+        in: path
+        description: AI provider profile identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: AI provider health test result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiProviderProfileDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI provider profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/health:
     get:
       tags:

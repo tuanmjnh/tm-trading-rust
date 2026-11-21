@@ -1,6 +1,4 @@
-use crate::ai_provider::{
-    AiProviderProfileDto, AiProviderProfileListDto,
-};
+use crate::ai_provider::{AiProviderProfileDto, AiProviderProfileListDto};
 use utoipa::OpenApi;
 
 use crate::error::ApiErrorResponse;
@@ -66,7 +64,8 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         get_news_item,
         list_news_sources,
         list_news_clusters,
-        list_ai_provider_profiles
+        list_ai_provider_profiles,
+        test_ai_provider_profile
     ),
     components(schemas(
         ApiVersionInfo,
@@ -593,3 +592,18 @@ pub fn list_news_clusters() {}
     )
 )]
 pub fn list_ai_provider_profiles() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai-providers/{id}/test",
+    tag = "AI",
+    params(("id" = String, Path, description = "AI provider profile identifier")),
+    responses(
+        (status = 200, description = "AI provider health test result", body = AiProviderProfileDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI provider profile", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn test_ai_provider_profile() {}
