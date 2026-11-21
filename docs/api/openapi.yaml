@@ -323,6 +323,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai-models/{id}/test:
+    post:
+      tags:
+      - AI
+      operationId: test_ai_model
+      parameters:
+      - name: id
+        in: path
+        description: AI model identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: AI model health observation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiModelDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: AI model belongs to a missing provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/ai-providers:
     get:
       tags:

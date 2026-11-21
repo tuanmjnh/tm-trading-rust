@@ -1442,6 +1442,35 @@ async fn ai_models_are_registered_under_a_existing_provider_and_removed_with_it(
     assert_eq!(listed["count"], 1);
     assert_eq!(listed["models"][0]["model_id"], "model-a");
 
+    let tested = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-models/primary-large/test",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(tested.status(), StatusCode::OK);
+    // The probe is bounded, so an unset key is recorded as a health observation, not an error.
+    let tested = json_body(tested).await;
+    assert_eq!(tested["health_state"], "UNHEALTHY");
+    assert!(tested["last_error_code"].is_string());
+    assert!(!tested["last_health_check_at"].is_null());
+
+    let unknown = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-models/missing/test",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
     let updated = app
         .clone()
         .oneshot(request(

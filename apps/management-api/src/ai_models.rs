@@ -117,6 +117,37 @@ pub async fn delete_ai_model(
     Ok(Json(()))
 }
 
+pub async fn test_ai_model(
+    State(state): State<AppState>,
+    auth: crate::auth::AuthContext,
+    Path(id): Path<String>,
+) -> Result<Json<AiModelDto>, ApiError> {
+    auth.require_capability(CAPABILITY_AI_WRITE)?;
+    let model = load(&state, &id).await?;
+    let provider = state
+        .ai_provider_profiles
+        .get(model.provider_id())
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| {
+            ApiError::UnprocessableEntity("ai provider profile was not found".to_owned())
+        })?;
+
+    let observed_at = Utc::now();
+    let (healthy, error_code) =
+        match crate::ai_providers::probe_model(&provider, model.model_id()).await {
+            Ok(_) => (true, None),
+            Err(error) => (false, Some(error.code().to_owned())),
+        };
+    let updated = model.with_health(observed_at, healthy, error_code.as_deref());
+    state
+        .ai_models
+        .upsert(&updated)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(to_dto(&updated)))
+}
+
 async fn load(state: &AppState, id: &str) -> Result<AiModel, ApiError> {
     state
         .ai_models

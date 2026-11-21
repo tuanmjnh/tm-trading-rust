@@ -88,6 +88,9 @@ enum UiAction {
     TestAiProvider {
         id: String,
     },
+    TestAiModel {
+        id: String,
+    },
 }
 
 #[derive(Clone)]
@@ -234,6 +237,18 @@ fn App() -> Element {
                                     }
                                 }
                             }
+                            Some(UiAction::TestAiModel { id }) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                ai_providers.write().model_test_started(id.clone());
+                                match client.test_ai_model(&id).await {
+                                    Ok(model) => ai_providers.write().model_test_succeeded(model),
+                                    Err(error) => {
+                                        ai_providers.write().model_test_failed(&id, error.to_string())
+                                    }
+                                }
+                            }
                             None => break,
                         }
                     }
@@ -362,6 +377,7 @@ fn App() -> Element {
     let news_close_sender = actions;
     let ai_providers_state = ai_providers();
     let ai_test_sender = actions;
+    let ai_model_test_sender = actions;
     let status_class = current_operation
         .as_ref()
         .map(|current| operation_status_class(current.status))
@@ -659,6 +675,9 @@ fn App() -> Element {
                     strings: strings(),
                     on_test: move |id| {
                         ai_test_sender.send(UiAction::TestAiProvider { id });
+                    },
+                    on_test_model: move |id| {
+                        ai_model_test_sender.send(UiAction::TestAiModel { id });
                     },
                 }
             }

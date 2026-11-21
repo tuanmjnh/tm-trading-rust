@@ -15,6 +15,8 @@ pub struct AiProviderPanelState {
     pub test_error: Option<String>,
     pub models: Option<Vec<AiModelDto>>,
     pub models_error: Option<String>,
+    pub testing_model_id: Option<String>,
+    pub model_test_error: Option<String>,
 }
 
 impl AiProviderPanelState {
@@ -25,6 +27,28 @@ impl AiProviderPanelState {
 
     pub fn models_failed(&mut self, error: String) {
         self.models_error = Some(error);
+    }
+
+    pub fn model_test_started(&mut self, id: String) {
+        self.testing_model_id = Some(id);
+        self.model_test_error = None;
+    }
+
+    pub fn model_test_succeeded(&mut self, model: AiModelDto) {
+        if let Some(models) = self.models.as_mut() {
+            if let Some(existing) = models.iter_mut().find(|item| item.id == model.id) {
+                *existing = model;
+            } else {
+                models.push(model);
+            }
+        }
+        self.testing_model_id = None;
+        self.model_test_error = None;
+    }
+
+    pub fn model_test_failed(&mut self, _id: &str, error: String) {
+        self.testing_model_id = None;
+        self.model_test_error = Some(error);
     }
 
     pub fn list_loaded(&mut self, list: AiProviderProfileListDto) {
@@ -65,6 +89,7 @@ pub fn AiProviderPanel(
     state: AiProviderPanelState,
     strings: UiStrings,
     on_test: EventHandler<String>,
+    on_test_model: EventHandler<String>,
 ) -> Element {
     let profile_count = state.profiles.as_ref().map_or(0, Vec::len);
     let healthy_count = state.profiles.as_ref().map_or(0, |profiles| {
@@ -174,6 +199,9 @@ pub fn AiProviderPanel(
             if let Some(error) = state.models_error.as_ref() {
                 div { class: "banner error", role: "alert", "{error}" }
             }
+            if let Some(error) = state.model_test_error.as_ref() {
+                div { class: "banner error", role: "alert", "{error}" }
+            }
             match state.models.as_ref() {
                 None if state.models_error.is_some() => rsx! {
                     div { class: "empty",
@@ -205,25 +233,49 @@ pub fn AiProviderPanel(
                                     th { "{strings.ai_model_output_column}" }
                                     th { "{strings.ai_model_enabled_column}" }
                                     th { "{strings.ai_provider_health_column}" }
+                                    th { "{strings.ai_provider_actions_column}" }
                                 }
                             }
                             tbody {
                                 for model in models.iter() {
-                                    tr { class: "signal-row",
-                                        td {
-                                            div { class: "service-name", "{model.display_name}" }
-                                            div { class: "service-instance", "{model.id}" }
-                                        }
-                                        td { class: "signal-source", "{model.provider_id}" }
-                                        td { span { class: "timeframe-chip", "{model.model_id}" } }
-                                        td { class: "signal-time", "{format_tokens(model.context_window)}" }
-                                        td { class: "signal-time", "{format_tokens(model.max_output_tokens)}" }
-                                        td {
-                                            if model.enabled { "{strings.ai_model_enabled}" } else { "{strings.ai_model_disabled}" }
-                                        }
-                                        td {
-                                            span { class: "pill {health_class(&model.health_state)}",
-                                                "{health_label(&model.health_state, &strings)}"
+                                    {
+                                        let model_id = model.id.clone();
+                                        let testing = state.testing_model_id.as_deref() == Some(model.id.as_str());
+                                        let test_sender = on_test_model;
+                                        let disabled = testing
+                                            || !model.enabled
+                                            || !state.profiles.as_ref().is_some_and(|profiles| {
+                                                profiles.iter().any(|profile| {
+                                                    profile.id == model.provider_id
+                                                        && profile.enabled
+                                                })
+                                            });
+                                        rsx! {
+                                            tr { class: "signal-row",
+                                                td {
+                                                    div { class: "service-name", "{model.display_name}" }
+                                                    div { class: "service-instance", "{model.id}" }
+                                                }
+                                                td { class: "signal-source", "{model.provider_id}" }
+                                                td { span { class: "timeframe-chip", "{model.model_id}" } }
+                                                td { class: "signal-time", "{format_tokens(model.context_window)}" }
+                                                td { class: "signal-time", "{format_tokens(model.max_output_tokens)}" }
+                                                td {
+                                                    if model.enabled { "{strings.ai_model_enabled}" } else { "{strings.ai_model_disabled}" }
+                                                }
+                                                td {
+                                                    span { class: "pill {health_class(&model.health_state)}",
+                                                        "{health_label(&model.health_state, &strings)}"
+                                                    }
+                                                }
+                                                td { class: "actions",
+                                                    button {
+                                                        class: "button primary",
+                                                        disabled,
+                                                        onclick: move |_| test_sender.call(model_id.clone()),
+                                                        if testing { "{strings.ai_provider_testing}" } else { "{strings.ai_provider_test}" }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -357,5 +409,70 @@ mod tests {
         });
         assert!(state.models_error.is_none());
         assert_eq!(state.models.as_ref().unwrap()[0].model_id, "model-a");
+    }
+
+    #[test]
+    fn a_model_test_replaces_only_the_tested_model() {
+        let mut state = AiProviderPanelState::default();
+        let now = Utc.with_ymd_and_hms(2026, 11, 21, 8, 0, 0).unwrap();
+        let mut other = model("secondary-small", now);
+        other.provider_id = "secondary".to_owned();
+        state.models_loaded(AiModelListDto {
+            generated_at: now,
+            count: 2,
+            models: vec![model("primary-large", now), other],
+        });
+        state.model_test_started("primary-large".to_owned());
+        state.model_test_succeeded(model_with_health("primary-large", now, "UNHEALTHY"));
+        let models = state.models.as_ref().unwrap();
+        assert!(state.testing_model_id.is_none());
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].health_state, "UNHEALTHY");
+        assert_eq!(models[1].provider_id, "secondary");
+        assert_eq!(models[1].health_state, "UNKNOWN");
+    }
+
+    #[test]
+    fn a_failed_model_test_keeps_the_models_and_reports_the_error() {
+        let mut state = AiProviderPanelState::default();
+        let now = Utc.with_ymd_and_hms(2026, 11, 21, 8, 0, 0).unwrap();
+        state.models_loaded(AiModelListDto {
+            generated_at: now,
+            count: 1,
+            models: vec![model("primary-large", now)],
+        });
+        state.model_test_started("primary-large".to_owned());
+        state.model_test_failed("primary-large", "down".to_owned());
+        assert!(state.testing_model_id.is_none());
+        assert_eq!(state.model_test_error.as_deref(), Some("down"));
+        assert_eq!(
+            state.models.as_ref().unwrap()[0].health_state,
+            "UNKNOWN".to_owned()
+        );
+    }
+
+    fn model(id: &str, now: DateTime<Utc>) -> AiModelDto {
+        model_with_health(id, now, "UNKNOWN")
+    }
+
+    fn model_with_health(id: &str, now: DateTime<Utc>, health: &str) -> AiModelDto {
+        AiModelDto {
+            id: id.to_owned(),
+            provider_id: "primary".to_owned(),
+            model_id: "model-a".to_owned(),
+            display_name: "Primary Large".to_owned(),
+            context_window: Some(128_000),
+            max_output_tokens: Some(8_192),
+            supports_streaming: true,
+            supports_json_mode: true,
+            supports_tools: false,
+            supports_vision: false,
+            enabled: true,
+            health_state: health.to_owned(),
+            last_health_check_at: None,
+            last_error_code: None,
+            created_at: now,
+            updated_at: now,
+        }
     }
 }

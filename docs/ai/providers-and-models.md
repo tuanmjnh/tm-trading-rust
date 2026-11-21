@@ -91,7 +91,7 @@ A model belongs to exactly one provider profile. `provider_id` comes from the pa
 | `last_health_check_at` | Observation time of the last model test |
 | `last_error_code` | Sanitized diagnostic code from the last failed test |
 
-Capabilities are declared, not probed, and are not used for routing yet. A model is stored with `UNKNOWN` health until a bounded model test exists; the fields are carried so routing can refuse an untested or unhealthy model later.
+Capabilities are declared, not probed, and are not used for routing yet. A model is stored with `UNKNOWN` health until `POST /api/v1/ai-models/{id}/test` runs the same bounded OpenAI-compatible probe as the provider test, using the model's own `model_id` and the owning provider's base URL, timeout, and API-key environment variable. A successful probe records `HEALTHY` and clears the error code; a failed probe records `UNHEALTHY` plus the sanitized code. A model whose provider is missing returns `422`.
 
 | Method | Path | Capability |
 |---|---|---|
@@ -100,13 +100,13 @@ Capabilities are declared, not probed, and are not used for routing yet. A model
 | `GET` | `/api/v1/ai-models/{id}` | `trading.ai.read` |
 | `PATCH` | `/api/v1/ai-models/{id}` | `trading.ai.write` |
 | `DELETE` | `/api/v1/ai-models/{id}` | `trading.ai.write` |
+| `POST` | `/api/v1/ai-models/{id}/test` | `trading.ai.write` |
 
 Models live in the `ai_models` collection with an `updatedAt` index and a `providerId` index. The Desktop AI Provider Center lists registered models under the provider table.
 
 ## 7. Pending
 
-- bounded model test that records model health per registered model;
-- model registry and per-task model selection;
+- per-task model selection;
 - routing and bounded fallback across profiles;
 - dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them;
 - the AI Worker and the evidence-bound briefing with traceable input snapshot and source references.

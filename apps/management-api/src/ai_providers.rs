@@ -182,6 +182,14 @@ pub async fn test_ai_provider_profile(
 async fn run_health_test(
     profile: &AiProviderProfile,
 ) -> Result<tm_trading_ai_providers::AiProviderHealth, tm_trading_ai_providers::AiProviderError> {
+    probe_model(profile, profile.default_model()).await
+}
+
+/// Runs the bounded OpenAI-compatible probe with the given model identifier.
+pub(crate) async fn probe_model(
+    profile: &AiProviderProfile,
+    model: &str,
+) -> Result<tm_trading_ai_providers::AiProviderHealth, tm_trading_ai_providers::AiProviderError> {
     tm_trading_ai_providers::validate_ai_provider_base_url(profile.base_url())?;
     let api_key = std::env::var(profile.api_key_env())
         .map_err(|_| tm_trading_ai_providers::AiProviderError::MissingApiKey)?;
@@ -189,7 +197,7 @@ async fn run_health_test(
         AiProviderKind::OpenAiCompatible | AiProviderKind::OpenAi | AiProviderKind::OpenRouter => {
             tm_trading_ai_providers::OpenAiCompatibleProvider::new(
                 profile.base_url(),
-                profile.default_model(),
+                model,
                 &api_key,
                 std::time::Duration::from_millis(profile.timeout_ms()),
             )?

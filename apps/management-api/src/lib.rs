@@ -107,6 +107,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/ai-models", get(ai_models::list_ai_models))
         .route(
+            "/api/v1/ai-models/{id}/test",
+            post(ai_models::test_ai_model),
+        )
+        .route(
             "/api/v1/ai-models/{id}",
             get(ai_models::get_ai_model)
                 .patch(ai_models::update_ai_model)

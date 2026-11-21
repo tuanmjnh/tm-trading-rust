@@ -78,7 +78,8 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         create_ai_model,
         get_ai_model,
         update_ai_model,
-        delete_ai_model
+        delete_ai_model,
+        test_ai_model
     ),
     components(schemas(
         ApiVersionInfo,
@@ -762,3 +763,19 @@ pub fn update_ai_model() {}
     )
 )]
 pub fn delete_ai_model() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai-models/{id}/test",
+    tag = "AI",
+    params(("id" = String, Path, description = "AI model identifier")),
+    responses(
+        (status = 200, description = "AI model health observation", body = AiModelDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI model", body = ApiErrorResponse),
+        (status = 422, description = "AI model belongs to a missing provider", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn test_ai_model() {}
