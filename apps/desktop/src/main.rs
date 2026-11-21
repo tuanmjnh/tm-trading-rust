@@ -2,6 +2,7 @@
 // window. Debug builds keep the console so startup logs stay visible.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai_providers;
 mod i18n;
 mod news;
 mod signal_center;
@@ -19,6 +20,7 @@ use tm_trading_contracts::{
     ServiceSnapshot, WatchlistDto,
 };
 
+use ai_providers::{AiProviderPanel, AiProviderPanelState};
 use i18n::{Locale, UiStrings};
 use news::{NewsItemSlideover, NewsPanel, NewsPanelState};
 use signal_center::{ResearchEventSlideover, ResearchPanelState, SignalCenterPanel};
@@ -83,6 +85,9 @@ enum UiAction {
         news_id: String,
     },
     CloseNewsItem,
+    TestAiProvider {
+        id: String,
+    },
 }
 
 #[derive(Clone)]
@@ -138,6 +143,7 @@ fn App() -> Element {
     let market_error = use_signal(|| Option::<String>::None);
     let research = use_signal(ResearchPanelState::default);
     let news = use_signal(NewsPanelState::default);
+    let ai_providers = use_signal(AiProviderPanelState::default);
 
     let client_task = client.clone();
     let actions = use_coroutine(move |mut actions: UnboundedReceiver<UiAction>| {
@@ -151,6 +157,7 @@ fn App() -> Element {
             (market_overview, market_pulse, market_error);
         let mut research = research;
         let mut news = news;
+        let mut ai_providers = ai_providers;
         async move {
             loop {
                 tokio::select! {
@@ -214,6 +221,18 @@ fn App() -> Element {
                             }
                             Some(UiAction::CloseNewsItem) => {
                                 news.write().close();
+                            }
+                            Some(UiAction::TestAiProvider { id }) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                ai_providers.write().test_started(id.clone());
+                                match client.test_ai_provider_profile(&id).await {
+                                    Ok(profile) => ai_providers.write().test_succeeded(profile),
+                                    Err(error) => {
+                                        ai_providers.write().test_failed(&id, error.to_string())
+                                    }
+                                }
                             }
                             None => break,
                         }
@@ -292,6 +311,11 @@ fn App() -> Element {
                     }
                 }
 
+                match client.list_ai_provider_profiles().await {
+                    Ok(list) => ai_providers.write().list_loaded(list),
+                    Err(error) => ai_providers.write().list_failed(error.to_string()),
+                }
+
                 if let Some(operation_id) = pending_operation() {
                     match client.get_operation(&operation_id).await {
                         Ok(current) => {
@@ -331,6 +355,8 @@ fn App() -> Element {
     let news_state = news();
     let news_open_sender = actions;
     let news_close_sender = actions;
+    let ai_providers_state = ai_providers();
+    let ai_test_sender = actions;
     let status_class = current_operation
         .as_ref()
         .map(|current| operation_status_class(current.status))
@@ -621,6 +647,13 @@ fn App() -> Element {
                     strings: strings(),
                     on_open: move |news_id| {
                         news_open_sender.send(UiAction::OpenNewsItem { news_id });
+                    },
+                }
+                AiProviderPanel {
+                    state: ai_providers_state.clone(),
+                    strings: strings(),
+                    on_test: move |id| {
+                        ai_test_sender.send(UiAction::TestAiProvider { id });
                     },
                 }
             }
