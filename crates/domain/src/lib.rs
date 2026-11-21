@@ -1,5 +1,6 @@
 mod ai_model;
 mod ai_provider;
+mod ai_task;
 mod candle;
 mod lifecycle;
 mod news;
@@ -18,6 +19,11 @@ pub use ai_provider::{
     AiProviderHealthState, AiProviderKind, AiProviderProfile, AiProviderProfileError,
     MAX_AI_PROVIDER_DISPLAY_NAME_CHARS, MAX_AI_PROVIDER_TIMEOUT_MS, MIN_AI_PROVIDER_TIMEOUT_MS,
     NewAiProviderProfile, StoredAiProviderProfile,
+};
+pub use ai_task::{
+    AiTaskKind, AiTaskModelRef, AiTaskRoute, AiTaskRouteError, MAX_AI_TASK_CONCURRENCY,
+    MAX_AI_TASK_MAX_ATTEMPTS, MAX_AI_TASK_OUTPUT_TOKENS, MIN_AI_TASK_CONCURRENCY,
+    MIN_AI_TASK_MAX_ATTEMPTS, MIN_AI_TASK_OUTPUT_TOKENS, NewAiTaskRoute, StoredAiTaskRoute,
 };
 pub use candle::{CANDLE_SCHEMA_VERSION, Candle, CandleError, NewCandle, candle_id};
 pub use lifecycle::{DesiredState, ObservedState, Readiness};

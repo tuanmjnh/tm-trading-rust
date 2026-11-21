@@ -245,6 +245,17 @@ pub struct UiStrings {
     pub ai_model_enabled_column: &'static str,
     pub ai_model_enabled: &'static str,
     pub ai_model_disabled: &'static str,
+    pub ai_task_routes: &'static str,
+    pub ai_task_routes_hint: &'static str,
+    pub ai_task_routes_empty: &'static str,
+    pub ai_task_routes_empty_hint: &'static str,
+    pub ai_task_routes_unavailable_hint: &'static str,
+    pub ai_task_routes_loading_hint: &'static str,
+    pub ai_task_route_task_column: &'static str,
+    pub ai_task_route_primary_column: &'static str,
+    pub ai_task_route_fallback_column: &'static str,
+    pub ai_task_route_attempts_column: &'static str,
+    pub ai_task_route_state_column: &'static str,
 }
 
 impl UiStrings {
@@ -473,6 +484,17 @@ impl UiStrings {
             ai_model_enabled_column: "State",
             ai_model_enabled: "Enabled",
             ai_model_disabled: "Disabled",
+            ai_task_routes: "Task routing",
+            ai_task_routes_hint: "Primary and fallback models for each AI task",
+            ai_task_routes_empty: "No task routes configured",
+            ai_task_routes_empty_hint: "Configure a route to send an AI task to a registered model.",
+            ai_task_routes_unavailable_hint: "The Management API could not load the AI task routes.",
+            ai_task_routes_loading_hint: "Loading the configured AI task routes.",
+            ai_task_route_task_column: "Task",
+            ai_task_route_primary_column: "Primary",
+            ai_task_route_fallback_column: "Fallbacks",
+            ai_task_route_attempts_column: "Attempts",
+            ai_task_route_state_column: "State",
         }
     }
 
@@ -693,6 +715,17 @@ impl UiStrings {
             ai_model_enabled_column: "Trạng thái",
             ai_model_enabled: "Bật",
             ai_model_disabled: "Tắt",
+            ai_task_routes: "Định tuyến tác vụ",
+            ai_task_routes_hint: "Mô hình chính và dự phòng cho từng tác vụ AI",
+            ai_task_routes_empty: "Chưa cấu hình định tuyến tác vụ",
+            ai_task_routes_empty_hint: "Cấu hình một tuyến để gửi tác vụ AI tới mô hình đã đăng ký.",
+            ai_task_routes_unavailable_hint: "Management API không tải được các tuyến tác vụ AI.",
+            ai_task_routes_loading_hint: "Đang tải các tuyến tác vụ AI đã cấu hình.",
+            ai_task_route_task_column: "Tác vụ",
+            ai_task_route_primary_column: "Chính",
+            ai_task_route_fallback_column: "Dự phòng",
+            ai_task_route_attempts_column: "Số lần thử",
+            ai_task_route_state_column: "Trạng thái",
         }
     }
 }

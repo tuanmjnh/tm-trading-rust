@@ -1,5 +1,6 @@
 mod ai_models;
 mod ai_providers;
+mod ai_task_routes;
 mod auth;
 mod error;
 mod market;
@@ -115,6 +116,20 @@ pub fn router(state: AppState) -> Router {
             get(ai_models::get_ai_model)
                 .patch(ai_models::update_ai_model)
                 .delete(ai_models::delete_ai_model),
+        )
+        .route(
+            "/api/v1/ai-task-routes",
+            get(ai_task_routes::list_ai_task_routes),
+        )
+        .route(
+            "/api/v1/ai-task-routes/{task}",
+            get(ai_task_routes::get_ai_task_route)
+                .patch(ai_task_routes::update_ai_task_route)
+                .delete(ai_task_routes::delete_ai_task_route),
+        )
+        .route(
+            "/api/v1/ai-task-routes",
+            post(ai_task_routes::create_ai_task_route),
         )
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(

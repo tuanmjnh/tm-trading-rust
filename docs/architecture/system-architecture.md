@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover. Phase 7 has the legacy-compatible News source registry, the legacy-compatible News item contract with memory/MongoDB repositories, the RSS/Atom/RDF provider crate, the opt-in News Worker, the owner-scoped news read API, the Desktop News & Events panel with its story detail Slideover, the AI provider profile registry with its bounded OpenAI-compatible health-test adapter, the AI model registry, and the Desktop AI Provider Center.<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover. Phase 7 has the legacy-compatible News source registry, the legacy-compatible News item contract with memory/MongoDB repositories, the RSS/Atom/RDF provider crate, the opt-in News Worker, the owner-scoped news read API, the Desktop News & Events panel with its story detail Slideover, the AI provider profile registry with its bounded OpenAI-compatible health-test adapter, the AI model registry, the AI task-routing registry, and the Desktop AI Provider Center.<br>
 > Last updated: 2026-11-21<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -43,7 +43,8 @@ Implemented:
 - a dependency-free RSS 2.0/Atom/RDF adapter that extracts only title, canonical link, publication time, a plain-text bounded excerpt, and category tags, behind a fetch path with one timeout, a 2 MB ceiling, no redirect following, and safe-URL validation;
 - an opt-in News Worker that polls only due, license-allowed sources, upserts normalized items, records each source's observed health, reports a cycle without a successful poll as skipped or failed, and becomes ready only after a real collection;
 - owner-scoped news reads at `GET /api/v1/news`, `GET /api/v1/news/{news_id}`, and `GET /api/v1/news/sources`, with bounded filters, read-time freshness, display-rights gating, and the exact `trading.news.read` capability;
-- an AI provider profile registry with memory/MongoDB repositories, exact `trading.ai.read`/`trading.ai.write` capabilities, secret-free profile reads that expose only an API-key environment-variable name, `POST /api/v1/ai-providers/{id}/test` recording bounded OpenAI-compatible health observations, and a model registry that stores provider-owned models, declares their context/output limits and capabilities, and deletes them with their provider.
+- an AI provider profile registry with memory/MongoDB repositories, exact `trading.ai.read`/`trading.ai.write` capabilities, secret-free profile reads that expose only an API-key environment-variable name, `POST /api/v1/ai-providers/{id}/test` recording bounded OpenAI-compatible health observations, a model registry that stores provider-owned models, declares their context/output limits and capabilities, records per-model health through `POST /api/v1/ai-models/{id}/test`, and deletes them with their provider;
+- an AI task-routing registry with memory/MongoDB repositories, one route per task, a primary model and an ordered fallback chain that must resolve to registered models, a bounded attempt/concurrency/output budget, and `GET`/`POST`/`PATCH`/`DELETE` endpoints under `/api/v1/ai-task-routes`.
 
 Not implemented:
 
@@ -54,7 +55,7 @@ Not implemented:
 - TM Hub login, TOTP, and refresh flow in the Desktop client;
 - reusable data-backed panels beyond Market Overview, Market Pulse, Signal Center, and News & Events;
 - deterministic news scoring and clustering beyond same-cycle headline grouping;
-- the AI model registry, task routing/fallback, the AI Worker, and the evidence-bound briefing UI.
+- the AI Worker, request execution with bounded fallback, and the evidence-bound briefing UI.
 
 ## 2. Target runtime and current implementation
 
@@ -136,7 +137,7 @@ The Desktop app stores its WebView2 profile under `<exe_dir>/data/desktop`, over
 - API errors use stable typed codes and include a correlation ID.
 - The generated contract snapshot is [`docs/api/openapi.yaml`](../api/openapi.yaml).
 
-The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, the watchlist endpoints, the provider catalog and instance endpoints, the market overview and pulse read models, the owner-scoped research event reads, the news item and news source reads, the AI provider profile and health-test endpoints, the AI model registry endpoints, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
+The current OpenAPI document defines the health/version paths, the service read model, durable operation endpoints, the watchlist endpoints, the provider catalog and instance endpoints, the market overview and pulse read models, the owner-scoped research event reads, the news item and news source reads, the AI provider profile and health-test endpoints, the AI model registry endpoints, the AI task-route endpoints, and the Agent heartbeat/command endpoints. It is a contract snapshot; the running API serves the same document at `/api/v1/openapi.json`.
 
 ## 4. Service and operation model
 

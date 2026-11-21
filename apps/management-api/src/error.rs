@@ -128,6 +128,10 @@ impl From<RepositoryError> for ApiError {
             }
             RepositoryError::AiModelNotFound => Self::NotFound("ai model was not found".to_owned()),
             RepositoryError::AiModel(error) => Self::UnprocessableEntity(error.to_string()),
+            RepositoryError::AiTaskRouteNotFound => {
+                Self::NotFound("ai task route was not found".to_owned())
+            }
+            RepositoryError::AiTaskRoute(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())
             }

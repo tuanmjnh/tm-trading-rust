@@ -91,7 +91,7 @@ A model belongs to exactly one provider profile. `provider_id` comes from the pa
 | `last_health_check_at` | Observation time of the last model test |
 | `last_error_code` | Sanitized diagnostic code from the last failed test |
 
-Capabilities are declared, not probed, and are not used for routing yet. A model is stored with `UNKNOWN` health until `POST /api/v1/ai-models/{id}/test` runs the same bounded OpenAI-compatible probe as the provider test, using the model's own `model_id` and the owning provider's base URL, timeout, and API-key environment variable. A successful probe records `HEALTHY` and clears the error code; a failed probe records `UNHEALTHY` plus the sanitized code. A model whose provider is missing returns `422`.
+Capabilities are declared, not probed. A model is stored with `UNKNOWN` health until `POST /api/v1/ai-models/{id}/test` runs the same bounded OpenAI-compatible probe as the provider test, using the model's own `model_id` and the owning provider's base URL, timeout, and API-key environment variable. A successful probe records `HEALTHY` and clears the error code; a failed probe records `UNHEALTHY` plus the sanitized code. A model whose provider is missing returns `422`.
 
 | Method | Path | Capability |
 |---|---|---|
@@ -104,9 +104,44 @@ Capabilities are declared, not probed, and are not used for routing yet. A model
 
 Models live in the `ai_models` collection with an `updatedAt` index and a `providerId` index. The Desktop AI Provider Center lists registered models under the provider table.
 
-## 7. Pending
+## 7. Task routing
 
-- per-task model selection;
-- routing and bounded fallback across profiles;
+Each AI task has one route: a primary model, an optional fallback chain, and the budget that bounds a request.
+
+| Task | Purpose |
+|---|---|
+| `news_classification` | Classify a news item |
+| `news_summary` | Summarize a news item |
+| `market_briefing` | Brief the market view |
+| `research_explanation` | Explain a research event |
+| `daily_digest` | Build the daily digest |
+
+A route names its models as `provider_id:model_registry_id`, for example `primary:primary-large`. Every entry must resolve to a registered model that belongs to the named provider profile; otherwise the route is rejected with `422`. The chain may not name the same provider twice, and it may not be longer than the attempt budget, so one failing provider is never tried twice.
+
+| Field | Meaning |
+|---|---|
+| `task` | Task identifier |
+| `primary` | First model to try |
+| `fallbacks` | Ordered fallback models |
+| `enabled` | Operator enablement |
+| `timeout_ms` | Per-attempt timeout, 500 to 60000 ms |
+| `max_attempts` | How many providers a request may try, 1 to 3 |
+| `concurrency` | How many requests the task may run at once, 1 to 4 |
+| `max_output_tokens` | Optional output ceiling, 1 to 200000 |
+| `providers_in_reach` | How many providers the current settings can actually try |
+
+| Method | Path | Capability |
+|---|---|---|
+| `GET` | `/api/v1/ai-task-routes` | `trading.ai.read` |
+| `POST` | `/api/v1/ai-task-routes` | `trading.ai.write` |
+| `GET` | `/api/v1/ai-task-routes/{task}` | `trading.ai.read` |
+| `PATCH` | `/api/v1/ai-task-routes/{task}` | `trading.ai.write` |
+| `DELETE` | `/api/v1/ai-task-routes/{task}` | `trading.ai.write` |
+
+Routes live in the `ai_task_routes` collection with an `updatedAt` index. The Desktop AI Provider Center lists each task, its primary and fallback models, and how many providers the route can reach. The AI Worker still owns request execution and the fallback decision, so no route can trigger an AI request by itself.
+
+## 8. Pending
+
+- the AI Worker that executes a route and applies the bounded fallback;
 - dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them;
-- the AI Worker and the evidence-bound briefing with traceable input snapshot and source references.
+- the evidence-bound briefing with traceable input snapshot and source references.

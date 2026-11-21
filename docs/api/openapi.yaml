@@ -664,6 +664,212 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai-task-routes:
+    get:
+      tags:
+      - AI
+      operationId: list_ai_task_routes
+      responses:
+        '200':
+          description: AI task routes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiTaskRouteListDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    post:
+      tags:
+      - AI
+      operationId: create_ai_task_route
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewAiTaskRouteDto'
+        required: true
+      responses:
+        '200':
+          description: Configured AI task route
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiTaskRouteDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Invalid AI task route
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai-task-routes/{task}:
+    get:
+      tags:
+      - AI
+      operationId: get_ai_task_route
+      parameters:
+      - name: task
+        in: path
+        description: AI task identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: AI task route
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiTaskRouteDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI task route
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      tags:
+      - AI
+      operationId: delete_ai_task_route
+      parameters:
+      - name: task
+        in: path
+        description: AI task identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: AI task route deleted
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI task route
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    patch:
+      tags:
+      - AI
+      operationId: update_ai_task_route
+      parameters:
+      - name: task
+        in: path
+        description: AI task identifier
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAiTaskRouteDto'
+        required: true
+      responses:
+        '200':
+          description: Updated AI task route
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiTaskRouteDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI task route
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Invalid AI task route
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/health:
     get:
       tags:
@@ -1974,6 +2180,74 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AiProviderProfileDto'
+    AiTaskRouteDto:
+      type: object
+      required:
+      - task
+      - primary
+      - fallbacks
+      - enabled
+      - timeout_ms
+      - max_attempts
+      - concurrency
+      - providers_in_reach
+      - created_at
+      - updated_at
+      properties:
+        concurrency:
+          type: integer
+          format: int32
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        enabled:
+          type: boolean
+        fallbacks:
+          type: array
+          items:
+            type: string
+        max_attempts:
+          type: integer
+          format: int32
+          minimum: 0
+        max_output_tokens:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        primary:
+          type: string
+        providers_in_reach:
+          type: integer
+          minimum: 0
+        task:
+          type: string
+        timeout_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        updated_at:
+          type: string
+          format: date-time
+    AiTaskRouteListDto:
+      type: object
+      required:
+      - generated_at
+      - count
+      - routes
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+        routes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiTaskRouteDto'
     ApiErrorBody:
       type: object
       required:
@@ -2352,6 +2626,41 @@ components:
         id:
           type: string
         kind:
+          type: string
+        timeout_ms:
+          type: integer
+          format: int64
+          minimum: 0
+    NewAiTaskRouteDto:
+      type: object
+      required:
+      - task
+      - primary
+      - timeout_ms
+      - max_attempts
+      - concurrency
+      properties:
+        concurrency:
+          type: integer
+          format: int32
+          minimum: 0
+        fallbacks:
+          type: array
+          items:
+            type: string
+        max_attempts:
+          type: integer
+          format: int32
+          minimum: 0
+        max_output_tokens:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        primary:
+          type: string
+        task:
           type: string
         timeout_ms:
           type: integer
@@ -3173,6 +3482,47 @@ components:
         enabled:
           type:
           - boolean
+          - 'null'
+        timeout_ms:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+    UpdateAiTaskRouteDto:
+      type: object
+      properties:
+        concurrency:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        enabled:
+          type:
+          - boolean
+          - 'null'
+        fallbacks:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
+        max_attempts:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        max_output_tokens:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        primary:
+          type:
+          - string
           - 'null'
         timeout_ms:
           type:

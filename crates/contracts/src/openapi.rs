@@ -3,6 +3,7 @@ use crate::ai_provider::{
     AiProviderProfileDto, AiProviderProfileListDto, NewAiProviderProfileDto,
     UpdateAiProviderProfileDto,
 };
+use crate::ai_task::{AiTaskRouteDto, AiTaskRouteListDto, NewAiTaskRouteDto, UpdateAiTaskRouteDto};
 use utoipa::OpenApi;
 
 use crate::error::ApiErrorResponse;
@@ -79,7 +80,12 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         get_ai_model,
         update_ai_model,
         delete_ai_model,
-        test_ai_model
+        test_ai_model,
+        list_ai_task_routes,
+        get_ai_task_route,
+        create_ai_task_route,
+        update_ai_task_route,
+        delete_ai_task_route
     ),
     components(schemas(
         ApiVersionInfo,
@@ -133,6 +139,10 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         AiModelListDto,
         NewAiModelDto,
         UpdateAiModelDto,
+        AiTaskRouteDto,
+        AiTaskRouteListDto,
+        NewAiTaskRouteDto,
+        UpdateAiTaskRouteDto,
         NewsClusterListDto,
         NewsClusterQueryDto
     )),
@@ -779,3 +789,78 @@ pub fn delete_ai_model() {}
     )
 )]
 pub fn test_ai_model() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai-task-routes",
+    tag = "AI",
+    responses(
+        (status = 200, description = "AI task routes", body = AiTaskRouteListDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_ai_task_routes() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai-task-routes/{task}",
+    tag = "AI",
+    params(("task" = String, Path, description = "AI task identifier")),
+    responses(
+        (status = 200, description = "AI task route", body = AiTaskRouteDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI task route", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn get_ai_task_route() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai-task-routes",
+    tag = "AI",
+    request_body = NewAiTaskRouteDto,
+    responses(
+        (status = 200, description = "Configured AI task route", body = AiTaskRouteDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 422, description = "Invalid AI task route", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn create_ai_task_route() {}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/ai-task-routes/{task}",
+    tag = "AI",
+    params(("task" = String, Path, description = "AI task identifier")),
+    request_body = UpdateAiTaskRouteDto,
+    responses(
+        (status = 200, description = "Updated AI task route", body = AiTaskRouteDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI task route", body = ApiErrorResponse),
+        (status = 422, description = "Invalid AI task route", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn update_ai_task_route() {}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/ai-task-routes/{task}",
+    tag = "AI",
+    params(("task" = String, Path, description = "AI task identifier")),
+    responses(
+        (status = 200, description = "AI task route deleted"),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI task route", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn delete_ai_task_route() {}

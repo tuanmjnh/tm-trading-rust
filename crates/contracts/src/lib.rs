@@ -1,5 +1,6 @@
 mod ai_model;
 mod ai_provider;
+mod ai_task;
 mod error;
 mod market;
 mod news;
@@ -16,6 +17,7 @@ pub use ai_provider::{
     AiProviderProfileDto, AiProviderProfileListDto, NewAiProviderProfileDto,
     UpdateAiProviderProfileDto,
 };
+pub use ai_task::{AiTaskRouteDto, AiTaskRouteListDto, NewAiTaskRouteDto, UpdateAiTaskRouteDto};
 pub use error::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
 pub use market::{
     MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,

@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use tm_trading_contracts::{
-    AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto,
+    AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto, AiTaskRouteDto,
+    AiTaskRouteListDto,
 };
 
 use crate::i18n::UiStrings;
@@ -17,9 +18,20 @@ pub struct AiProviderPanelState {
     pub models_error: Option<String>,
     pub testing_model_id: Option<String>,
     pub model_test_error: Option<String>,
+    pub routes: Option<Vec<AiTaskRouteDto>>,
+    pub routes_error: Option<String>,
 }
 
 impl AiProviderPanelState {
+    pub fn routes_loaded(&mut self, list: AiTaskRouteListDto) {
+        self.routes = Some(list.routes);
+        self.routes_error = None;
+    }
+
+    pub fn routes_failed(&mut self, error: String) {
+        self.routes_error = Some(error);
+    }
+
     pub fn models_loaded(&mut self, list: AiModelListDto) {
         self.models = Some(list.models);
         self.models_error = None;
@@ -285,6 +297,65 @@ pub fn AiProviderPanel(
                     }
                 }
             }
+            div { class: "panel-head signal-center-head",
+                div {
+                    h3 { "{strings.ai_task_routes}" }
+                    p { class: "panel-subtitle", "{strings.ai_task_routes_hint}" }
+                }
+            }
+            if let Some(error) = state.routes_error.as_ref() {
+                div { class: "banner error", role: "alert", "{error}" }
+            }
+            match state.routes.as_ref() {
+                None if state.routes_error.is_some() => rsx! {
+                    div { class: "empty",
+                        p { class: "empty-title", "{strings.ai_provider_unavailable}" }
+                        p { "{strings.ai_task_routes_unavailable_hint}" }
+                    }
+                },
+                None => rsx! {
+                    div { class: "empty loading-state", role: "status",
+                        p { class: "empty-title", "{strings.ai_provider_loading}" }
+                        p { "{strings.ai_task_routes_loading_hint}" }
+                    }
+                },
+                Some(routes) if routes.is_empty() => rsx! {
+                    div { class: "empty",
+                        p { class: "empty-title", "{strings.ai_task_routes_empty}" }
+                        p { "{strings.ai_task_routes_empty_hint}" }
+                    }
+                },
+                Some(routes) => rsx! {
+                    div { class: "table-wrap",
+                        table { class: "services ai-provider-table",
+                            thead {
+                                tr {
+                                    th { "{strings.ai_task_route_task_column}" }
+                                    th { "{strings.ai_task_route_primary_column}" }
+                                    th { "{strings.ai_task_route_fallback_column}" }
+                                    th { "{strings.ai_task_route_attempts_column}" }
+                                    th { "{strings.ai_task_route_state_column}" }
+                                }
+                            }
+                            tbody {
+                                for route in routes.iter() {
+                                    tr { class: "signal-row",
+                                        td { span { class: "timeframe-chip", "{route.task}" } }
+                                        td { class: "signal-source", "{route.primary}" }
+                                        td { class: "signal-source",
+                                            "{route.fallbacks.join(\", \")}"
+                                        }
+                                        td { class: "signal-time", "{route.providers_in_reach}" }
+                                        td {
+                                            if route.enabled { "{strings.ai_model_enabled}" } else { "{strings.ai_model_disabled}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -453,6 +524,47 @@ mod tests {
 
     fn model(id: &str, now: DateTime<Utc>) -> AiModelDto {
         model_with_health(id, now, "UNKNOWN")
+    }
+
+    #[test]
+    fn a_route_list_failure_keeps_the_models_and_routes() {
+        let mut state = AiProviderPanelState::default();
+        let now = Utc.with_ymd_and_hms(2026, 11, 21, 8, 0, 0).unwrap();
+        state.models_loaded(AiModelListDto {
+            generated_at: now,
+            count: 1,
+            models: vec![model("primary-large", now)],
+        });
+        state.routes_failed("down".to_owned());
+        assert!(state.routes.is_none());
+        assert_eq!(state.routes_error.as_deref(), Some("down"));
+        assert_eq!(state.models.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn loaded_routes_clear_the_previous_error() {
+        let mut state = AiProviderPanelState::default();
+        let now = Utc.with_ymd_and_hms(2026, 11, 21, 8, 0, 0).unwrap();
+        state.routes_failed("down".to_owned());
+        state.routes_loaded(AiTaskRouteListDto {
+            generated_at: now,
+            count: 1,
+            routes: vec![AiTaskRouteDto {
+                task: "market_briefing".to_owned(),
+                primary: "primary:primary-large".to_owned(),
+                fallbacks: vec!["primary:secondary-small".to_owned()],
+                enabled: true,
+                timeout_ms: 5_000,
+                max_attempts: 2,
+                concurrency: 1,
+                max_output_tokens: Some(1_024),
+                providers_in_reach: 2,
+                created_at: now,
+                updated_at: now,
+            }],
+        });
+        assert!(state.routes_error.is_none());
+        assert_eq!(state.routes.as_ref().unwrap()[0].providers_in_reach, 2usize);
     }
 
     fn model_with_health(id: &str, now: DateTime<Utc>, health: &str) -> AiModelDto {

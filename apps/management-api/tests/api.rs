@@ -1568,3 +1568,204 @@ async fn ai_models_are_registered_under_a_existing_provider_and_removed_with_it(
         .expect("response");
     assert_eq!(json_body(empty).await["count"], 0);
 }
+
+fn ai_task_route_body(overrides: serde_json::Value) -> serde_json::Value {
+    let mut body = json!({
+        "task": "market_briefing",
+        "primary": "primary:primary-large",
+        "fallbacks": ["primary:secondary-small"],
+        "timeout_ms": 5000,
+        "max_attempts": 2,
+        "concurrency": 1,
+        "max_output_tokens": 1024
+    });
+    for (key, value) in overrides.as_object().expect("object") {
+        body[key.as_str()] = value.clone();
+    }
+    body
+}
+
+#[tokio::test]
+async fn ai_task_routes_bind_to_registered_models_and_bound_the_fallback_chain() {
+    let app = router(state());
+
+    let provider = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers",
+            Some(USER_TOKEN),
+            Some(ai_provider_body(json!({}))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(provider.status(), StatusCode::OK);
+
+    let model = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers/primary/models",
+            Some(USER_TOKEN),
+            Some(ai_model_body(json!({}))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(model.status(), StatusCode::OK);
+
+    let fallback_model = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers/primary/models",
+            Some(USER_TOKEN),
+            Some(ai_model_body(json!({ "id": "secondary-small" }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(fallback_model.status(), StatusCode::OK);
+
+    let created = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-task-routes",
+            Some(USER_TOKEN),
+            Some(ai_task_route_body(json!({}))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(created.status(), StatusCode::OK);
+    let created = json_body(created).await;
+    assert_eq!(created["task"], "market_briefing");
+    assert_eq!(created["primary"], "primary:primary-large");
+    assert_eq!(created["providers_in_reach"], 2);
+    assert_eq!(created["enabled"], true);
+
+    let listed = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai-task-routes",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(listed.status(), StatusCode::OK);
+    assert_eq!(json_body(listed).await["count"], 1);
+
+    let unknown_model = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-task-routes",
+            Some(USER_TOKEN),
+            Some(ai_task_route_body(json!({
+                "task": "news_summary",
+                "primary": "primary:missing-model"
+            }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unknown_model.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let unknown_provider = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-task-routes",
+            Some(USER_TOKEN),
+            Some(ai_task_route_body(json!({
+                "task": "news_summary",
+                "primary": "missing:primary-large"
+            }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unknown_provider.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let repeated_provider = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-task-routes",
+            Some(USER_TOKEN),
+            Some(ai_task_route_body(json!({
+                "task": "news_summary",
+                "fallbacks": ["primary:primary-large"]
+            }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(repeated_provider.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let unsupported_task = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-task-routes",
+            Some(USER_TOKEN),
+            Some(ai_task_route_body(json!({ "task": "unknown_task" }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unsupported_task.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let updated = app
+        .clone()
+        .oneshot(request(
+            "PATCH",
+            "/api/v1/ai-task-routes/market_briefing",
+            Some(USER_TOKEN),
+            Some(json!({ "enabled": false, "max_attempts": 1 })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(updated.status(), StatusCode::OK);
+    let updated = json_body(updated).await;
+    assert_eq!(updated["enabled"], false);
+    assert_eq!(updated["providers_in_reach"], 0);
+
+    let agent = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai-task-routes",
+            Some(AGENT_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    let anonymous = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/ai-task-routes", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    let deleted = app
+        .clone()
+        .oneshot(request(
+            "DELETE",
+            "/api/v1/ai-task-routes/market_briefing",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(deleted.status(), StatusCode::OK);
+
+    let missing = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai-task-routes/market_briefing",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}

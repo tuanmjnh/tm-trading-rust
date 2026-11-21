@@ -3,7 +3,7 @@ use std::time::Duration;
 use reqwest::Client;
 use thiserror::Error;
 use tm_trading_contracts::{
-    AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto,
+    AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto, AiTaskRouteListDto,
     CreateOperationRequest, CreateProviderInstanceRequest, CreateWatchlistRequest, HealthResponse,
     MarketOverviewDto, MarketPulseDto, NewsClusterListDto, NewsClusterQueryDto, NewsItemDto,
     NewsListDto, NewsQueryDto, NewsSourceListDto, OperationActionDto, OperationResponse,
@@ -518,6 +518,21 @@ impl ManagementApiClient {
                 message: error.to_string(),
             })?;
         Self::decode(response, &path).await
+    }
+
+    pub async fn list_ai_task_routes(&self) -> Result<AiTaskRouteListDto, ApiClientError> {
+        let path = "/api/v1/ai-task-routes";
+        let response = self
+            .http
+            .get(format!("{}{}", self.base_url, path))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
     }
 
     async fn get_market<TResponse>(
