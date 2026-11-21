@@ -13,7 +13,8 @@ use tm_trading_news_worker::{
     CycleResult, NewsWorker, NewsWorkerConfig, NewsWorkerError, run_news_cycle,
 };
 use tm_trading_storage::{
-    MongoConnection, MongoNewsClusterRepository, MongoNewsItemRepository, MongoNewsSourceRepository, RepositoryError,
+    MongoConnection, MongoNewsClusterRepository, MongoNewsItemRepository,
+    MongoNewsSourceRepository, RepositoryError,
 };
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;

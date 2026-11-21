@@ -509,7 +509,7 @@ pub async fn run_news_cycle(
                 // read side can present one event instead of many near-duplicate
                 // headlines. Only recently observed clusters are loaded so the
                 // assignment stays bounded.
-                let recent_clusters = cluster_repository
+                let mut recent_clusters = cluster_repository
                     .list(&tm_trading_storage::NewsClusterQuery {
                         limit: 200,
                         ..tm_trading_storage::NewsClusterQuery::default()
@@ -521,13 +521,14 @@ pub async fn run_news_cycle(
                         continue;
                     }
                     let market_group = Some(item.market_group().to_owned());
-                    if let Some(mut cluster) = recent_clusters
+                    if let Some(position) = recent_clusters
                         .iter()
-                        .find(|cluster| cluster.matches_tokens(&tokens))
-                        .cloned()
+                        .position(|cluster| cluster.matches_tokens(&tokens))
                     {
+                        let mut cluster = recent_clusters[position].clone();
                         cluster.add_item(item.item_id(), now);
                         cluster_repository.upsert(&cluster).await?;
+                        recent_clusters[position] = cluster;
                     } else {
                         let cluster = tm_trading_domain::NewsCluster::new(
                             tm_trading_domain::NewNewsCluster {
@@ -539,6 +540,7 @@ pub async fn run_news_cycle(
                         )
                         .map_err(NewsWorkerError::Cluster)?;
                         cluster_repository.upsert(&cluster).await?;
+                        recent_clusters.push(cluster);
                     }
                 }
                 source_repository

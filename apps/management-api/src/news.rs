@@ -6,9 +6,7 @@ use tm_trading_contracts::{
     NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto, NewsQueryDto, NewsSourceDto,
     NewsSourceListDto,
 };
-use tm_trading_domain::{
-    NewsDirection, NewsHealthState, NewsItem, NewsLevel, NewsSource,
-};
+use tm_trading_domain::{NewsDirection, NewsHealthState, NewsItem, NewsLevel, NewsSource};
 use tm_trading_storage::{NewsClusterQuery, NewsItemQuery};
 
 use crate::auth::CAPABILITY_NEWS_READ;
