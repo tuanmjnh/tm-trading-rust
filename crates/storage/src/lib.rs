@@ -1,8 +1,11 @@
+mod ai_models;
+mod ai_models_memory;
 mod ai_providers_memory;
 mod bson_support;
 mod candles_memory;
 mod memory;
 mod mongo;
+mod mongo_ai_models;
 mod mongo_ai_providers;
 mod mongo_candles;
 mod mongo_news_clusters;
@@ -21,10 +24,13 @@ mod repository;
 mod research_events_memory;
 mod watchlists_memory;
 
+pub use ai_models::AiModelRepository;
+pub use ai_models_memory::InMemoryAiModelRepository;
 pub use ai_providers_memory::InMemoryAiProviderProfileRepository;
 pub use candles_memory::InMemoryCandleRepository;
 pub use memory::{InMemoryOperationRepository, InMemoryServiceSnapshotRepository};
 pub use mongo::MongoConnection;
+pub use mongo_ai_models::MongoAiModelRepository;
 pub use mongo_ai_providers::MongoAiProviderProfileRepository;
 pub use mongo_candles::MongoCandleRepository;
 pub use mongo_news_clusters::MongoNewsClusterRepository;

@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_storage::{
-    AiProviderProfileRepository, CandleRepository, InMemoryAiProviderProfileRepository,
-    InMemoryCandleRepository, InMemoryNewsClusterRepository, InMemoryNewsItemRepository,
-    InMemoryNewsSourceRepository, InMemoryOperationRepository, InMemoryProviderInstanceRepository,
-    InMemoryResearchEventRepository, InMemoryServiceSnapshotRepository,
-    InMemoryWatchlistRepository, NewsClusterRepository, NewsItemRepository, NewsSourceRepository,
-    OperationRepository, ProviderInstanceRepository, RepositoryError, ResearchEventRepository,
-    ServiceSnapshotRepository, WatchlistRepository,
+    AiModelRepository, AiProviderProfileRepository, CandleRepository, InMemoryAiModelRepository,
+    InMemoryAiProviderProfileRepository, InMemoryCandleRepository, InMemoryNewsClusterRepository,
+    InMemoryNewsItemRepository, InMemoryNewsSourceRepository, InMemoryOperationRepository,
+    InMemoryProviderInstanceRepository, InMemoryResearchEventRepository,
+    InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository, NewsClusterRepository,
+    NewsItemRepository, NewsSourceRepository, OperationRepository, ProviderInstanceRepository,
+    RepositoryError, ResearchEventRepository, ServiceSnapshotRepository, WatchlistRepository,
 };
 
 /// Credentials and capabilities used in local deployment mode.
@@ -27,6 +27,7 @@ pub struct Repositories {
     pub watchlists: Arc<dyn WatchlistRepository>,
     pub providers: Arc<dyn ProviderInstanceRepository>,
     pub ai_provider_profiles: Arc<dyn AiProviderProfileRepository>,
+    pub ai_models: Arc<dyn AiModelRepository>,
     pub candles: Arc<dyn CandleRepository>,
     pub research_events: Arc<dyn ResearchEventRepository>,
     pub news_sources: Arc<dyn NewsSourceRepository>,
@@ -44,6 +45,7 @@ impl Repositories {
             watchlists: Arc::new(InMemoryWatchlistRepository::new()),
             providers: Arc::new(InMemoryProviderInstanceRepository::new()),
             ai_provider_profiles: Arc::new(InMemoryAiProviderProfileRepository::new()),
+            ai_models: Arc::new(InMemoryAiModelRepository::new()),
             candles: Arc::new(InMemoryCandleRepository::new()),
             research_events: Arc::new(InMemoryResearchEventRepository::new()),
             news_sources: Arc::new(InMemoryNewsSourceRepository::new()),
@@ -61,6 +63,7 @@ pub struct AppState {
     pub watchlists: Arc<dyn WatchlistRepository>,
     pub providers: Arc<dyn ProviderInstanceRepository>,
     pub ai_provider_profiles: Arc<dyn AiProviderProfileRepository>,
+    pub ai_models: Arc<dyn AiModelRepository>,
     pub candles: Arc<dyn CandleRepository>,
     pub research_events: Arc<dyn ResearchEventRepository>,
     pub news_sources: Arc<dyn NewsSourceRepository>,
@@ -83,6 +86,7 @@ impl AppState {
             watchlists: repositories.watchlists,
             providers: repositories.providers,
             ai_provider_profiles: repositories.ai_provider_profiles,
+            ai_models: repositories.ai_models,
             candles: repositories.candles,
             research_events: repositories.research_events,
             news_sources: repositories.news_sources,

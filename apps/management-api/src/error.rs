@@ -126,6 +126,8 @@ impl From<RepositoryError> for ApiError {
             RepositoryError::AiProviderProfileNotFound => {
                 Self::NotFound("ai provider profile was not found".to_owned())
             }
+            RepositoryError::AiModelNotFound => Self::NotFound("ai model was not found".to_owned()),
+            RepositoryError::AiModel(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())
             }

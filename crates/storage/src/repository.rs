@@ -6,9 +6,9 @@ use thiserror::Error;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{
-    AiProviderProfile, AiProviderProfileError, Candle, CandleError, NewNewsSource, NewsCluster,
-    NewsClusterError, NewsItem, NewsItemError, NewsLevel, NewsSource, NewsSourceError, Operation,
-    OperationError, OperationId, ProviderInstance, ProviderInstanceError, ResearchEvent,
+    AiModelError, AiProviderProfile, AiProviderProfileError, Candle, CandleError, NewNewsSource,
+    NewsCluster, NewsClusterError, NewsItem, NewsItemError, NewsLevel, NewsSource, NewsSourceError,
+    Operation, OperationError, OperationId, ProviderInstance, ProviderInstanceError, ResearchEvent,
     ResearchEventError, Watchlist, WatchlistError,
 };
 
@@ -467,6 +467,8 @@ pub enum RepositoryError {
     ProviderInstanceNotFound,
     #[error("ai provider profile was not found")]
     AiProviderProfileNotFound,
+    #[error("ai model was not found")]
+    AiModelNotFound,
     #[error("news source was not found")]
     NewsSourceNotFound,
     #[error(transparent)]
@@ -479,6 +481,8 @@ pub enum RepositoryError {
     ProviderInstance(#[from] ProviderInstanceError),
     #[error(transparent)]
     AiProviderProfile(#[from] AiProviderProfileError),
+    #[error(transparent)]
+    AiModel(#[from] AiModelError),
     #[error(transparent)]
     Domain(#[from] OperationError),
 }

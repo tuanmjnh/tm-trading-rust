@@ -164,6 +164,165 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai-models:
+    get:
+      tags:
+      - AI
+      operationId: list_ai_models
+      responses:
+        '200':
+          description: AI models
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiModelListDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai-models/{id}:
+    get:
+      tags:
+      - AI
+      operationId: get_ai_model
+      parameters:
+      - name: id
+        in: path
+        description: AI model identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: AI model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiModelDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      tags:
+      - AI
+      operationId: delete_ai_model
+      parameters:
+      - name: id
+        in: path
+        description: AI model identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: AI model deleted
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    patch:
+      tags:
+      - AI
+      operationId: update_ai_model
+      parameters:
+      - name: id
+        in: path
+        description: AI model identifier
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAiModelDto'
+        required: true
+      responses:
+        '200':
+          description: Updated AI model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiModelDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Invalid AI model configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/ai-providers:
     get:
       tags:
@@ -354,6 +513,55 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '422':
           description: Invalid AI provider configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai-providers/{id}/models:
+    post:
+      tags:
+      - AI
+      operationId: create_ai_model
+      parameters:
+      - name: id
+        in: path
+        description: AI provider profile identifier
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewAiModelDto'
+        required: true
+      responses:
+        '200':
+          description: Created AI model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiModelDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Invalid AI model configuration
           content:
             application/json:
               schema:
@@ -1570,6 +1778,86 @@ components:
         server_time:
           type: string
           format: date-time
+    AiModelDto:
+      type: object
+      required:
+      - id
+      - provider_id
+      - model_id
+      - display_name
+      - supports_streaming
+      - supports_json_mode
+      - supports_tools
+      - supports_vision
+      - enabled
+      - health_state
+      - created_at
+      - updated_at
+      properties:
+        context_window:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        display_name:
+          type: string
+        enabled:
+          type: boolean
+        health_state:
+          type: string
+        id:
+          type: string
+        last_error_code:
+          type:
+          - string
+          - 'null'
+        last_health_check_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        max_output_tokens:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        model_id:
+          type: string
+        provider_id:
+          type: string
+        supports_json_mode:
+          type: boolean
+        supports_streaming:
+          type: boolean
+        supports_tools:
+          type: boolean
+        supports_vision:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    AiModelListDto:
+      type: object
+      required:
+      - generated_at
+      - count
+      - models
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiModelDto'
     AiProviderProfileDto:
       type: object
       required:
@@ -1960,6 +2248,39 @@ components:
           - number
           - 'null'
           format: double
+    NewAiModelDto:
+      type: object
+      required:
+      - id
+      - model_id
+      - display_name
+      properties:
+        context_window:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        display_name:
+          type: string
+        id:
+          type: string
+        max_output_tokens:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        model_id:
+          type: string
+        supports_json_mode:
+          type: boolean
+        supports_streaming:
+          type: boolean
+        supports_tools:
+          type: boolean
+        supports_vision:
+          type: boolean
     NewAiProviderProfileDto:
       type: object
       required:
@@ -2742,6 +3063,45 @@ components:
         updated_at:
           type: string
           format: date-time
+    UpdateAiModelDto:
+      type: object
+      properties:
+        context_window:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        display_name:
+          type:
+          - string
+          - 'null'
+        enabled:
+          type:
+          - boolean
+          - 'null'
+        max_output_tokens:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        supports_json_mode:
+          type:
+          - boolean
+          - 'null'
+        supports_streaming:
+          type:
+          - boolean
+          - 'null'
+        supports_tools:
+          type:
+          - boolean
+          - 'null'
+        supports_vision:
+          type:
+          - boolean
+          - 'null'
     UpdateAiProviderProfileDto:
       type: object
       properties:

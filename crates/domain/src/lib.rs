@@ -1,3 +1,4 @@
+mod ai_model;
 mod ai_provider;
 mod candle;
 mod lifecycle;
@@ -9,6 +10,10 @@ mod provider;
 mod research;
 mod watchlist;
 
+pub use ai_model::{
+    AiModel, AiModelError, MAX_AI_MODEL_CONTEXT_WINDOW, MAX_AI_MODEL_DISPLAY_NAME_CHARS,
+    MAX_AI_MODEL_OUTPUT_TOKENS, NewAiModel, StoredAiModel,
+};
 pub use ai_provider::{
     AiProviderHealthState, AiProviderKind, AiProviderProfile, AiProviderProfileError,
     MAX_AI_PROVIDER_DISPLAY_NAME_CHARS, MAX_AI_PROVIDER_TIMEOUT_MS, MIN_AI_PROVIDER_TIMEOUT_MS,

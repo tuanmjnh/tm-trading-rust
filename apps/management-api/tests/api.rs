@@ -1381,3 +1381,161 @@ async fn ai_provider_profiles_are_configured_and_health_checked() {
         .expect("response");
     assert_eq!(gone.status(), StatusCode::NOT_FOUND);
 }
+
+fn ai_model_body(overrides: serde_json::Value) -> serde_json::Value {
+    let mut body = json!({
+        "id": "primary-large",
+        "model_id": "model-a",
+        "display_name": "Primary Large",
+        "context_window": 128000,
+        "max_output_tokens": 8192,
+        "supports_streaming": true,
+        "supports_json_mode": true
+    });
+    for (key, value) in overrides.as_object().expect("object") {
+        body[key.as_str()] = value.clone();
+    }
+    body
+}
+
+#[tokio::test]
+async fn ai_models_are_registered_under_a_existing_provider_and_removed_with_it() {
+    let app = router(state());
+
+    let created_provider = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers",
+            Some(USER_TOKEN),
+            Some(ai_provider_body(json!({}))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(created_provider.status(), StatusCode::OK);
+
+    let created = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers/primary/models",
+            Some(USER_TOKEN),
+            Some(ai_model_body(json!({}))),
+        ))
+        .await
+        .expect("response");
+    let status = created.status();
+    let created = json_body(created).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["provider_id"], "primary");
+    assert_eq!(created["health_state"], "UNKNOWN");
+    assert_eq!(created["enabled"], true);
+    assert!(created["last_health_check_at"].is_null());
+
+    let listed = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/ai-models", Some(USER_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed = json_body(listed).await;
+    assert_eq!(listed["count"], 1);
+    assert_eq!(listed["models"][0]["model_id"], "model-a");
+
+    let updated = app
+        .clone()
+        .oneshot(request(
+            "PATCH",
+            "/api/v1/ai-models/primary-large",
+            Some(USER_TOKEN),
+            Some(json!({ "display_name": "Renamed", "enabled": false, "context_window": 64000 })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(updated.status(), StatusCode::OK);
+    let updated = json_body(updated).await;
+    assert_eq!(updated["display_name"], "Renamed");
+    assert_eq!(updated["enabled"], false);
+    assert_eq!(updated["context_window"], 64000);
+    assert_eq!(updated["supports_json_mode"], true);
+
+    let missing_provider = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers/missing/models",
+            Some(USER_TOKEN),
+            Some(ai_model_body(json!({ "id": "orphan" }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(missing_provider.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let invalid_context = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers/primary/models",
+            Some(USER_TOKEN),
+            Some(ai_model_body(json!({ "id": "bad", "context_window": 0 }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(invalid_context.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let agent = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/ai-models", Some(AGENT_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    let anonymous = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/ai-models", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    let deleted_model = app
+        .clone()
+        .oneshot(request(
+            "DELETE",
+            "/api/v1/ai-models/primary-large",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(deleted_model.status(), StatusCode::OK);
+
+    let recreated = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers/primary/models",
+            Some(USER_TOKEN),
+            Some(ai_model_body(json!({}))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(recreated.status(), StatusCode::OK);
+
+    let deleted_provider = app
+        .clone()
+        .oneshot(request(
+            "DELETE",
+            "/api/v1/ai-providers/primary",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(deleted_provider.status(), StatusCode::OK);
+
+    let empty = app
+        .oneshot(request("GET", "/api/v1/ai-models", Some(USER_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(json_body(empty).await["count"], 0);
+}

@@ -1,3 +1,4 @@
+use crate::ai_model::{AiModelDto, AiModelListDto, NewAiModelDto, UpdateAiModelDto};
 use crate::ai_provider::{
     AiProviderProfileDto, AiProviderProfileListDto, NewAiProviderProfileDto,
     UpdateAiProviderProfileDto,
@@ -72,7 +73,12 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         get_ai_provider_profile,
         update_ai_provider_profile,
         delete_ai_provider_profile,
-        test_ai_provider_profile
+        test_ai_provider_profile,
+        list_ai_models,
+        create_ai_model,
+        get_ai_model,
+        update_ai_model,
+        delete_ai_model
     ),
     components(schemas(
         ApiVersionInfo,
@@ -122,6 +128,10 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         AiProviderProfileListDto,
         NewAiProviderProfileDto,
         UpdateAiProviderProfileDto,
+        AiModelDto,
+        AiModelListDto,
+        NewAiModelDto,
+        UpdateAiModelDto,
         NewsClusterListDto,
         NewsClusterQueryDto
     )),
@@ -677,3 +687,78 @@ pub fn delete_ai_provider_profile() {}
     )
 )]
 pub fn test_ai_provider_profile() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai-models",
+    tag = "AI",
+    responses(
+        (status = 200, description = "AI models", body = AiModelListDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_ai_models() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai-providers/{id}/models",
+    tag = "AI",
+    params(("id" = String, Path, description = "AI provider profile identifier")),
+    request_body = NewAiModelDto,
+    responses(
+        (status = 200, description = "Created AI model", body = AiModelDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 422, description = "Invalid AI model configuration", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn create_ai_model() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai-models/{id}",
+    tag = "AI",
+    params(("id" = String, Path, description = "AI model identifier")),
+    responses(
+        (status = 200, description = "AI model", body = AiModelDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI model", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn get_ai_model() {}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/ai-models/{id}",
+    tag = "AI",
+    params(("id" = String, Path, description = "AI model identifier")),
+    request_body = UpdateAiModelDto,
+    responses(
+        (status = 200, description = "Updated AI model", body = AiModelDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI model", body = ApiErrorResponse),
+        (status = 422, description = "Invalid AI model configuration", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn update_ai_model() {}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/ai-models/{id}",
+    tag = "AI",
+    params(("id" = String, Path, description = "AI model identifier")),
+    responses(
+        (status = 200, description = "AI model deleted"),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn delete_ai_model() {}

@@ -316,6 +316,11 @@ fn App() -> Element {
                     Err(error) => ai_providers.write().list_failed(error.to_string()),
                 }
 
+                match client.list_ai_models().await {
+                    Ok(list) => ai_providers.write().models_loaded(list),
+                    Err(error) => ai_providers.write().models_failed(error.to_string()),
+                }
+
                 if let Some(operation_id) = pending_operation() {
                     match client.get_operation(&operation_id).await {
                         Ok(current) => {

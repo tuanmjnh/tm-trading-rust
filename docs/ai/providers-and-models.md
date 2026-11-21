@@ -70,8 +70,42 @@ All paths require a user credential; an Agent credential is always rejected. Pro
 
 The Desktop AI Provider Center reads the list through `api-client`, shows each profile's kind, default model, health, last check, and last sanitized error, and offers a bounded Test action per enabled profile.
 
-## 6. Pending
+## 6. Model registry
 
+A model belongs to exactly one provider profile. `provider_id` comes from the path, never from the body. Registering a model against an unknown provider fails with `422`, and deleting a provider also deletes its models, so no model can reference a missing provider.
+
+| Field | Meaning |
+|---|---|
+| `id` | Stable model-registry identifier |
+| `provider_id` | Owning AI provider profile |
+| `model_id` | Model name sent to the provider |
+| `display_name` | Operator-facing label, at most 80 characters |
+| `context_window` | Optional context size, 1 to 2000000 |
+| `max_output_tokens` | Optional output ceiling, 1 to 200000 |
+| `supports_streaming` | Declared capability |
+| `supports_json_mode` | Declared capability |
+| `supports_tools` | Declared capability |
+| `supports_vision` | Declared capability |
+| `enabled` | Operator enablement |
+| `health_state` | `UNKNOWN`, `HEALTHY`, or `UNHEALTHY` |
+| `last_health_check_at` | Observation time of the last model test |
+| `last_error_code` | Sanitized diagnostic code from the last failed test |
+
+Capabilities are declared, not probed, and are not used for routing yet. A model is stored with `UNKNOWN` health until a bounded model test exists; the fields are carried so routing can refuse an untested or unhealthy model later.
+
+| Method | Path | Capability |
+|---|---|---|
+| `GET` | `/api/v1/ai-models` | `trading.ai.read` |
+| `POST` | `/api/v1/ai-providers/{id}/models` | `trading.ai.write` |
+| `GET` | `/api/v1/ai-models/{id}` | `trading.ai.read` |
+| `PATCH` | `/api/v1/ai-models/{id}` | `trading.ai.write` |
+| `DELETE` | `/api/v1/ai-models/{id}` | `trading.ai.write` |
+
+Models live in the `ai_models` collection with an `updatedAt` index and a `providerId` index. The Desktop AI Provider Center lists registered models under the provider table.
+
+## 7. Pending
+
+- bounded model test that records model health per registered model;
 - model registry and per-task model selection;
 - routing and bounded fallback across profiles;
 - dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them;

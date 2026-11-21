@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
-use tm_trading_contracts::{AiProviderProfileDto, AiProviderProfileListDto};
+use tm_trading_contracts::{
+    AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto,
+};
 
 use crate::i18n::UiStrings;
 
@@ -11,9 +13,20 @@ pub struct AiProviderPanelState {
     pub list_error: Option<String>,
     pub testing_id: Option<String>,
     pub test_error: Option<String>,
+    pub models: Option<Vec<AiModelDto>>,
+    pub models_error: Option<String>,
 }
 
 impl AiProviderPanelState {
+    pub fn models_loaded(&mut self, list: AiModelListDto) {
+        self.models = Some(list.models);
+        self.models_error = None;
+    }
+
+    pub fn models_failed(&mut self, error: String) {
+        self.models_error = Some(error);
+    }
+
     pub fn list_loaded(&mut self, list: AiProviderProfileListDto) {
         self.profiles = Some(list.profiles);
         self.list_error = None;
@@ -152,6 +165,74 @@ pub fn AiProviderPanel(
                     }
                 }
             }
+            div { class: "panel-head signal-center-head",
+                div {
+                    h3 { "{strings.ai_models}" }
+                    p { class: "panel-subtitle", "{strings.ai_models_hint}" }
+                }
+            }
+            if let Some(error) = state.models_error.as_ref() {
+                div { class: "banner error", role: "alert", "{error}" }
+            }
+            match state.models.as_ref() {
+                None if state.models_error.is_some() => rsx! {
+                    div { class: "empty",
+                        p { class: "empty-title", "{strings.ai_provider_unavailable}" }
+                        p { "{strings.ai_models_unavailable_hint}" }
+                    }
+                },
+                None => rsx! {
+                    div { class: "empty loading-state", role: "status",
+                        p { class: "empty-title", "{strings.ai_provider_loading}" }
+                        p { "{strings.ai_models_loading_hint}" }
+                    }
+                },
+                Some(models) if models.is_empty() => rsx! {
+                    div { class: "empty",
+                        p { class: "empty-title", "{strings.ai_models_empty}" }
+                        p { "{strings.ai_models_empty_hint}" }
+                    }
+                },
+                Some(models) => rsx! {
+                    div { class: "table-wrap",
+                        table { class: "services ai-provider-table",
+                            thead {
+                                tr {
+                                    th { "{strings.ai_model_name_column}" }
+                                    th { "{strings.ai_model_provider_column}" }
+                                    th { "{strings.ai_model_id_column}" }
+                                    th { "{strings.ai_model_context_column}" }
+                                    th { "{strings.ai_model_output_column}" }
+                                    th { "{strings.ai_model_enabled_column}" }
+                                    th { "{strings.ai_provider_health_column}" }
+                                }
+                            }
+                            tbody {
+                                for model in models.iter() {
+                                    tr { class: "signal-row",
+                                        td {
+                                            div { class: "service-name", "{model.display_name}" }
+                                            div { class: "service-instance", "{model.id}" }
+                                        }
+                                        td { class: "signal-source", "{model.provider_id}" }
+                                        td { span { class: "timeframe-chip", "{model.model_id}" } }
+                                        td { class: "signal-time", "{format_tokens(model.context_window)}" }
+                                        td { class: "signal-time", "{format_tokens(model.max_output_tokens)}" }
+                                        td {
+                                            if model.enabled { "{strings.ai_model_enabled}" } else { "{strings.ai_model_disabled}" }
+                                        }
+                                        td {
+                                            span { class: "pill {health_class(&model.health_state)}",
+                                                "{health_label(&model.health_state, &strings)}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -170,6 +251,10 @@ fn health_class(state: &str) -> &'static str {
         "UNHEALTHY" => "state-failed",
         _ => "state-unknown",
     }
+}
+
+fn format_tokens(value: Option<u32>) -> String {
+    value.map_or_else(|| "-".to_owned(), |value| value.to_string())
 }
 
 fn format_optional_timestamp(value: Option<DateTime<Utc>>) -> String {
@@ -227,5 +312,50 @@ mod tests {
         assert!(state.testing_id.is_none());
         assert_eq!(state.test_error.as_deref(), Some("boom"));
         assert!(state.profiles.is_none());
+    }
+
+    #[test]
+    fn a_model_list_failure_keeps_the_provider_table() {
+        let mut state = AiProviderPanelState::default();
+        state.list_loaded(AiProviderProfileListDto {
+            generated_at: Utc.with_ymd_and_hms(2026, 11, 21, 8, 0, 0).unwrap(),
+            count: 1,
+            profiles: vec![profile("primary", "HEALTHY")],
+        });
+        state.models_failed("down".to_owned());
+        assert!(state.models.is_none());
+        assert_eq!(state.models_error.as_deref(), Some("down"));
+        assert_eq!(state.profiles.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn loaded_models_clear_the_previous_error() {
+        let mut state = AiProviderPanelState::default();
+        state.models_failed("down".to_owned());
+        let now = Utc.with_ymd_and_hms(2026, 11, 21, 8, 0, 0).unwrap();
+        state.models_loaded(AiModelListDto {
+            generated_at: now,
+            count: 1,
+            models: vec![AiModelDto {
+                id: "primary-large".to_owned(),
+                provider_id: "primary".to_owned(),
+                model_id: "model-a".to_owned(),
+                display_name: "Primary Large".to_owned(),
+                context_window: Some(128_000),
+                max_output_tokens: Some(8_192),
+                supports_streaming: true,
+                supports_json_mode: true,
+                supports_tools: false,
+                supports_vision: false,
+                enabled: true,
+                health_state: "UNKNOWN".to_owned(),
+                last_health_check_at: None,
+                last_error_code: None,
+                created_at: now,
+                updated_at: now,
+            }],
+        });
+        assert!(state.models_error.is_none());
+        assert_eq!(state.models.as_ref().unwrap()[0].model_id, "model-a");
     }
 }

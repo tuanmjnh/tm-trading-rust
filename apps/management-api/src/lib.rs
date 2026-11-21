@@ -1,3 +1,4 @@
+mod ai_models;
 mod ai_providers;
 mod auth;
 mod error;
@@ -99,6 +100,17 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v1/ai-providers/{id}/test",
             post(ai_providers::test_ai_provider_profile),
+        )
+        .route(
+            "/api/v1/ai-providers/{id}/models",
+            post(ai_models::create_ai_model),
+        )
+        .route("/api/v1/ai-models", get(ai_models::list_ai_models))
+        .route(
+            "/api/v1/ai-models/{id}",
+            get(ai_models::get_ai_model)
+                .patch(ai_models::update_ai_model)
+                .delete(ai_models::delete_ai_model),
         )
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(

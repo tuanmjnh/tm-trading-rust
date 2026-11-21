@@ -1,3 +1,4 @@
+mod ai_model;
 mod ai_provider;
 mod error;
 mod market;
@@ -10,6 +11,7 @@ mod service;
 mod system;
 mod watchlist;
 
+pub use ai_model::{AiModelDto, AiModelListDto, NewAiModelDto, UpdateAiModelDto};
 pub use ai_provider::{
     AiProviderProfileDto, AiProviderProfileListDto, NewAiProviderProfileDto,
     UpdateAiProviderProfileDto,

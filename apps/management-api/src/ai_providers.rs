@@ -118,10 +118,16 @@ pub async fn delete_ai_provider_profile(
     auth: crate::auth::AuthContext,
     Path(id): Path<String>,
 ) -> Result<Json<()>, ApiError> {
+    // Delete the profile and its models so no model references a missing provider.
     auth.require_capability(CAPABILITY_AI_WRITE)?;
     state
         .ai_provider_profiles
         .delete(&id)
+        .await
+        .map_err(ApiError::from)?;
+    state
+        .ai_models
+        .delete_by_provider(&id)
         .await
         .map_err(ApiError::from)?;
     Ok(Json(()))

@@ -231,6 +231,20 @@ pub struct UiStrings {
     pub ai_provider_health_healthy: &'static str,
     pub ai_provider_health_unhealthy: &'static str,
     pub ai_provider_health_unknown: &'static str,
+    pub ai_models: &'static str,
+    pub ai_models_hint: &'static str,
+    pub ai_models_unavailable_hint: &'static str,
+    pub ai_models_loading_hint: &'static str,
+    pub ai_models_empty: &'static str,
+    pub ai_models_empty_hint: &'static str,
+    pub ai_model_name_column: &'static str,
+    pub ai_model_provider_column: &'static str,
+    pub ai_model_id_column: &'static str,
+    pub ai_model_context_column: &'static str,
+    pub ai_model_output_column: &'static str,
+    pub ai_model_enabled_column: &'static str,
+    pub ai_model_enabled: &'static str,
+    pub ai_model_disabled: &'static str,
 }
 
 impl UiStrings {
@@ -445,6 +459,20 @@ impl UiStrings {
             ai_provider_health_healthy: "Healthy",
             ai_provider_health_unhealthy: "Unhealthy",
             ai_provider_health_unknown: "Unknown",
+            ai_models: "Registered models",
+            ai_models_hint: "Models available on the configured provider profiles",
+            ai_models_unavailable_hint: "The Management API could not load the AI models.",
+            ai_models_loading_hint: "Loading the registered AI models.",
+            ai_models_empty: "No models registered",
+            ai_models_empty_hint: "Register a model under a provider profile to route AI tasks to it.",
+            ai_model_name_column: "Model",
+            ai_model_provider_column: "Provider",
+            ai_model_id_column: "Model ID",
+            ai_model_context_column: "Context",
+            ai_model_output_column: "Max output",
+            ai_model_enabled_column: "State",
+            ai_model_enabled: "Enabled",
+            ai_model_disabled: "Disabled",
         }
     }
 
@@ -651,6 +679,20 @@ impl UiStrings {
             ai_provider_health_healthy: "Khỏe mạnh",
             ai_provider_health_unhealthy: "Không khỏe mạnh",
             ai_provider_health_unknown: "Không rõ",
+            ai_models: "Mô hình đã đăng ký",
+            ai_models_hint: "Các mô hình khả dụng trên hồ sơ nhà cung cấp đã cấu hình",
+            ai_models_unavailable_hint: "Management API không tải được danh sách mô hình AI.",
+            ai_models_loading_hint: "Đang tải danh sách mô hình AI đã đăng ký.",
+            ai_models_empty: "Chưa có mô hình",
+            ai_models_empty_hint: "Đăng ký mô hình dưới một hồ sơ nhà cung cấp để định tuyến tác vụ AI.",
+            ai_model_name_column: "Mô hình",
+            ai_model_provider_column: "Nhà cung cấp",
+            ai_model_id_column: "Mã mô hình",
+            ai_model_context_column: "Ngữ cảnh",
+            ai_model_output_column: "Đầu ra tối đa",
+            ai_model_enabled_column: "Trạng thái",
+            ai_model_enabled: "Bật",
+            ai_model_disabled: "Tắt",
         }
     }
 }
