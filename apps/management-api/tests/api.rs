@@ -1220,3 +1220,164 @@ async fn news_endpoints_return_display_safe_stories_and_source_health() {
         .expect("response");
     assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
 }
+
+fn ai_provider_body(overrides: serde_json::Value) -> serde_json::Value {
+    let mut body = json!({
+        "id": "primary",
+        "kind": "anthropic",
+        "display_name": "Primary",
+        "base_url": "https://api.example.com",
+        "default_model": "model-a",
+        "timeout_ms": 5000,
+        "api_key_env": "TM_TEST_AI_KEY"
+    });
+    for (key, value) in overrides.as_object().expect("object") {
+        body[key.as_str()] = value.clone();
+    }
+    body
+}
+
+#[tokio::test]
+async fn ai_provider_profiles_are_configured_and_health_checked() {
+    let app = router(state());
+
+    let created = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers",
+            Some(USER_TOKEN),
+            Some(ai_provider_body(json!({}))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(created.status(), StatusCode::OK);
+    let created = json_body(created).await;
+    assert_eq!(created["id"], "primary");
+    assert_eq!(created["api_key_env"], "TM_TEST_AI_KEY");
+    assert_eq!(created["health_state"], "UNKNOWN");
+    assert!(created["last_health_check_at"].is_null());
+
+    let listed = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai-providers",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(listed.status(), StatusCode::OK);
+    assert_eq!(json_body(listed).await["count"], 1);
+
+    let updated = app
+        .clone()
+        .oneshot(request(
+            "PATCH",
+            "/api/v1/ai-providers/primary",
+            Some(USER_TOKEN),
+            Some(json!({ "display_name": "Renamed", "enabled": false })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(updated.status(), StatusCode::OK);
+    let updated = json_body(updated).await;
+    assert_eq!(updated["display_name"], "Renamed");
+    assert_eq!(updated["enabled"], false);
+    assert_eq!(updated["default_model"], "model-a");
+
+    let tested = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers/primary/test",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(tested.status(), StatusCode::OK);
+    let tested = json_body(tested).await;
+    assert_eq!(tested["health_state"], "UNHEALTHY");
+    assert!(tested["last_error_code"].is_string());
+    assert!(!tested["last_health_check_at"].is_null());
+
+    let unknown_test = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers/missing/test",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unknown_test.status(), StatusCode::NOT_FOUND);
+
+    let invalid_kind = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers",
+            Some(USER_TOKEN),
+            Some(ai_provider_body(json!({ "id": "bad", "kind": "unknown" }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(invalid_kind.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let invalid_timeout = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers",
+            Some(USER_TOKEN),
+            Some(ai_provider_body(json!({ "id": "slow", "timeout_ms": 1 }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(invalid_timeout.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let agent = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai-providers",
+            Some(AGENT_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    let anonymous = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/ai-providers", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    let deleted = app
+        .clone()
+        .oneshot(request(
+            "DELETE",
+            "/api/v1/ai-providers/primary",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(deleted.status(), StatusCode::OK);
+
+    let gone = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai-providers/primary",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+}

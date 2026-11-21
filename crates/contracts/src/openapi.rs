@@ -1,4 +1,7 @@
-use crate::ai_provider::{AiProviderProfileDto, AiProviderProfileListDto};
+use crate::ai_provider::{
+    AiProviderProfileDto, AiProviderProfileListDto, NewAiProviderProfileDto,
+    UpdateAiProviderProfileDto,
+};
 use utoipa::OpenApi;
 
 use crate::error::ApiErrorResponse;
@@ -65,6 +68,10 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         list_news_sources,
         list_news_clusters,
         list_ai_provider_profiles,
+        create_ai_provider_profile,
+        get_ai_provider_profile,
+        update_ai_provider_profile,
+        delete_ai_provider_profile,
         test_ai_provider_profile
     ),
     components(schemas(
@@ -107,12 +114,14 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         NewsLevelDto,
         NewsDirectionDto,
         NewsFreshnessDto,
-                NewsSourceDto,
+        NewsSourceDto,
         NewsSourceListDto,
         NewsHealthStateDto,
         NewsClusterDto,
         AiProviderProfileDto,
         AiProviderProfileListDto,
+        NewAiProviderProfileDto,
+        UpdateAiProviderProfileDto,
         NewsClusterListDto,
         NewsClusterQueryDto
     )),
@@ -592,6 +601,67 @@ pub fn list_news_clusters() {}
     )
 )]
 pub fn list_ai_provider_profiles() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai-providers",
+    tag = "AI",
+    request_body = NewAiProviderProfileDto,
+    responses(
+        (status = 200, description = "Created AI provider profile", body = AiProviderProfileDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 422, description = "Invalid AI provider configuration", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn create_ai_provider_profile() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai-providers/{id}",
+    tag = "AI",
+    params(("id" = String, Path, description = "AI provider profile identifier")),
+    responses(
+        (status = 200, description = "AI provider profile", body = AiProviderProfileDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI provider profile", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn get_ai_provider_profile() {}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/ai-providers/{id}",
+    tag = "AI",
+    params(("id" = String, Path, description = "AI provider profile identifier")),
+    request_body = UpdateAiProviderProfileDto,
+    responses(
+        (status = 200, description = "Updated AI provider profile", body = AiProviderProfileDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI provider profile", body = ApiErrorResponse),
+        (status = 422, description = "Invalid AI provider configuration", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn update_ai_provider_profile() {}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/ai-providers/{id}",
+    tag = "AI",
+    params(("id" = String, Path, description = "AI provider profile identifier")),
+    responses(
+        (status = 200, description = "AI provider profile deleted"),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn delete_ai_provider_profile() {}
 
 #[utoipa::path(
     post,

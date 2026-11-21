@@ -98,6 +98,8 @@ impl OpenAiCompatibleProvider {
         validate_ai_provider_base_url(base_url)?;
         let client = Client::builder()
             .timeout(timeout)
+            // A provider redirect could otherwise reach an internal address.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| AiProviderError::Client(error.to_string()))?;
         Ok(Self {

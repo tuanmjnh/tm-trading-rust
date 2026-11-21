@@ -194,6 +194,176 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+    post:
+      tags:
+      - AI
+      operationId: create_ai_provider_profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewAiProviderProfileDto'
+        required: true
+      responses:
+        '200':
+          description: Created AI provider profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiProviderProfileDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Invalid AI provider configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai-providers/{id}:
+    get:
+      tags:
+      - AI
+      operationId: get_ai_provider_profile
+      parameters:
+      - name: id
+        in: path
+        description: AI provider profile identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: AI provider profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiProviderProfileDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI provider profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      tags:
+      - AI
+      operationId: delete_ai_provider_profile
+      parameters:
+      - name: id
+        in: path
+        description: AI provider profile identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: AI provider profile deleted
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    patch:
+      tags:
+      - AI
+      operationId: update_ai_provider_profile
+      parameters:
+      - name: id
+        in: path
+        description: AI provider profile identifier
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAiProviderProfileDto'
+        required: true
+      responses:
+        '200':
+          description: Updated AI provider profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiProviderProfileDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI provider profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Invalid AI provider configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/ai-providers/{id}/test:
     post:
       tags:
@@ -1790,6 +1960,33 @@ components:
           - number
           - 'null'
           format: double
+    NewAiProviderProfileDto:
+      type: object
+      required:
+      - id
+      - kind
+      - display_name
+      - base_url
+      - default_model
+      - timeout_ms
+      - api_key_env
+      properties:
+        api_key_env:
+          type: string
+        base_url:
+          type: string
+        default_model:
+          type: string
+        display_name:
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+        timeout_ms:
+          type: integer
+          format: int64
+          minimum: 0
     NewsClusterDto:
       type: object
       description: One cluster of stories that describe the same event.
@@ -2545,6 +2742,35 @@ components:
         updated_at:
           type: string
           format: date-time
+    UpdateAiProviderProfileDto:
+      type: object
+      properties:
+        api_key_env:
+          type:
+          - string
+          - 'null'
+        base_url:
+          type:
+          - string
+          - 'null'
+        default_model:
+          type:
+          - string
+          - 'null'
+        display_name:
+          type:
+          - string
+          - 'null'
+        enabled:
+          type:
+          - boolean
+          - 'null'
+        timeout_ms:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
     UpdateProviderInstanceRequest:
       type: object
       description: Fields left out are unchanged.

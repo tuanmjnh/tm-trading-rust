@@ -34,7 +34,7 @@ pub async fn create_ai_provider_profile(
     auth: crate::auth::AuthContext,
     Json(request): Json<NewAiProviderProfileDto>,
 ) -> Result<Json<AiProviderProfileDto>, ApiError> {
-    auth.require_capability(CAPABILITY_AI_READ)?;
+    auth.require_capability(CAPABILITY_AI_WRITE)?;
     let kind = AiProviderKind::parse(&request.kind)
         .ok_or_else(|| ApiError::UnprocessableEntity("unsupported ai provider kind".to_owned()))?;
     let profile = AiProviderProfile::new(NewAiProviderProfile {
