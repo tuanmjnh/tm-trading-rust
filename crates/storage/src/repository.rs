@@ -6,10 +6,10 @@ use thiserror::Error;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{
-    Candle, CandleError, NewNewsSource, NewsCluster, NewsClusterError, NewsItem, NewsItemError,
-    NewsLevel, NewsSource, NewsSourceError, Operation, OperationError, OperationId,
-    ProviderInstance, ProviderInstanceError, ResearchEvent, ResearchEventError, Watchlist,
-    WatchlistError,
+    AiProviderProfile, AiProviderProfileError, Candle, CandleError, NewNewsSource, NewsCluster,
+    NewsClusterError, NewsItem, NewsItemError, NewsLevel, NewsSource, NewsSourceError, Operation,
+    OperationError, OperationId, ProviderInstance, ProviderInstanceError, ResearchEvent,
+    ResearchEventError, Watchlist, WatchlistError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -414,6 +414,14 @@ pub trait ProviderInstanceRepository: Send + Sync {
     async fn delete(&self, provider_instance_id: &str) -> Result<(), RepositoryError>;
 }
 
+#[async_trait]
+pub trait AiProviderProfileRepository: Send + Sync {
+    async fn list(&self) -> Result<Vec<AiProviderProfile>, RepositoryError>;
+    async fn get(&self, id: &str) -> Result<Option<AiProviderProfile>, RepositoryError>;
+    async fn upsert(&self, profile: &AiProviderProfile) -> Result<(), RepositoryError>;
+    async fn delete(&self, id: &str) -> Result<(), RepositoryError>;
+}
+
 #[derive(Debug, Error)]
 pub enum RepositoryError {
     #[error("idempotency key was reused with a different request")]
@@ -457,6 +465,8 @@ pub enum RepositoryError {
     WatchlistNotFound,
     #[error("provider instance was not found")]
     ProviderInstanceNotFound,
+    #[error("ai provider profile was not found")]
+    AiProviderProfileNotFound,
     #[error("news source was not found")]
     NewsSourceNotFound,
     #[error(transparent)]
@@ -467,6 +477,8 @@ pub enum RepositoryError {
     NewsCluster(#[from] NewsClusterError),
     #[error(transparent)]
     ProviderInstance(#[from] ProviderInstanceError),
+    #[error(transparent)]
+    AiProviderProfile(#[from] AiProviderProfileError),
     #[error(transparent)]
     Domain(#[from] OperationError),
 }

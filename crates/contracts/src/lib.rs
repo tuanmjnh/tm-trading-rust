@@ -1,3 +1,4 @@
+mod ai_provider;
 mod error;
 mod market;
 mod news;
@@ -9,6 +10,10 @@ mod service;
 mod system;
 mod watchlist;
 
+pub use ai_provider::{
+    AiProviderProfileDto, AiProviderProfileListDto, NewAiProviderProfileDto,
+    UpdateAiProviderProfileDto,
+};
 pub use error::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
 pub use market::{
     MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,

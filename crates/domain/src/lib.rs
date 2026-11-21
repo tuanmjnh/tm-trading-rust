@@ -1,3 +1,4 @@
+mod ai_provider;
 mod candle;
 mod lifecycle;
 mod news;
@@ -8,6 +9,11 @@ mod provider;
 mod research;
 mod watchlist;
 
+pub use ai_provider::{
+    AiProviderHealthState, AiProviderKind, AiProviderProfile, AiProviderProfileError,
+    MAX_AI_PROVIDER_DISPLAY_NAME_CHARS, MAX_AI_PROVIDER_TIMEOUT_MS, MIN_AI_PROVIDER_TIMEOUT_MS,
+    NewAiProviderProfile, StoredAiProviderProfile,
+};
 pub use candle::{CANDLE_SCHEMA_VERSION, Candle, CandleError, NewCandle, candle_id};
 pub use lifecycle::{DesiredState, ObservedState, Readiness};
 pub use news::{

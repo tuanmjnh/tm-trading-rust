@@ -164,6 +164,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai-providers:
+    get:
+      tags:
+      - AI
+      operationId: list_ai_provider_profiles
+      responses:
+        '200':
+          description: AI provider profiles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiProviderProfileListDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/health:
     get:
       tags:
@@ -1327,6 +1357,73 @@ components:
         server_time:
           type: string
           format: date-time
+    AiProviderProfileDto:
+      type: object
+      required:
+      - id
+      - kind
+      - display_name
+      - enabled
+      - base_url
+      - default_model
+      - timeout_ms
+      - api_key_env
+      - health_state
+      - created_at
+      - updated_at
+      properties:
+        api_key_env:
+          type: string
+        base_url:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        default_model:
+          type: string
+        display_name:
+          type: string
+        enabled:
+          type: boolean
+        health_state:
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+        last_error_code:
+          type:
+          - string
+          - 'null'
+        last_health_check_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        timeout_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        updated_at:
+          type: string
+          format: date-time
+    AiProviderProfileListDto:
+      type: object
+      required:
+      - generated_at
+      - count
+      - profiles
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+        profiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiProviderProfileDto'
     ApiErrorBody:
       type: object
       required:

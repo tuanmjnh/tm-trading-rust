@@ -1,7 +1,9 @@
+mod ai_providers_memory;
 mod bson_support;
 mod candles_memory;
 mod memory;
 mod mongo;
+mod mongo_ai_providers;
 mod mongo_candles;
 mod mongo_news_clusters;
 mod mongo_news_items;
@@ -19,9 +21,11 @@ mod repository;
 mod research_events_memory;
 mod watchlists_memory;
 
+pub use ai_providers_memory::InMemoryAiProviderProfileRepository;
 pub use candles_memory::InMemoryCandleRepository;
 pub use memory::{InMemoryOperationRepository, InMemoryServiceSnapshotRepository};
 pub use mongo::MongoConnection;
+pub use mongo_ai_providers::MongoAiProviderProfileRepository;
 pub use mongo_candles::MongoCandleRepository;
 pub use mongo_news_clusters::MongoNewsClusterRepository;
 pub use mongo_news_items::MongoNewsItemRepository;
@@ -36,11 +40,12 @@ pub use news_items_memory::InMemoryNewsItemRepository;
 pub use news_sources_memory::InMemoryNewsSourceRepository;
 pub use providers_memory::InMemoryProviderInstanceRepository;
 pub use repository::{
-    CandleRepository, CandleUpsertOutcome, CreateOperationOutcome, DEFAULT_NEWS_CLUSTER_LIMIT,
-    DEFAULT_NEWS_ITEM_LIMIT, NewsClusterQuery, NewsClusterRepository, NewsItemQuery,
-    NewsItemRepository, NewsItemUpsertOutcome, NewsSourceRepository, OperationRepository,
-    ProviderInstanceRepository, RepositoryError, ResearchEventQuery, ResearchEventRepository,
-    ResearchEventUpsertOutcome, ServiceSnapshotRepository, WatchlistRepository,
+    AiProviderProfileRepository, CandleRepository, CandleUpsertOutcome, CreateOperationOutcome,
+    DEFAULT_NEWS_CLUSTER_LIMIT, DEFAULT_NEWS_ITEM_LIMIT, NewsClusterQuery, NewsClusterRepository,
+    NewsItemQuery, NewsItemRepository, NewsItemUpsertOutcome, NewsSourceRepository,
+    OperationRepository, ProviderInstanceRepository, RepositoryError, ResearchEventQuery,
+    ResearchEventRepository, ResearchEventUpsertOutcome, ServiceSnapshotRepository,
+    WatchlistRepository,
 };
 pub use research_events_memory::InMemoryResearchEventRepository;
 pub use watchlists_memory::InMemoryWatchlistRepository;

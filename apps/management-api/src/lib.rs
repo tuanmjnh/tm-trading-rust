@@ -1,3 +1,4 @@
+mod ai_providers;
 mod auth;
 mod error;
 mod market;
@@ -84,6 +85,17 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/news/sources", get(news::list_news_sources))
         .route("/api/v1/news/clusters", get(news::list_news_clusters))
         .route("/api/v1/news/{news_id}", get(news::get_news_item))
+        .route(
+            "/api/v1/ai-providers",
+            get(ai_providers::list_ai_provider_profiles)
+                .post(ai_providers::create_ai_provider_profile),
+        )
+        .route(
+            "/api/v1/ai-providers/{id}",
+            get(ai_providers::get_ai_provider_profile)
+                .patch(ai_providers::update_ai_provider_profile)
+                .delete(ai_providers::delete_ai_provider_profile),
+        )
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(
             "/api/v1/agent/commands/claim",

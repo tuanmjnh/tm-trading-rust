@@ -120,6 +120,12 @@ impl From<RepositoryError> for ApiError {
             RepositoryError::NewsSource(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::NewsItem(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::NewsCluster(error) => Self::UnprocessableEntity(error.to_string()),
+            RepositoryError::AiProviderProfile(error) => {
+                Self::UnprocessableEntity(error.to_string())
+            }
+            RepositoryError::AiProviderProfileNotFound => {
+                Self::NotFound("ai provider profile was not found".to_owned())
+            }
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())
             }
