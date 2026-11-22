@@ -281,4 +281,4 @@ is never stored.
 
 ## 12. Pending
 
-- dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them.
+- dedicated Anthropic and Gemini adapters. OpenAI and OpenRouter currently use the OpenAI-compatible adapter and need dedicated adapters only if their protocol differences require them.
