@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use sha1::{Digest, Sha1};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -16,6 +17,34 @@ pub const MAX_AI_JOB_INPUTS: usize = MAX_AI_BRIEFING_LIST_ITEMS;
 
 /// Maximum lifetime of one AI job before it expires.
 pub const MAX_AI_JOB_LIFETIME_HOURS: i64 = 24;
+
+/// Canonical fingerprint of one job request.
+///
+/// The fingerprint covers the task and the exact requested inputs, so replaying the
+/// same request is recognised and reusing one idempotency key for a different request
+/// is detected.
+#[must_use]
+pub fn ai_job_request_hash(
+    task: AiTaskKind,
+    research_event_ids: &[String],
+    news_item_ids: &[String],
+) -> String {
+    let mut canonical = String::from(task.as_str());
+    for id in research_event_ids {
+        canonical.push_str("\nresearch_event:");
+        canonical.push_str(id);
+    }
+    for id in news_item_ids {
+        canonical.push_str("\nnews_item:");
+        canonical.push_str(id);
+    }
+    let digest = Sha1::digest(canonical.as_bytes());
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
 
 /// Stable identifier of one AI job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,6 +70,13 @@ impl AiJobId {
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         let suffix = value.trim().strip_prefix(AI_JOB_ID_PREFIX)?;
+        if suffix.len() != 32
+            || !suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return None;
+        }
         Uuid::parse_str(suffix).ok().map(Self)
     }
 }
@@ -109,6 +145,7 @@ pub struct NewAiJob {
     pub owner_scope: String,
     pub idempotency_key: String,
     pub request_hash: String,
+    pub correlation_id: Uuid,
     pub task: AiTaskKind,
     pub research_event_ids: Vec<String>,
     pub news_item_ids: Vec<String>,
@@ -124,6 +161,7 @@ pub struct PersistedAiJob {
     pub owner_scope: String,
     pub idempotency_key: String,
     pub request_hash: String,
+    pub correlation_id: Uuid,
     pub task: AiTaskKind,
     pub research_event_ids: Vec<String>,
     pub news_item_ids: Vec<String>,
@@ -148,6 +186,7 @@ pub struct AiJob {
     owner_scope: String,
     idempotency_key: String,
     request_hash: String,
+    correlation_id: Uuid,
     task: AiTaskKind,
     research_event_ids: Vec<String>,
     news_item_ids: Vec<String>,
@@ -194,6 +233,7 @@ impl AiJob {
             owner_scope: input.owner_scope,
             idempotency_key: input.idempotency_key,
             request_hash: input.request_hash,
+            correlation_id: input.correlation_id,
             task: input.task,
             research_event_ids: input.research_event_ids,
             news_item_ids: input.news_item_ids,
@@ -228,6 +268,7 @@ impl AiJob {
             owner_scope: validated.owner_scope,
             idempotency_key: validated.idempotency_key,
             request_hash: validated.request_hash,
+            correlation_id: validated.correlation_id,
             task: validated.task,
             research_event_ids: validated.research_event_ids,
             news_item_ids: validated.news_item_ids,
@@ -268,6 +309,11 @@ impl AiJob {
     #[must_use]
     pub fn request_hash(&self) -> &str {
         &self.request_hash
+    }
+
+    #[must_use]
+    pub const fn correlation_id(&self) -> Uuid {
+        self.correlation_id
     }
 
     #[must_use]
@@ -492,6 +538,7 @@ struct NormalizedAiJob {
     owner_scope: String,
     idempotency_key: String,
     request_hash: String,
+    correlation_id: Uuid,
     task: AiTaskKind,
     research_event_ids: Vec<String>,
     news_item_ids: Vec<String>,
@@ -524,6 +571,7 @@ impl NormalizedAiJob {
             owner_scope,
             idempotency_key,
             request_hash,
+            correlation_id: input.correlation_id,
             task: input.task,
             research_event_ids,
             news_item_ids,
@@ -604,12 +652,32 @@ mod tests {
             owner_scope: "local-operator".to_owned(),
             idempotency_key: "explain-1".to_owned(),
             request_hash: "hash-1".to_owned(),
+            correlation_id: Uuid::new_v4(),
             task: AiTaskKind::ResearchExplanation,
             research_event_ids: vec!["rev1_0123456789abcdef".to_owned()],
             news_item_ids: Vec::new(),
             requested_at: at(),
             expires_at: at() + chrono::Duration::hours(1),
         }
+    }
+
+    #[test]
+    fn a_request_hash_covers_the_task_and_input_kind() {
+        let research = vec!["rev1_0123456789abcdef".to_owned()];
+        let news = vec!["news_0123456789abcdef0123456789abcdef01234567".to_owned()];
+        let hash = ai_job_request_hash(AiTaskKind::ResearchExplanation, &research, &[]);
+        assert_eq!(
+            hash,
+            ai_job_request_hash(AiTaskKind::ResearchExplanation, &research, &[])
+        );
+        assert_ne!(
+            hash,
+            ai_job_request_hash(AiTaskKind::ResearchExplanation, &[], &news)
+        );
+        assert_ne!(
+            hash,
+            ai_job_request_hash(AiTaskKind::NewsSummary, &research, &[])
+        );
     }
 
     #[test]
@@ -621,6 +689,14 @@ mod tests {
         assert!(job.id().to_string().starts_with(AI_JOB_ID_PREFIX));
         assert_eq!(AiJobId::parse(&job.id().to_string()), Some(job.id()));
         assert_eq!(AiJobId::parse("aijob1_not-a-uuid"), None);
+        assert_eq!(
+            AiJobId::parse("aijob1_01234567-89ab-cdef-0123-456789abcdef"),
+            None
+        );
+        assert_eq!(
+            AiJobId::parse("aijob1_0123456789ABCDEF0123456789ABCDEF"),
+            None
+        );
     }
 
     #[test]
@@ -789,6 +865,7 @@ mod tests {
             owner_scope: job.owner_scope().to_owned(),
             idempotency_key: job.idempotency_key().to_owned(),
             request_hash: job.request_hash().to_owned(),
+            correlation_id: job.correlation_id(),
             task: job.task(),
             research_event_ids: job.research_event_ids().to_vec(),
             news_item_ids: job.news_item_ids().to_vec(),

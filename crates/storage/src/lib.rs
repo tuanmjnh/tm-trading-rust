@@ -35,7 +35,7 @@ mod watchlists_memory;
 
 pub use ai_briefings::{AiBriefingQuery, AiBriefingRepository, DEFAULT_AI_BRIEFING_LIMIT};
 pub use ai_briefings_memory::InMemoryAiBriefingRepository;
-pub use ai_jobs::{AiJobRepository, CreateAiJobOutcome};
+pub use ai_jobs::{AiJobQuery, AiJobRepository, CreateAiJobOutcome, DEFAULT_AI_JOB_LIMIT};
 pub use ai_jobs_memory::InMemoryAiJobRepository;
 pub use ai_models::AiModelRepository;
 pub use ai_models_memory::InMemoryAiModelRepository;

@@ -10,7 +10,7 @@ use mongodb::{Collection, Database, IndexModel};
 use tm_trading_domain::{AiJob, AiJobError, AiJobId, AiJobStatus, AiTaskKind, PersistedAiJob};
 
 use crate::bson_support::{from_timestamp, number_as_i64, timestamp};
-use crate::{AiJobRepository, CreateAiJobOutcome, RepositoryError};
+use crate::{AiJobQuery, AiJobRepository, CreateAiJobOutcome, RepositoryError};
 
 /// Durable `ai_jobs` store.
 pub struct MongoAiJobRepository {
@@ -129,6 +129,24 @@ impl AiJobRepository for MongoAiJobRepository {
             .await?
             .map(from_document)
             .transpose()
+    }
+
+    async fn list(&self, query: &AiJobQuery) -> Result<Vec<AiJob>, RepositoryError> {
+        let mut filter = doc! { "ownerScope": &query.owner_scope };
+        if let Some(task) = query.task {
+            filter.insert("task", task.as_str());
+        }
+        let mut cursor = self
+            .collection
+            .find(filter)
+            .sort(doc! { "requestedAt": -1, "_id": -1 })
+            .limit(i64::try_from(query.limit).unwrap_or(i64::MAX))
+            .await?;
+        let mut jobs = Vec::new();
+        while let Some(document) = cursor.try_next().await? {
+            jobs.push(from_document(document)?);
+        }
+        Ok(jobs)
     }
 
     async fn claim_next(
@@ -267,6 +285,7 @@ fn to_document(job: &AiJob) -> Result<Document, RepositoryError> {
         "ownerScope": job.owner_scope(),
         "idempotencyKey": job.idempotency_key(),
         "requestHash": job.request_hash(),
+        "correlationId": job.correlation_id().to_string(),
         "task": job.task().as_str(),
         "researchEventIds": job.research_event_ids().to_vec(),
         "newsItemIds": job.news_item_ids().to_vec(),
@@ -316,6 +335,8 @@ fn from_document(document: Document) -> Result<AiJob, RepositoryError> {
         owner_scope: required_text(&document, "ownerScope")?,
         idempotency_key: required_text(&document, "idempotencyKey")?,
         request_hash: required_text(&document, "requestHash")?,
+        correlation_id: uuid::Uuid::parse_str(&required_text(&document, "correlationId")?)
+            .map_err(|_| RepositoryError::CorruptRecord("correlationId"))?,
         task,
         research_event_ids: string_list(&document, "researchEventIds")?,
         news_item_ids: string_list(&document, "newsItemIds")?,

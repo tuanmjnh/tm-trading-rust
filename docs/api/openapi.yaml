@@ -971,6 +971,166 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai/jobs:
+    get:
+      tags:
+      - AI
+      operationId: list_ai_jobs
+      parameters:
+      - name: task
+        in: query
+        description: Exact AI task filter
+        required: false
+        schema:
+          $ref: '#/components/schemas/AiBriefingTaskDto'
+      - name: limit
+        in: query
+        description: Maximum number of jobs, 1 to 200, default 50
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+      responses:
+        '200':
+          description: Owner-scoped AI jobs, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiJobListDto'
+        '400':
+          description: Malformed query parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The requested task or limit is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    post:
+      tags:
+      - AI
+      operationId: create_ai_job
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewAiJobDto'
+        required: true
+      responses:
+        '200':
+          description: The queued job was already stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiJobDto'
+        '201':
+          description: AI job queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiJobDto'
+        '400':
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: The idempotency key was reused with a different request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The task or the requested inputs are invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai/jobs/{job_id}:
+    get:
+      tags:
+      - AI
+      operationId: get_ai_job
+      parameters:
+      - name: job_id
+        in: path
+        description: AI job identifier
+        required: true
+        schema:
+          type: string
+          pattern: ^aijob1_[0-9a-f]{32}$
+      responses:
+        '200':
+          description: Owner-scoped AI job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiJobDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/health:
     get:
       tags:
@@ -2264,6 +2424,104 @@ components:
       - market_briefing
       - research_explanation
       - daily_digest
+    AiJobDto:
+      type: object
+      description: One owner-scoped AI job.
+      required:
+      - id
+      - owner_scope
+      - correlation_id
+      - task
+      - status
+      - attempt
+      - research_event_ids
+      - news_item_ids
+      - requested_at
+      - expires_at
+      properties:
+        attempt:
+          type: integer
+          format: int32
+          minimum: 0
+        briefing_id:
+          type:
+          - string
+          - 'null'
+        correlation_id:
+          type: string
+        error_code:
+          type:
+          - string
+          - 'null'
+        expires_at:
+          type: string
+          format: date-time
+        finished_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        id:
+          type: string
+        news_item_ids:
+          type: array
+          items:
+            type: string
+        owner_scope:
+          type: string
+        requested_at:
+          type: string
+          format: date-time
+        research_event_ids:
+          type: array
+          items:
+            type: string
+        status:
+          $ref: '#/components/schemas/AiJobStatusDto'
+        task:
+          $ref: '#/components/schemas/AiBriefingTaskDto'
+    AiJobListDto:
+      type: object
+      description: A bounded list of owner-scoped AI jobs.
+      required:
+      - generated_at
+      - count
+      - jobs
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiJobDto'
+    AiJobQueryDto:
+      type: object
+      description: Optional filters for an AI job list request.
+      properties:
+        limit:
+          type:
+          - integer
+          - 'null'
+          maximum: 200
+          minimum: 1
+        task:
+          oneOf:
+          - $ref: '#/components/schemas/AiBriefingTaskDto'
+          - type: 'null'
+    AiJobStatusDto:
+      type: string
+      description: Durable state of one queued AI job.
+      enum:
+      - QUEUED
+      - CLAIMED
+      - SUCCEEDED
+      - FAILED
+      - EXPIRED
+      - OUTCOME_UNKNOWN
     AiModelDto:
       type: object
       required:
@@ -2802,6 +3060,30 @@ components:
           - number
           - 'null'
           format: double
+    NewAiJobDto:
+      type: object
+      description: Request to queue one evidence-bound briefing.
+      required:
+      - task
+      - research_event_ids
+      - news_item_ids
+      properties:
+        idempotency_key:
+          type:
+          - string
+          - 'null'
+          description: Optional replay key. Without it, an identical request reuses its own job.
+          maxLength: 200
+        news_item_ids:
+          type: array
+          items:
+            type: string
+        research_event_ids:
+          type: array
+          items:
+            type: string
+        task:
+          $ref: '#/components/schemas/AiBriefingTaskDto'
     NewAiModelDto:
       type: object
       required:

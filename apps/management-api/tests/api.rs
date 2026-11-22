@@ -2000,3 +2000,259 @@ async fn ai_briefings_are_owner_scoped_and_carry_evidence_provenance() {
         .expect("response");
     assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn ai_jobs_are_owner_scoped_idempotent_and_bounded() {
+    let state = state();
+    let app = router(state.clone());
+
+    let created = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(USER_TOKEN),
+            Some(json!({
+                "task": "research_explanation",
+                "research_event_ids": ["rev1_0123456789abcdef"],
+                "news_item_ids": []
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created = json_body(created).await;
+    assert_eq!(created["status"], "QUEUED");
+    assert_eq!(created["owner_scope"], "test-operator");
+    let correlation_id = created["correlation_id"]
+        .as_str()
+        .expect("correlation id")
+        .to_owned();
+    assert!(!correlation_id.is_empty());
+    assert_eq!(created["task"], "research_explanation");
+    assert_eq!(created["attempt"], 0);
+    assert_eq!(
+        created["research_event_ids"],
+        json!(["rev1_0123456789abcdef"])
+    );
+    let job_id = created["id"].as_str().expect("job id").to_owned();
+    assert!(job_id.starts_with("aijob1_"));
+
+    let replay = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(USER_TOKEN),
+            Some(json!({
+                "task": "research_explanation",
+                "research_event_ids": ["rev1_0123456789abcdef"],
+                "news_item_ids": []
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(replay.status(), StatusCode::OK);
+    let replay = json_body(replay).await;
+    assert_eq!(replay["id"], job_id);
+    assert_eq!(replay["correlation_id"], correlation_id);
+
+    let explicit = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(USER_TOKEN),
+            Some(json!({
+                "task": "research_explanation",
+                "research_event_ids": ["rev1_0123456789abcdef"],
+                "news_item_ids": [],
+                "idempotency_key": "explain-1"
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(explicit.status(), StatusCode::CREATED);
+    let explicit_id = json_body(explicit).await["id"]
+        .as_str()
+        .expect("job id")
+        .to_owned();
+
+    let explicit_replay = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(USER_TOKEN),
+            Some(json!({
+                "task": "research_explanation",
+                "research_event_ids": ["rev1_0123456789abcdef"],
+                "news_item_ids": [],
+                "idempotency_key": "explain-1"
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(explicit_replay.status(), StatusCode::OK);
+    assert_eq!(json_body(explicit_replay).await["id"], explicit_id);
+
+    let conflicting = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(USER_TOKEN),
+            Some(json!({
+                "task": "research_explanation",
+                "research_event_ids": ["rev1_fedcba9876543210"],
+                "news_item_ids": [],
+                "idempotency_key": "explain-1"
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(conflicting.status(), StatusCode::CONFLICT);
+
+    let too_many_inputs = (0..51)
+        .map(|index| format!("rev1_{index:016x}"))
+        .collect::<Vec<_>>();
+    for body in [
+        json!({"task": "market_briefing", "research_event_ids": ["rev1_0123456789abcdef"]}),
+        json!({"task": "research_explanation", "research_event_ids": [], "news_item_ids": []}),
+        json!({"task": "research_explanation", "research_event_ids": ["not-an-id"]}),
+        json!({"task": "research_explanation", "research_event_ids": too_many_inputs}),
+    ] {
+        let invalid = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/api/v1/ai/jobs",
+                Some(USER_TOKEN),
+                Some(body),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    for (path, expected) in [
+        (
+            "/api/v1/ai/jobs?limit=not-a-number",
+            StatusCode::BAD_REQUEST,
+        ),
+        ("/api/v1/ai/jobs?limit=0", StatusCode::UNPROCESSABLE_ENTITY),
+        (
+            "/api/v1/ai/jobs?limit=201",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "/api/v1/ai/jobs?task=unsupported",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let invalid = app
+            .clone()
+            .oneshot(request("GET", path, Some(USER_TOKEN), None))
+            .await
+            .expect("response");
+        assert_eq!(invalid.status(), expected);
+    }
+
+    let listed = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/ai/jobs", Some(USER_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed = json_body(listed).await;
+    assert_eq!(listed["count"], 2);
+    let listed_ids = listed["jobs"]
+        .as_array()
+        .expect("jobs")
+        .iter()
+        .map(|job| job["id"].as_str().expect("job id"))
+        .collect::<Vec<_>>();
+    assert!(listed_ids.contains(&job_id.as_str()));
+    assert!(listed_ids.contains(&explicit_id.as_str()));
+
+    let detail = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/ai/jobs/{job_id}"),
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(detail.status(), StatusCode::OK);
+
+    let unknown = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai/jobs/aijob1_00000000000000000000000000000000",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    let agent = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/ai/jobs", Some(AGENT_TOKEN), None))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    let agent_write = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(AGENT_TOKEN),
+            Some(json!({
+                "task": "research_explanation",
+                "research_event_ids": ["rev1_0123456789abcdef"],
+                "news_item_ids": []
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(agent_write.status(), StatusCode::FORBIDDEN);
+
+    let anonymous = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/ai/jobs", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    let mut foreign_state = state;
+    foreign_state.auth.user_token = "other-user-token".to_owned();
+    foreign_state.auth.user_subject = "foreign-operator".to_owned();
+    let foreign_app = router(foreign_state);
+    let foreign_detail = foreign_app
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/ai/jobs/{job_id}"),
+            Some("other-user-token"),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(foreign_detail.status(), StatusCode::NOT_FOUND);
+    let foreign_list = foreign_app
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai/jobs",
+            Some("other-user-token"),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(foreign_list.status(), StatusCode::OK);
+    assert_eq!(json_body(foreign_list).await["count"], 0);
+}

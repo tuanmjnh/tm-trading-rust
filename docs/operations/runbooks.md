@@ -422,24 +422,36 @@ The Desktop News & Events panel reads both lists every refresh cycle and shows o
 
 Selecting a headline opens the news-story detail Slideover, which fetches that story by ID and shows its excerpt, level, direction, and freshness, a link to the original article, and full provenance: news ID, source, language, market group, event type, publication, first-seen and ingestion times, and the article URL. Opening a news story closes an open research-event Slideover and the reverse, so only one overlay is open at a time.
 
-## AI briefing read model
+## AI briefing and job request API
 
-The Management API serves evidence-bound briefing records independently of the future AI Worker:
+The Management API serves evidence-bound briefing records and the durable request source
+used by the AI Worker:
 
 ```powershell
 curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
   "http://127.0.0.1:8787/api/v1/ai/briefings?task=market_briefing&limit=50"
 curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
   "http://127.0.0.1:8787/api/v1/ai/briefings/aibr1_..."
+curl -X POST `
+  -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  -H "Content-Type: application/json" `
+  --data '{"task":"research_explanation","research_event_ids":["rev1_0123456789abcdef"],"news_item_ids":[]}' `
+  "http://127.0.0.1:8787/api/v1/ai/jobs"
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/ai/jobs?task=research_explanation&limit=50"
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/ai/jobs/aijob1_..."
 ```
 
 - `task` is an optional exact AI task filter; `limit` is 1-200 and defaults to 50. Malformed limits return the typed `400` error contract, while unsupported tasks and out-of-range limits return `422`.
-- The owner scope is always the authenticated subject. An unknown or foreign briefing ID is `404`, so the API does not confirm that another owner's record exists.
-- Both endpoints require the exact `trading.ai.read` capability. The Agent credential is rejected with `403`, and an anonymous request is `401`.
-- Each response separates facts, model interpretations, and uncertainties and includes typed evidence references, input snapshot IDs, missing/stale disclosures, provider/model/prompt provenance, producer/schema stamps, and the UTC generation time.
+- The owner scope is always the authenticated subject. An unknown or foreign briefing or job ID is `404`, so the API does not confirm that another owner's record exists.
+- Briefing reads require the exact `trading.ai.read` capability. Job reads use the same capability; queueing a job requires `trading.ai.write`. The Agent credential is rejected with `403`, and an anonymous request is `401`.
+- Each briefing response separates facts, model interpretations, and uncertainties and includes typed evidence references, input snapshot IDs, missing/stale disclosures, provider/model/prompt provenance, producer/schema stamps, and the UTC generation time.
+- A job request must name at least one valid research-event or news identifier and at most 50 combined inputs. Only `research_explanation` can be queued today. The owner scope is never accepted from the request body.
+- A new job returns `201`; an identical replay returns `200` with the stored job. Reusing an idempotency key with a different request returns `409`. Without an explicit key, the request fingerprint is the replay key. The job carries the server-generated correlation ID used to follow the request through execution.
 - The Desktop AI Briefing panel keeps its own loading, empty, and error state and does not blank the Dashboard when this API call fails. Its detail Slideover shows the complete evidence and provenance and ignores a late response for a briefing that is no longer selected.
 
-Briefings are stored in `ai_briefings` with camelCase fields and the `{ ownerScope, generatedAt }` read index. Publication is insert-once: replaying an identifier preserves the first published content.
+Briefings are stored in `ai_briefings` with camelCase fields and the `{ ownerScope, generatedAt }` read index. Publication is insert-once: replaying an identifier preserves the first published content. Jobs are stored in `ai_jobs`; one document is both the owner-scoped request and the work item the worker claims.
 
 ## Logs and status
 

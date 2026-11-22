@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 
 use tm_trading_domain::{AiJob, AiJobId};
 
-use crate::{AiJobRepository, CreateAiJobOutcome, RepositoryError};
+use crate::{AiJobQuery, AiJobRepository, CreateAiJobOutcome, RepositoryError};
 
 #[derive(Default)]
 pub struct InMemoryAiJobRepository {
@@ -48,6 +48,24 @@ impl AiJobRepository for InMemoryAiJobRepository {
 
     async fn get(&self, job_id: &AiJobId) -> Result<Option<AiJob>, RepositoryError> {
         Ok(self.state()?.get(job_id).cloned())
+    }
+
+    async fn list(&self, query: &AiJobQuery) -> Result<Vec<AiJob>, RepositoryError> {
+        let mut jobs = self
+            .state()?
+            .values()
+            .filter(|job| job.owner_scope() == query.owner_scope)
+            .filter(|job| query.task.is_none_or(|task| job.task() == task))
+            .cloned()
+            .collect::<Vec<_>>();
+        jobs.sort_by(|left, right| {
+            right
+                .requested_at()
+                .cmp(&left.requested_at())
+                .then_with(|| right.id().to_string().cmp(&left.id().to_string()))
+        });
+        jobs.truncate(query.limit);
+        Ok(jobs)
     }
 
     async fn claim_next(
@@ -169,6 +187,7 @@ mod tests {
             owner_scope: "local-operator".to_owned(),
             idempotency_key: idempotency_key.to_owned(),
             request_hash: request_hash.to_owned(),
+            correlation_id: uuid::Uuid::new_v4(),
             task: AiTaskKind::ResearchExplanation,
             research_event_ids: vec!["rev1_0123456789abcdef".to_owned()],
             news_item_ids: Vec::new(),
@@ -210,6 +229,62 @@ mod tests {
             Err(RepositoryError::IdempotencyConflict { .. })
         ));
         assert_eq!(repository.get(&first.id()).await.unwrap(), Some(first));
+    }
+
+    #[tokio::test]
+    async fn lists_only_the_owner_and_applies_the_task_and_limit() {
+        let repository = InMemoryAiJobRepository::new();
+        let first = job_requested_at(
+            "explain-1",
+            "hash-1",
+            at(),
+            at() + chrono::Duration::hours(1),
+        );
+        let second = job_requested_at(
+            "explain-2",
+            "hash-2",
+            at() + chrono::Duration::seconds(1),
+            at() + chrono::Duration::hours(1),
+        );
+        let foreign = AiJob::new(NewAiJob {
+            owner_scope: "other-operator".to_owned(),
+            idempotency_key: "explain-3".to_owned(),
+            request_hash: "hash-3".to_owned(),
+            correlation_id: uuid::Uuid::new_v4(),
+            task: AiTaskKind::ResearchExplanation,
+            research_event_ids: vec!["rev1_0123456789abcdef".to_owned()],
+            news_item_ids: Vec::new(),
+            requested_at: at(),
+            expires_at: at() + chrono::Duration::hours(1),
+        })
+        .unwrap();
+        repository.create(first.clone()).await.unwrap();
+        repository.create(second.clone()).await.unwrap();
+        repository.create(foreign).await.unwrap();
+
+        let listed = repository
+            .list(&AiJobQuery {
+                owner_scope: "local-operator".to_owned(),
+                task: Some(AiTaskKind::ResearchExplanation),
+                limit: 10,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            listed.iter().map(|job| job.id()).collect::<Vec<_>>(),
+            vec![second.id(), first.id()]
+        );
+
+        let limited = repository
+            .list(&AiJobQuery {
+                owner_scope: "local-operator".to_owned(),
+                task: None,
+                limit: 1,
+            })
+            .await
+            .unwrap();
+        assert_eq!(limited.len(), 1);
+        assert_eq!(limited[0].id(), second.id());
     }
 
     #[tokio::test]

@@ -198,6 +198,7 @@ claims.
 | `id` | Stable `aijob1_` identifier |
 | `owner_scope` | Owner the request belongs to |
 | `idempotency_key` / `request_hash` | Replay identity and request fingerprint |
+| `correlation_id` | Server-generated end-to-end correlation handle |
 | `task` | AI task to run |
 | `research_event_ids` / `news_item_ids` | Requested evidence identifiers |
 | `status` | `QUEUED`, `CLAIMED`, `SUCCEEDED`, `FAILED`, `EXPIRED`, or `OUTCOME_UNKNOWN` |
@@ -219,6 +220,30 @@ state.
 A queued job that passes its expiry becomes `EXPIRED`. A claimed job whose lease lapses
 becomes `OUTCOME_UNKNOWN`, never `FAILED`: an unobserved provider call is not evidence of
 a failed or successful run.
+
+The Management API is the owner-scoped request source:
+
+| Method | Path | Capability |
+|---|---|---|
+| `GET` | `/api/v1/ai/jobs` | `trading.ai.read` |
+| `POST` | `/api/v1/ai/jobs` | `trading.ai.write` |
+| `GET` | `/api/v1/ai/jobs/{job_id}` | `trading.ai.read` |
+
+A request names one AI task and the exact research-event or news identifiers to use as
+evidence. Only `research_explanation` can be queued today. The request must contain at
+least one valid input and at most 50 combined inputs. The owner scope always comes from
+the authenticated subject; it is never accepted from the request body.
+
+Without an explicit idempotency key, the request fingerprint is the replay key, so an
+identical request returns the stored job. A client-supplied key is limited to 200
+characters. Replaying a key with the same request returns `200` and the stored job;
+reusing it with a different request returns `409`. A new job returns `201` and expires
+after one hour unless it is claimed sooner.
+
+The list accepts an exact task filter and a limit from 1 to 200, defaulting to 50. A
+malformed limit returns the typed `400` error contract; an unsupported task or an
+out-of-range limit returns `422`. An unknown or foreign job identifier returns `404`, an
+Agent credential returns `403`, and an anonymous request returns `401`.
 
 ## 11. AI Worker
 
@@ -249,5 +274,4 @@ is never stored.
 
 ## 12. Pending
 
-- a request source over the API so an owner can enqueue a briefing job;
 - dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them.

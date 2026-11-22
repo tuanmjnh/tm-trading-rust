@@ -2,6 +2,9 @@ use crate::ai_briefing::{
     AiBriefingDto, AiBriefingListDto, AiBriefingQueryDto, AiBriefingReferenceDto,
     AiBriefingReferenceKindDto, AiBriefingTaskDto,
 };
+use crate::ai_job::{
+    AiJobDto, AiJobListDto, AiJobQueryDto, AiJobStatusDto, AiJobTaskDto, NewAiJobDto,
+};
 use crate::ai_model::{AiModelDto, AiModelListDto, NewAiModelDto, UpdateAiModelDto};
 use crate::ai_provider::{
     AiProviderProfileDto, AiProviderProfileListDto, NewAiProviderProfileDto,
@@ -91,7 +94,10 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         update_ai_task_route,
         delete_ai_task_route,
         list_ai_briefings,
-        get_ai_briefing
+        get_ai_briefing,
+        list_ai_jobs,
+        create_ai_job,
+        get_ai_job
     ),
     components(schemas(
         ApiVersionInfo,
@@ -155,6 +161,11 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         AiBriefingReferenceDto,
         AiBriefingReferenceKindDto,
         AiBriefingTaskDto,
+        AiJobDto,
+        AiJobListDto,
+        AiJobQueryDto,
+        AiJobStatusDto,
+        NewAiJobDto,
         NewsClusterListDto,
         NewsClusterQueryDto
     )),
@@ -911,3 +922,55 @@ pub fn list_ai_briefings() {}
     )
 )]
 pub fn get_ai_briefing() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai/jobs",
+    tag = "AI",
+    params(
+        ("task" = Option<AiJobTaskDto>, Query, description = "Exact AI task filter"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of jobs, 1 to 200, default 50", minimum = 1, maximum = 200)
+    ),
+    responses(
+        (status = 200, description = "Owner-scoped AI jobs, newest first", body = AiJobListDto),
+        (status = 400, description = "Malformed query parameter", body = ApiErrorResponse),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 422, description = "The requested task or limit is invalid", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_ai_jobs() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/ai/jobs",
+    tag = "AI",
+    request_body = NewAiJobDto,
+    responses(
+        (status = 200, description = "The queued job was already stored", body = AiJobDto),
+        (status = 201, description = "AI job queued", body = AiJobDto),
+        (status = 400, description = "Malformed request body", body = ApiErrorResponse),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 409, description = "The idempotency key was reused with a different request", body = ApiErrorResponse),
+        (status = 422, description = "The task or the requested inputs are invalid", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn create_ai_job() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai/jobs/{job_id}",
+    tag = "AI",
+    params(("job_id" = String, Path, description = "AI job identifier", pattern = "^aijob1_[0-9a-f]{32}$")),
+    responses(
+        (status = 200, description = "Owner-scoped AI job", body = AiJobDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI job", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn get_ai_job() {}

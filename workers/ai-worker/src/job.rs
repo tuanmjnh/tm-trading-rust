@@ -371,6 +371,7 @@ mod tests {
             owner_scope: owner_scope.to_owned(),
             idempotency_key: "explain-1".to_owned(),
             request_hash: "hash-1".to_owned(),
+            correlation_id: uuid::Uuid::new_v4(),
             task: AiTaskKind::ResearchExplanation,
             research_event_ids: vec![event_id.to_owned()],
             news_item_ids: Vec::new(),

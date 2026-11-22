@@ -20,7 +20,7 @@ pub use ai_briefing::{
 };
 pub use ai_job::{
     AI_JOB_ID_PREFIX, AI_JOB_SCHEMA_VERSION, AiJob, AiJobError, AiJobId, AiJobStatus,
-    MAX_AI_JOB_INPUTS, MAX_AI_JOB_LIFETIME_HOURS, NewAiJob, PersistedAiJob,
+    MAX_AI_JOB_INPUTS, MAX_AI_JOB_LIFETIME_HOURS, NewAiJob, PersistedAiJob, ai_job_request_hash,
 };
 pub use ai_model::{
     AiModel, AiModelError, MAX_AI_MODEL_CONTEXT_WINDOW, MAX_AI_MODEL_DISPLAY_NAME_CHARS,

@@ -5,11 +5,11 @@ use std::sync::Arc;
 use tm_trading_config::LogFormat;
 use tm_trading_management_api::{AppState, AuthConfig, Repositories, router};
 use tm_trading_storage::{
-    MongoAiBriefingRepository, MongoAiModelRepository, MongoAiProviderProfileRepository,
-    MongoAiTaskRouteRepository, MongoCandleRepository, MongoConnection, MongoNewsClusterRepository,
-    MongoNewsItemRepository, MongoNewsSourceRepository, MongoOperationRepository,
-    MongoProviderInstanceRepository, MongoResearchEventRepository, MongoServiceSnapshotRepository,
-    MongoWatchlistRepository,
+    MongoAiBriefingRepository, MongoAiJobRepository, MongoAiModelRepository,
+    MongoAiProviderProfileRepository, MongoAiTaskRouteRepository, MongoCandleRepository,
+    MongoConnection, MongoNewsClusterRepository, MongoNewsItemRepository,
+    MongoNewsSourceRepository, MongoOperationRepository, MongoProviderInstanceRepository,
+    MongoResearchEventRepository, MongoServiceSnapshotRepository, MongoWatchlistRepository,
 };
 use tokio::net::TcpListener;
 
@@ -95,6 +95,7 @@ async fn stores() -> Result<Repositories, Box<dyn std::error::Error>> {
                 ai_briefings: Arc::new(
                     MongoAiBriefingRepository::new(connection.database()).await?,
                 ),
+                ai_jobs: Arc::new(MongoAiJobRepository::new(connection.database()).await?),
                 candles: Arc::new(MongoCandleRepository::new(connection.database()).await?),
                 research_events: Arc::new(
                     MongoResearchEventRepository::new(connection.database()).await?,

@@ -1,6 +1,6 @@
 # Current System Architecture
 
-> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover. Phase 7 has the legacy-compatible News source registry, the legacy-compatible News item contract with memory/MongoDB repositories, the RSS/Atom/RDF provider crate, the opt-in News Worker, the owner-scoped news read API, the Desktop News & Events panel with its story detail Slideover, the AI provider profile registry with its bounded OpenAI-compatible health-test adapter, the AI model registry, the AI task-routing registry, the Desktop AI Provider Center, and the evidence-bound AI briefing contract/store/API/UI.<br>
+> Status: Phase 1 foundation, Phase 2 local Agent/sample-worker runtime, Phase 3 local Management API, Phase 4 Dioxus Desktop shell, Phase 5 market data, watchlists, provider configuration, the opt-in Market Worker, the closed-candle API read model, and the Market Overview/Market Pulse panels are implemented. Phase 6 has the deterministic TA/indicator/VSA engine, the research event contract and store, the owner-scoped research event API, the opt-in Research Worker runtime, and the Desktop Signal Center with its research-event detail Slideover. Phase 7 has the legacy-compatible News source registry, the legacy-compatible News item contract with memory/MongoDB repositories, the RSS/Atom/RDF provider crate, the opt-in News Worker, the owner-scoped news read API, the Desktop News & Events panel with its story detail Slideover, the AI provider profile registry with its bounded OpenAI-compatible health-test adapter, the AI model registry, the AI task-routing registry, the Desktop AI Provider Center, the evidence-bound AI briefing contract/store/API/UI, the durable owner-scoped AI job request source, and the opt-in supervised AI Worker that publishes briefings.<br>
 > Last updated: 2026-11-22<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
@@ -45,7 +45,9 @@ Implemented:
 - owner-scoped news reads at `GET /api/v1/news`, `GET /api/v1/news/{news_id}`, and `GET /api/v1/news/sources`, with bounded filters, read-time freshness, display-rights gating, and the exact `trading.news.read` capability;
 - an AI provider profile registry with memory/MongoDB repositories, exact `trading.ai.read`/`trading.ai.write` capabilities, secret-free profile reads that expose only an API-key environment-variable name, `POST /api/v1/ai-providers/{id}/test` recording bounded OpenAI-compatible health observations, a model registry that stores provider-owned models, declares their context/output limits and capabilities, records per-model health through `POST /api/v1/ai-models/{id}/test`, and deletes them with their provider;
 - an AI task-routing registry with memory/MongoDB repositories, one route per task, a primary model and an ordered fallback chain that must resolve to registered models, a bounded attempt/concurrency/output budget, and `GET`/`POST`/`PATCH`/`DELETE` endpoints under `/api/v1/ai-task-routes`;
-- an evidence-bound AI briefing contract with memory/MongoDB repositories, append-once publication, exact typed evidence references, provider/model/prompt/input/producer/schema provenance, separated facts/interpretations/uncertainties, explicit missing/stale disclosures, owner-scoped list/detail API reads, and an independent Desktop briefing panel and detail Slideover.
+- an evidence-bound AI briefing contract with memory/MongoDB repositories, append-once publication, exact typed evidence references, provider/model/prompt/input/producer/schema provenance, separated facts/interpretations/uncertainties, explicit missing/stale disclosures, owner-scoped list/detail API reads, and an independent Desktop briefing panel and detail Slideover;
+- a durable owner-scoped AI job contract and memory/MongoDB repositories with atomic idempotency, lease-protected claims, fencing tokens, bounded expiry, and distinct failed versus unknown outcomes;
+- owner-scoped AI job list/create/detail endpoints, and an opt-in supervised AI Worker that claims one job at a time, assembles bounded evidence, validates model output, publishes the briefing first, and only then completes the job.
 
 Not implemented:
 
@@ -56,7 +58,6 @@ Not implemented:
 - TM Hub login, TOTP, and refresh flow in the Desktop client;
 - reusable data-backed panels beyond Market Overview, Market Pulse, Signal Center, and News & Events;
 - deterministic news scoring and clustering beyond same-cycle headline grouping;
-- the AI Worker and request execution with bounded fallback;
 
 ## 2. Target runtime and current implementation
 
@@ -101,6 +102,8 @@ tm-trading-news-providers -> tm-trading-domain  (read-only public feed parsing)
 tm-trading-ai-providers -> tm-trading-domain  (OpenAI-compatible protocol translation)
         |
         +-> tm-trading-management-api  (bounded provider/model health probes)
+        +-> tm-trading-ai-worker -> tm-trading-storage
+                (durable job claims and evidence-bound briefing publication, agent-owned)
 
 tm-trading-agent-protocol -> tm-trading-supervisor-core -> tm-trading-agent
         |                                      |
@@ -125,9 +128,10 @@ Dependency rules:
 - `workers/market-worker` implements the same control protocol and runs one bounded collection cycle at a time in a spawned task, so heartbeats and control commands stay responsive. It requires the write-authority flag, selects a bounded set of provider instances from MongoDB, persists only closed bars, records observed provider health, and reports a skipped cycle as skipped rather than successful. On shutdown it aborts an in-flight cycle and reports `drained: false`.
 - `workers/news-worker` implements the same control protocol and runs one bounded collection cycle at a time. It requires its own write-authority flag, polls only sources whose declared interval elapsed and whose license gate passes, fetches each feed with a timeout and a 2 MB ceiling without following redirects, stores only rights-safe normalized fields, records each source's sanitized health, and withholds readiness until a real poll succeeds. A cycle with no due source is skipped, and a cycle where every polled source failed is a failure. Shutdown aborts an active cycle and reports `drained: false`.
 - `workers/research-worker` implements the same control protocol and runs one bounded VSA scan at a time over persisted closed candles. It requires its own write-authority flag, rejects missing or stale required input without publishing partial output, upserts deterministic owner-scoped events with source/input/producer/schema/quality provenance, and withholds readiness until a real scan succeeds. A cycle timeout or input failure revokes readiness; shutdown aborts an active scan and reports `drained: false`.
+- `workers/ai-worker` implements the same control protocol and claims at most one durable AI job per tick. It verifies the configured route, provider, model, JSON-mode capability, and credential without making a billable request before reporting readiness. It assembles owner-scoped evidence, rejects a request with no usable evidence before calling the provider, validates that the model returned only interpretations and uncertainties, publishes the briefing before completing the job, and never reports a lapsed lease as success.
 - `apps/management-api` is the local Axum Management API. It binds to loopback only, is a command producer and read-model provider, never spawns a process, and never runs a continuous worker loop. User endpoints require a bearer credential that carries exact `trading.*` capabilities; Agent endpoints require the separate per-installation Agent credential and may only act as the Agent named in the request. Operations are durable and idempotent, and are claimed with an expiring lease and fencing token.
 - `apps/agent` additionally opens an outbound command channel to the Management API: it heartbeats its service read model, claims commands addressed to its own Agent identity, executes them against its own worker registry, and reports the real outcome. The Agent never accepts an executable path or command line from the API.
-- `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, operation creation/polling, watchlists, provider instances, market read models, research events, news items with their source registry, AI provider profiles/models/routes, and owner-scoped AI briefings.
+- `crates/api-client` is the only client-side HTTP boundary. It depends on `contracts` alone and exposes health, service listing, operation creation/polling, watchlists, provider instances, market read models, research events, news items with their source registry, AI provider profiles/models/routes, owner-scoped AI briefings, and AI job requests.
 - `apps/desktop` is a thin Dioxus view over `api-client`. It connects only to the Management API, never to MongoDB or a worker, and holds no credentials beyond the user bearer token. Every user-facing string comes from `apps/desktop/src/i18n.rs`.
 - Executable processes remain thin composition roots around these crates.
 
@@ -193,6 +197,8 @@ Verified live: after the Agent process is killed, and again after the Management
 
 `MongoAiBriefingRepository` implements `AiBriefingRepository` against the new `ai_briefings` collection from section 6.13, behind `InMemoryAiBriefingRepository` for the local default. The document uses camelCase fields and the `{ ownerScope, generatedAt }` read index. Publication uses `$setOnInsert`, so replaying an identifier cannot rewrite the first published briefing. Every read includes owner scope, and malformed records are rejected instead of served as valid evidence.
 
+`MongoAiJobRepository` implements `AiJobRepository` against the new `ai_jobs` collection from section 6.14, behind `InMemoryAiJobRepository` for the local default. One document is both the owner-scoped request and the work item the AI Worker claims. It persists the server-generated correlation ID with the request. The unique `{ ownerScope, idempotencyKey }` index makes replay atomic; a claim increments the fencing token and takes an expiring lease, and every completion or failure checks the current lease holder and token. The API derives owner scope from the authenticated subject, and malformed records are rejected instead of served as valid work.
+
 ## 6. Configuration and security
 
 Configuration is read from process environment variables with local development defaults. Production mode fails closed unless an explicit database URI, HTTPS TM Hub URL, and Hub application ID are supplied. Database URIs are redacted from debug output.
@@ -210,7 +216,7 @@ Current defaults and variables:
 | `TM_HUB_URL` | `http://127.0.0.1:4000` | TM Hub base URL |
 | `TM_HUB_APP_ID` | unset | Dedicated Rust Hub application ID |
 | `TM_LOG_FORMAT` | `compact` | `compact` or `json` tracing output |
-| `TM_TRADING_STORE` | `memory` | `memory` or `mongodb` for operations, service snapshots, watchlists, providers, candles, research events, news sources, and news items; production requires `mongodb` |
+| `TM_TRADING_STORE` | `memory` | `memory` or `mongodb` for operations, service snapshots, watchlists, providers, candles, research events, news sources, news items, AI provider profiles/models/routes, AI briefings, and AI jobs; production requires `mongodb` |
 | `TM_TRADING_API_BIND` | `127.0.0.1:8787` | Management API bind; non-loopback is rejected in local mode |
 | `TM_TRADING_LOCAL_API_TOKEN` | required | Local user bearer token; grants `trading.service.read`, `trading.service.control`, `trading.operation.read`, `trading.watchlist.read`, `trading.watchlist.write`, `trading.provider.read`, `trading.provider.write`, `trading.market.read`, `trading.research.read`, `trading.news.read`, `trading.ai.read`, and `trading.ai.write` |
 | `TM_TRADING_AGENT_TOKEN` | required | Per-installation Agent-only bearer token; read from the environment, never the command line |
@@ -243,6 +249,10 @@ Current defaults and variables:
 | `TM_TRADING_NEWS_CYCLE_TIMEOUT_MS` | `60000` | Hard deadline for one collection cycle |
 | `TM_TRADING_NEWS_HEARTBEAT_MS` | `5000` | News Worker heartbeat interval |
 | `TM_TRADING_NEWS_SOURCE_OF_TRUTH` | off | `1` authorizes news item writes; without it the worker exits with code `78` |
+| `TM_TRADING_AI_WORKER_ENABLED` | unset | `1` registers the AI Worker with the Agent and permits briefing publication |
+| `TM_TRADING_AI_CLAIM_MS` | `5000` | Delay between two AI job claim attempts |
+| `TM_TRADING_AI_HEARTBEAT_MS` | `5000` | AI Worker heartbeat interval |
+| `TM_TRADING_AI_LEASE_MS` | `300000` | Lease taken on one claimed AI job |
 | `TM_TRADING_LOCALE` | `en` | Desktop initial locale (`en` or `vi`) |
 
 TM Hub remains authoritative for human identity, sessions, RBAC, routes, and shared configuration. Until Hub verification is wired, the Management API authenticates two local bearer credentials with an exact-match comparison: a user credential that carries `trading.service.read`, `trading.service.control`, and `trading.operation.read`, and a separate Agent credential that may only act as the Agent named in the request. A missing or invalid credential is `401`; a credential used on an endpoint of the other kind is `403`. The Hub-enforced `trading.*` capability set documented in the TM Hub integration map replaces this local mode without changing the endpoint contracts.
