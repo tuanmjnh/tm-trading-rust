@@ -131,7 +131,11 @@ impl From<RepositoryError> for ApiError {
             RepositoryError::AiTaskRouteNotFound => {
                 Self::NotFound("ai task route was not found".to_owned())
             }
+            RepositoryError::AiBriefingConflict => Self::Conflict(
+                "ai briefing identifier already contains different content".to_owned(),
+            ),
             RepositoryError::AiTaskRoute(error) => Self::UnprocessableEntity(error.to_string()),
+            RepositoryError::AiBriefing(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())
             }

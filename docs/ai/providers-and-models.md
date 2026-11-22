@@ -1,6 +1,6 @@
 # AI Providers and Models
 
-> Status: the AI provider profile registry, the generic OpenAI-compatible adapter, and the bounded health test are implemented (2026-11-21). Model registry, task routing, fallback, the AI Worker, and the evidence-bound briefing are not implemented yet.
+> Status: the AI provider profile registry, generic OpenAI-compatible health adapter, model registry, task routing, and evidence-bound briefing contract/API/UI are implemented (2026-11-22). Bounded generation, task-route fallback execution, and the AI Worker are not implemented yet.
 
 ## 1. Scope
 
@@ -140,8 +140,42 @@ A route names its models as `provider_id:model_registry_id`, for example `primar
 
 Routes live in the `ai_task_routes` collection with an `updatedAt` index. The Desktop AI Provider Center lists each task, its primary and fallback models, and how many providers the route can reach. The AI Worker still owns request execution and the fallback decision, so no route can trigger an AI request by itself.
 
-## 8. Pending
+## 8. Evidence-bound briefings
 
-- the AI Worker that executes a route and applies the bounded fallback;
-- dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them;
-- the evidence-bound briefing with traceable input snapshot and source references.
+A briefing is an immutable, owner-scoped record of one model response. It separates reported facts, model interpretations, and uncertainty instead of presenting them as equivalent claims.
+
+| Field | Meaning |
+|---|---|
+| `id` | Stable `aibr1_` identifier |
+| `owner_scope` | Owner authenticated by the Management API |
+| `task` | AI task that produced the briefing |
+| `provider_id` / `model_registry_id` / `model_id` | Exact provider and model provenance |
+| `prompt_version` | Version of the evidence prompt/assembly |
+| `facts` | Statements reported from the supplied evidence |
+| `interpretations` | Model inference, kept separate from facts |
+| `uncertainties` | Explicit caveats and missing confirmation |
+| `input_snapshot_ids` | Exact research input snapshots supplied to the model |
+| `references` | Typed research-event identifiers, news-item identifiers, or source URLs |
+| `missing_inputs` / `stale_inputs` | Explicit evidence disclosures |
+| `generated_at` | UTC generation time |
+| `producer_version` / `schema_version` | Record producer and schema provenance |
+
+The domain rejects a briefing with no content or no evidence. Reference values must match their kind: `research_event` values use the exact `rev1_` identifier shape, `news_item` values use the exact `news_` identifier shape, and `source_url` values are HTTP(S) URLs without userinfo, query parameters, or fragments so token-bearing links cannot be persisted. Input snapshot identifiers use the exact `rsnap1_` identifier shape.
+
+Briefing identifiers use `aibr1_` plus 16 lowercase hexadecimal characters. The identifier covers the complete content and evidence payload, so two distinct briefings generated in the same millisecond cannot overwrite each other.
+
+Briefings live in the new `ai_briefings` collection with an `{ ownerScope, generatedAt }` read index. Publication is insert-once: replaying an identifier preserves the first published content.
+
+| Method | Path | Capability |
+|---|---|---|
+| `GET` | `/api/v1/ai/briefings` | `trading.ai.read` |
+| `GET` | `/api/v1/ai/briefings/{briefing_id}` | `trading.ai.read` |
+
+The list accepts an exact task filter and a limit from 1 to 200, defaulting to 50. A malformed limit returns the typed `400` error contract; an unsupported task or an out-of-range limit returns `422`. Owner scope always comes from the authenticated subject. An unknown or foreign briefing identifier returns `404`, an Agent credential returns `403`, and an anonymous request returns `401`.
+
+The Desktop AI Briefing panel reads the owner-scoped list and shows the task, summary, model/provider, evidence counts, and generation time. Its detail Slideover shows the separated claims, source references, input snapshots, missing/stale disclosures, and complete provenance in EN and VI.
+
+## 9. Pending
+
+- the AI Worker that executes a route, applies bounded fallback, and publishes briefings;
+- dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them.

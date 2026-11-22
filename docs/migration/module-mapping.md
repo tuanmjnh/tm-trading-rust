@@ -125,7 +125,7 @@ Create these only when their owning slice begins:
 |---|---|---|---|
 | `ai/gateway.mjs` | `crates/ai-providers` | Reimplement behind trait | Protocol translation only; provider metadata and health are explicit |
 | `ai/providerStore.mjs` | `crates/storage` + provider core | Port later | Keep provider connection/model metadata; move secret to secret store |
-| `ai/daily-brief.mjs` | `crates/ai-providers` + AI worker | Port later | Persist model/prompt/input versions and source references |
+| `ai/daily-brief.mjs` | `crates/ai-providers` + AI worker | Port later | Persist model/prompt/input versions and source references; Rust briefings keep facts, interpretations, uncertainty, and evidence references separate |
 | `ai/agent.mjs` | AI worker/application service | Port later, read-only | Facts vs interpretation; no mutation of deterministic research records |
 | `ai/review.mjs` | AI worker | Port later | Human-review requirements remain visible |
 | `engine/models/aiProviderConnection.mjs` | `crates/storage` | Compatible read/write | `secretEnc` compatibility is read-only until secure store cutover is proven |

@@ -424,6 +424,50 @@ never relabeled as the current producer. The Management API always derives owner
 the authenticated subject. Another owner's event identifier returns `404`, and the list is
 bounded to 200 events with a default of 50.
 
+### 6.13 `ai_briefings` (new in Rust)
+
+There is no legacy collection with this name. The collection stores evidence-bound AI
+output separately from the legacy `ai_proposals` rows; legacy proposals are not relabeled
+as briefings and are not exposed by this contract until their meaning and provenance are
+verified.
+
+Required fields:
+
+```text
+_id / briefingId
+ownerScope
+task
+providerId
+modelRegistryId
+modelId
+promptVersion
+facts
+interpretations
+uncertainties
+inputSnapshotIds
+references
+missingInputs
+staleInputs
+generatedAt
+producerVersion
+schemaVersion
+```
+
+`facts`, `interpretations`, and `uncertainties` are separate arrays so reported facts are
+not presented as model interpretation. `references` entries carry a kind (`research_event`,
+`news_item`, or `source_url`) and the exact cited identifier or URL. Source URLs must be
+HTTP(S) without userinfo, query parameters, or fragments. A briefing must cite
+at least one input snapshot or reference and explicitly disclose missing or stale inputs.
+The stable `aibr1_` identifier covers the complete content and evidence payload,
+including owner, task, provider, model, prompt version, generation time, claims,
+references, input snapshots, and missing/stale disclosures. Distinct payloads therefore
+receive distinct identifiers even in the same millisecond; the same identifier is written
+only once so an exact replay cannot rewrite an already published briefing.
+
+The MongoDB repository declares a read index on `{ ownerScope, generatedAt }`. The
+Management API always derives owner scope from the authenticated subject, and another
+owner's briefing identifier returns `404`.
+
 ## 7. Event contracts
 
 ### 7.1 Existing domain-event envelope

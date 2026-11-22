@@ -2,6 +2,7 @@
 // window. Debug builds keep the console so startup logs stay visible.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai_briefings;
 mod ai_providers;
 mod i18n;
 mod news;
@@ -15,11 +16,12 @@ use dioxus::prelude::*;
 use futures_util::StreamExt;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
-    MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
-    NewsQueryDto, OperationActionDto, OperationResponse, OperationStatusDto, ResearchEventQueryDto,
-    ServiceSnapshot, WatchlistDto,
+    AiBriefingQueryDto, MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto,
+    MarketSymbolDto, NewsQueryDto, OperationActionDto, OperationResponse, OperationStatusDto,
+    ResearchEventQueryDto, ServiceSnapshot, WatchlistDto,
 };
 
+use ai_briefings::{AiBriefingPanel, AiBriefingPanelState, AiBriefingSlideover};
 use ai_providers::{AiProviderPanel, AiProviderPanelState};
 use i18n::{Locale, UiStrings};
 use news::{NewsItemSlideover, NewsPanel, NewsPanelState};
@@ -85,6 +87,10 @@ enum UiAction {
         news_id: String,
     },
     CloseNewsItem,
+    OpenAiBriefing {
+        briefing_id: String,
+    },
+    CloseAiBriefing,
     TestAiProvider {
         id: String,
     },
@@ -146,6 +152,7 @@ fn App() -> Element {
     let market_error = use_signal(|| Option::<String>::None);
     let research = use_signal(ResearchPanelState::default);
     let news = use_signal(NewsPanelState::default);
+    let ai_briefings = use_signal(AiBriefingPanelState::default);
     let ai_providers = use_signal(AiProviderPanelState::default);
 
     let client_task = client.clone();
@@ -160,6 +167,7 @@ fn App() -> Element {
             (market_overview, market_pulse, market_error);
         let mut research = research;
         let mut news = news;
+        let mut ai_briefings = ai_briefings;
         let mut ai_providers = ai_providers;
         async move {
             loop {
@@ -213,6 +221,7 @@ fn App() -> Element {
                             }
                             Some(UiAction::OpenResearchEvent { event_id }) => {
                                 news.write().close();
+                                ai_briefings.write().close();
                                 research.write().open(event_id);
                             }
                             Some(UiAction::CloseResearchEvent) => {
@@ -220,10 +229,19 @@ fn App() -> Element {
                             }
                             Some(UiAction::OpenNewsItem { news_id }) => {
                                 research.write().close();
+                                ai_briefings.write().close();
                                 news.write().open(news_id);
                             }
                             Some(UiAction::CloseNewsItem) => {
                                 news.write().close();
+                            }
+                            Some(UiAction::OpenAiBriefing { briefing_id }) => {
+                                research.write().close();
+                                news.write().close();
+                                ai_briefings.write().open(briefing_id);
+                            }
+                            Some(UiAction::CloseAiBriefing) => {
+                                ai_briefings.write().close();
                             }
                             Some(UiAction::TestAiProvider { id }) => {
                                 let Some(client) = client.as_ref() else {
@@ -326,6 +344,28 @@ fn App() -> Element {
                     }
                 }
 
+                let briefing_query = AiBriefingQueryDto {
+                    limit: Some(50),
+                    ..AiBriefingQueryDto::default()
+                };
+                match client.list_ai_briefings(&briefing_query).await {
+                    Ok(list) => ai_briefings.write().list_loaded(list.briefings),
+                    Err(error) => {
+                        tracing::error!(%error, "failed to list AI briefings");
+                        ai_briefings.write().list_failed();
+                    }
+                }
+                let selected_briefing_id = ai_briefings.read().selected_id.clone();
+                if let Some(briefing_id) = selected_briefing_id {
+                    match client.get_ai_briefing(&briefing_id).await {
+                        Ok(briefing) => ai_briefings.write().detail_loaded(briefing),
+                        Err(error) => {
+                            tracing::error!(%error, briefing_id = %briefing_id, "failed to load AI briefing");
+                            ai_briefings.write().detail_failed(&briefing_id);
+                        }
+                    }
+                }
+
                 match client.list_ai_provider_profiles().await {
                     Ok(list) => ai_providers.write().list_loaded(list),
                     Err(error) => ai_providers.write().list_failed(error.to_string()),
@@ -380,6 +420,9 @@ fn App() -> Element {
     let news_state = news();
     let news_open_sender = actions;
     let news_close_sender = actions;
+    let ai_briefings_state = ai_briefings();
+    let ai_briefing_open_sender = actions;
+    let ai_briefing_close_sender = actions;
     let ai_providers_state = ai_providers();
     let ai_test_sender = actions;
     let ai_model_test_sender = actions;
@@ -675,6 +718,13 @@ fn App() -> Element {
                         news_open_sender.send(UiAction::OpenNewsItem { news_id });
                     },
                 }
+                AiBriefingPanel {
+                    state: ai_briefings_state.clone(),
+                    strings: strings(),
+                    on_open: move |briefing_id| {
+                        ai_briefing_open_sender.send(UiAction::OpenAiBriefing { briefing_id });
+                    },
+                }
                 AiProviderPanel {
                     state: ai_providers_state.clone(),
                     strings: strings(),
@@ -701,6 +751,15 @@ fn App() -> Element {
                     strings: strings(),
                     on_close: move |_| {
                         news_close_sender.send(UiAction::CloseNewsItem);
+                    },
+                }
+            }
+            if ai_briefings_state.selected_id.is_some() {
+                AiBriefingSlideover {
+                    state: ai_briefings_state,
+                    strings: strings(),
+                    on_close: move |_| {
+                        ai_briefing_close_sender.send(UiAction::CloseAiBriefing);
                     },
                 }
             }

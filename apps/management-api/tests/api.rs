@@ -6,10 +6,11 @@ use tower::ServiceExt;
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use tm_trading_domain::{
-    Candle, NewCandle, NewNewsItem, NewNewsSource, NewResearchEvent, NewsItem, NewsLevel,
-    ResearchEvent, ResearchQuality,
+    AiBriefing, AiBriefingReference, AiBriefingReferenceKind, AiTaskKind, Candle, NewAiBriefing,
+    NewCandle, NewNewsItem, NewNewsSource, NewResearchEvent, NewsItem, NewsLevel, ResearchEvent,
+    ResearchQuality,
 };
 use tm_trading_management_api::{AppState, AuthConfig, router};
 
@@ -1768,4 +1769,204 @@ async fn ai_task_routes_bind_to_registered_models_and_bound_the_fallback_chain()
         .await
         .expect("response");
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
+fn ai_briefing(owner_scope: &str, task: AiTaskKind, minute: u32) -> AiBriefing {
+    let generated_at = Utc.with_ymd_and_hms(2026, 11, 21, 8, minute, 0).unwrap();
+    AiBriefing::new(NewAiBriefing {
+        owner_scope: owner_scope.to_owned(),
+        task,
+        provider_id: "primary".to_owned(),
+        model_registry_id: "primary-large".to_owned(),
+        model_id: "model-a".to_owned(),
+        prompt_version: "market-briefing.v1".to_owned(),
+        facts: vec!["BTCUSDT shows a higher high.".to_owned()],
+        interpretations: vec!["Momentum may be strengthening.".to_owned()],
+        uncertainties: vec!["Confirmation is still missing.".to_owned()],
+        input_snapshot_ids: vec!["rsnap1_0123456789abcdef".to_owned()],
+        references: vec![
+            AiBriefingReference::new(
+                AiBriefingReferenceKind::ResearchEvent,
+                "rev1_0123456789abcdef",
+            )
+            .unwrap(),
+        ],
+        missing_inputs: vec!["15m candles".to_owned()],
+        stale_inputs: vec!["1h volume".to_owned()],
+        generated_at,
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn ai_briefings_are_owner_scoped_and_carry_evidence_provenance() {
+    let state = state();
+    let briefing = ai_briefing("test-operator", AiTaskKind::MarketBriefing, 0);
+    state.ai_briefings.upsert(&briefing).await.unwrap();
+    state
+        .ai_briefings
+        .upsert(&ai_briefing(
+            "other-operator",
+            AiTaskKind::MarketBriefing,
+            15,
+        ))
+        .await
+        .unwrap();
+    let app = router(state.clone());
+
+    let listed = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai/briefings",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(listed.status(), StatusCode::OK);
+    let listed = json_body(listed).await;
+    assert_eq!(listed["count"], 1);
+    let item = &listed["briefings"][0];
+    assert_eq!(item["task"], "market_briefing");
+    assert_eq!(item["facts"], json!(["BTCUSDT shows a higher high."]));
+    assert_eq!(
+        item["interpretations"],
+        json!(["Momentum may be strengthening."])
+    );
+    assert_eq!(
+        item["uncertainties"],
+        json!(["Confirmation is still missing."])
+    );
+    assert_eq!(
+        item["input_snapshot_ids"],
+        json!(["rsnap1_0123456789abcdef"])
+    );
+    assert_eq!(item["references"][0]["kind"], "research_event");
+    assert_eq!(item["references"][0]["value"], "rev1_0123456789abcdef");
+    assert_eq!(item["missing_inputs"], json!(["15m candles"]));
+    assert_eq!(item["stale_inputs"], json!(["1h volume"]));
+    assert_eq!(item["prompt_version"], "market-briefing.v1");
+    assert_eq!(item["provider_id"], "primary");
+    assert_eq!(item["model_registry_id"], "primary-large");
+    assert_eq!(item["model_id"], "model-a");
+
+    let detail = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/ai/briefings/{}", briefing.id()),
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(detail.status(), StatusCode::OK);
+
+    let foreign = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/ai/briefings/{}", briefing.id()),
+            Some(AGENT_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(foreign.status(), StatusCode::FORBIDDEN);
+
+    let mut foreign_state = state;
+    foreign_state.auth.user_token = "other-user-token".to_owned();
+    foreign_state.auth.user_subject = "foreign-operator".to_owned();
+    let foreign_app = router(foreign_state);
+    let foreign_detail = foreign_app
+        .clone()
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/ai/briefings/{}", briefing.id()),
+            Some("other-user-token"),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(foreign_detail.status(), StatusCode::NOT_FOUND);
+    let foreign_list = foreign_app
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai/briefings",
+            Some("other-user-token"),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(foreign_list.status(), StatusCode::OK);
+    assert_eq!(json_body(foreign_list).await["count"], 0);
+
+    let invalid_task = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai/briefings?task=unknown",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(invalid_task.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let valid_task = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai/briefings?task=market_briefing&limit=1",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(valid_task.status(), StatusCode::OK);
+    assert_eq!(json_body(valid_task).await["count"], 1);
+
+    for path in [
+        "/api/v1/ai/briefings?limit=-1",
+        "/api/v1/ai/briefings?limit=abc",
+    ] {
+        let malformed = app
+            .clone()
+            .oneshot(request("GET", path, Some(USER_TOKEN), None))
+            .await
+            .expect("response");
+        assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(json_body(malformed).await["error"]["code"], "bad_request");
+    }
+
+    for path in [
+        "/api/v1/ai/briefings?limit=0",
+        "/api/v1/ai/briefings?limit=201",
+    ] {
+        let invalid_limit = app
+            .clone()
+            .oneshot(request("GET", path, Some(USER_TOKEN), None))
+            .await
+            .expect("response");
+        assert_eq!(invalid_limit.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    let invalid_id = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai/briefings/not-a-briefing-id",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(invalid_id.status(), StatusCode::NOT_FOUND);
+
+    let anonymous = app
+        .oneshot(request("GET", "/api/v1/ai/briefings", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
 }

@@ -870,6 +870,107 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai/briefings:
+    get:
+      tags:
+      - AI
+      operationId: list_ai_briefings
+      parameters:
+      - name: task
+        in: query
+        description: Exact AI task filter
+        required: false
+        schema:
+          $ref: '#/components/schemas/AiBriefingTaskDto'
+      - name: limit
+        in: query
+        description: Maximum number of briefings, 1 to 200, default 50
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+      responses:
+        '200':
+          description: Owner-scoped AI briefings, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiBriefingListDto'
+        '400':
+          description: Malformed query parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The requested task or limit is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/ai/briefings/{briefing_id}:
+    get:
+      tags:
+      - AI
+      operationId: get_ai_briefing
+      parameters:
+      - name: briefing_id
+        in: path
+        description: AI briefing identifier
+        required: true
+        schema:
+          type: string
+          pattern: ^aibr1_[0-9a-f]{16}$
+      responses:
+        '200':
+          description: Evidence-bound AI briefing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiBriefingDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Unknown AI briefing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/health:
     get:
       tags:
@@ -2033,6 +2134,136 @@ components:
         server_time:
           type: string
           format: date-time
+    AiBriefingDto:
+      type: object
+      description: One evidence-bound AI briefing.
+      required:
+      - id
+      - owner_scope
+      - task
+      - provider_id
+      - model_registry_id
+      - model_id
+      - prompt_version
+      - facts
+      - interpretations
+      - uncertainties
+      - input_snapshot_ids
+      - references
+      - missing_inputs
+      - stale_inputs
+      - generated_at
+      - producer_version
+      - schema_version
+      properties:
+        facts:
+          type: array
+          items:
+            type: string
+        generated_at:
+          type: string
+          format: date-time
+        id:
+          type: string
+        input_snapshot_ids:
+          type: array
+          items:
+            type: string
+        interpretations:
+          type: array
+          items:
+            type: string
+        missing_inputs:
+          type: array
+          items:
+            type: string
+        model_id:
+          type: string
+        model_registry_id:
+          type: string
+        owner_scope:
+          type: string
+        producer_version:
+          type: string
+        prompt_version:
+          type: string
+        provider_id:
+          type: string
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiBriefingReferenceDto'
+        schema_version:
+          type: string
+        stale_inputs:
+          type: array
+          items:
+            type: string
+        task:
+          $ref: '#/components/schemas/AiBriefingTaskDto'
+        uncertainties:
+          type: array
+          items:
+            type: string
+    AiBriefingListDto:
+      type: object
+      description: A bounded list of owner-scoped briefings.
+      required:
+      - generated_at
+      - count
+      - briefings
+      properties:
+        briefings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiBriefingDto'
+        count:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+    AiBriefingQueryDto:
+      type: object
+      description: Optional filters for a briefing list request.
+      properties:
+        limit:
+          type:
+          - integer
+          - 'null'
+          maximum: 200
+          minimum: 1
+        task:
+          oneOf:
+          - $ref: '#/components/schemas/AiBriefingTaskDto'
+          - type: 'null'
+    AiBriefingReferenceDto:
+      type: object
+      description: One exact source reference cited by a briefing.
+      required:
+      - kind
+      - value
+      properties:
+        kind:
+          $ref: '#/components/schemas/AiBriefingReferenceKindDto'
+        value:
+          type: string
+    AiBriefingReferenceKindDto:
+      type: string
+      description: Kind of source cited by a briefing.
+      enum:
+      - research_event
+      - news_item
+      - source_url
+    AiBriefingTaskDto:
+      type: string
+      description: Task that produced an AI briefing.
+      enum:
+      - news_classification
+      - news_summary
+      - market_briefing
+      - research_explanation
+      - daily_digest
     AiModelDto:
       type: object
       required:
@@ -3596,5 +3827,7 @@ tags:
   description: Owner-scoped deterministic research observations
 - name: News
   description: Rights-safe normalized news items and their source registry
+- name: AI
+  description: AI provider, model, routing, and evidence-bound briefing records
 - name: Agent
   description: Agent-only heartbeat and command endpoints

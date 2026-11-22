@@ -1,3 +1,4 @@
+mod ai_briefing;
 mod ai_model;
 mod ai_provider;
 mod ai_task;
@@ -12,6 +13,10 @@ mod service;
 mod system;
 mod watchlist;
 
+pub use ai_briefing::{
+    AiBriefingDto, AiBriefingListDto, AiBriefingQueryDto, AiBriefingReferenceDto,
+    AiBriefingReferenceKindDto, AiBriefingTaskDto,
+};
 pub use ai_model::{AiModelDto, AiModelListDto, NewAiModelDto, UpdateAiModelDto};
 pub use ai_provider::{
     AiProviderProfileDto, AiProviderProfileListDto, NewAiProviderProfileDto,

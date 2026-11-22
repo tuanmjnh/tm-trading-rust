@@ -1,3 +1,4 @@
+mod ai_briefing;
 mod ai_model;
 mod ai_provider;
 mod ai_task;
@@ -11,6 +12,11 @@ mod provider;
 mod research;
 mod watchlist;
 
+pub use ai_briefing::{
+    AI_BRIEFING_ID_PREFIX, AI_BRIEFING_PRODUCER_VERSION, AI_BRIEFING_SCHEMA_VERSION, AiBriefing,
+    AiBriefingError, AiBriefingReference, AiBriefingReferenceKind, MAX_AI_BRIEFING_CONTENT_CHARS,
+    MAX_AI_BRIEFING_LIST_ITEMS, MAX_AI_BRIEFING_TEXT_CHARS, NewAiBriefing, is_valid_ai_briefing_id,
+};
 pub use ai_model::{
     AiModel, AiModelError, MAX_AI_MODEL_CONTEXT_WINDOW, MAX_AI_MODEL_DISPLAY_NAME_CHARS,
     MAX_AI_MODEL_OUTPUT_TOKENS, NewAiModel, StoredAiModel,

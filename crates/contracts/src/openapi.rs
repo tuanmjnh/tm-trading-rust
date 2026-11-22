@@ -1,3 +1,7 @@
+use crate::ai_briefing::{
+    AiBriefingDto, AiBriefingListDto, AiBriefingQueryDto, AiBriefingReferenceDto,
+    AiBriefingReferenceKindDto, AiBriefingTaskDto,
+};
 use crate::ai_model::{AiModelDto, AiModelListDto, NewAiModelDto, UpdateAiModelDto};
 use crate::ai_provider::{
     AiProviderProfileDto, AiProviderProfileListDto, NewAiProviderProfileDto,
@@ -85,7 +89,9 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         get_ai_task_route,
         create_ai_task_route,
         update_ai_task_route,
-        delete_ai_task_route
+        delete_ai_task_route,
+        list_ai_briefings,
+        get_ai_briefing
     ),
     components(schemas(
         ApiVersionInfo,
@@ -143,6 +149,12 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         AiTaskRouteListDto,
         NewAiTaskRouteDto,
         UpdateAiTaskRouteDto,
+        AiBriefingDto,
+        AiBriefingListDto,
+        AiBriefingQueryDto,
+        AiBriefingReferenceDto,
+        AiBriefingReferenceKindDto,
+        AiBriefingTaskDto,
         NewsClusterListDto,
         NewsClusterQueryDto
     )),
@@ -155,6 +167,7 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         (name = "Market", description = "Closed-candle market overview and pulse"),
         (name = "Research", description = "Owner-scoped deterministic research observations"),
         (name = "News", description = "Rights-safe normalized news items and their source registry"),
+        (name = "AI", description = "AI provider, model, routing, and evidence-bound briefing records"),
         (name = "Agent", description = "Agent-only heartbeat and command endpoints")
     )
 )]
@@ -864,3 +877,37 @@ pub fn update_ai_task_route() {}
     )
 )]
 pub fn delete_ai_task_route() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai/briefings",
+    tag = "AI",
+    params(
+        ("task" = Option<AiBriefingTaskDto>, Query, description = "Exact AI task filter"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of briefings, 1 to 200, default 50", minimum = 1, maximum = 200)
+    ),
+    responses(
+        (status = 200, description = "Owner-scoped AI briefings, newest first", body = AiBriefingListDto),
+        (status = 400, description = "Malformed query parameter", body = ApiErrorResponse),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 422, description = "The requested task or limit is invalid", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_ai_briefings() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/ai/briefings/{briefing_id}",
+    tag = "AI",
+    params(("briefing_id" = String, Path, description = "AI briefing identifier", pattern = "^aibr1_[0-9a-f]{16}$")),
+    responses(
+        (status = 200, description = "Evidence-bound AI briefing", body = AiBriefingDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 404, description = "Unknown AI briefing", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn get_ai_briefing() {}

@@ -1,6 +1,6 @@
 # Operations Runbooks
 
-> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 closed-candle store, public market-data adapters, owner-scoped watchlists, and the opt-in Market Worker (operation, service-snapshot, candle, watchlist, and provider-instance MongoDB stores), implemented on 2026-11-20<br>
+> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 market data and watchlists, Phase 6 research events, and Phase 7 news plus AI provider/model/routing and evidence-bound briefing reads are implemented (2026-11-22). The AI Worker is not implemented yet.<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## Build the Agent and sample worker
@@ -165,6 +165,7 @@ cargo test -p tm-trading-storage --test mongo_repository
 cargo test -p tm-trading-storage --test mongo_services
 cargo test -p tm-trading-storage --test mongo_candles
 cargo test -p tm-trading-storage --test mongo_watchlists
+cargo test -p tm-trading-storage --test mongo_ai_briefings
 ```
 
 The URI must be TLS-enabled and validate against the local trust store or the referenced CA file. Any `mongod` started with `--tlsMode requireTLS --tlsCertificateKeyFile <server.pem> --tlsCAFile <ca.pem> --tlsAllowConnectionsWithoutCertificates` works; the certificate must carry `localhost` as a subject alternative name.
@@ -420,6 +421,25 @@ curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
 The Desktop News & Events panel reads both lists every refresh cycle and shows one row per story with headline, publisher, publication and ingestion times, market group, topics, and freshness, plus a story, fresh, and source count in the panel header. It has independent loading, empty, error, and stale states for the story list and the source registry, so an API failure keeps the last loaded rows behind its own banner.
 
 Selecting a headline opens the news-story detail Slideover, which fetches that story by ID and shows its excerpt, level, direction, and freshness, a link to the original article, and full provenance: news ID, source, language, market group, event type, publication, first-seen and ingestion times, and the article URL. Opening a news story closes an open research-event Slideover and the reverse, so only one overlay is open at a time.
+
+## AI briefing read model
+
+The Management API serves evidence-bound briefing records independently of the future AI Worker:
+
+```powershell
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/ai/briefings?task=market_briefing&limit=50"
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/ai/briefings/aibr1_..."
+```
+
+- `task` is an optional exact AI task filter; `limit` is 1-200 and defaults to 50. Malformed limits return the typed `400` error contract, while unsupported tasks and out-of-range limits return `422`.
+- The owner scope is always the authenticated subject. An unknown or foreign briefing ID is `404`, so the API does not confirm that another owner's record exists.
+- Both endpoints require the exact `trading.ai.read` capability. The Agent credential is rejected with `403`, and an anonymous request is `401`.
+- Each response separates facts, model interpretations, and uncertainties and includes typed evidence references, input snapshot IDs, missing/stale disclosures, provider/model/prompt provenance, producer/schema stamps, and the UTC generation time.
+- The Desktop AI Briefing panel keeps its own loading, empty, and error state and does not blank the Dashboard when this API call fails. Its detail Slideover shows the complete evidence and provenance and ignores a late response for a briefing that is no longer selected.
+
+Briefings are stored in `ai_briefings` with camelCase fields and the `{ ownerScope, generatedAt }` read index. Publication is insert-once: replaying an identifier preserves the first published content.
 
 ## Logs and status
 

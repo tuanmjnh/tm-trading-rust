@@ -1,3 +1,4 @@
+mod ai_briefings;
 mod ai_models;
 mod ai_providers;
 mod ai_task_routes;
@@ -130,6 +131,11 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v1/ai-task-routes",
             post(ai_task_routes::create_ai_task_route),
+        )
+        .route("/api/v1/ai/briefings", get(ai_briefings::list_ai_briefings))
+        .route(
+            "/api/v1/ai/briefings/{briefing_id}",
+            get(ai_briefings::get_ai_briefing),
         )
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(
