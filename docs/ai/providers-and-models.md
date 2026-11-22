@@ -1,6 +1,6 @@
 # AI Providers and Models
 
-> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, evidence-bound briefing contract/API/UI, the durable `ai_jobs` request queue, and the supervised AI Worker are implemented (2026-11-22).
+> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, evidence-bound briefing contract/API/UI, the durable `ai_jobs` request queue, the supervised AI Worker, and the Desktop research-event request action are implemented (2026-11-22).
 
 ## 1. Scope
 
@@ -244,6 +244,13 @@ The list accepts an exact task filter and a limit from 1 to 200, defaulting to 5
 malformed limit returns the typed `400` error contract; an unsupported task or an
 out-of-range limit returns `422`. An unknown or foreign job identifier returns `404`, an
 Agent credential returns `403`, and an anonymous request returns `401`.
+
+The Desktop AI Briefing panel is the current job producer. It selects one research event
+from the authenticated owner's research-event list, queues a `research_explanation` job
+with that exact identifier, and never supplies owner scope. It polls the owner-scoped job
+list and shows the latest queued, claimed, or terminal status in EN/VI. A successful job
+exposes its published briefing in the same panel; failed, expired, and unknown-outcome
+jobs remain visible instead of being reported as successful.
 
 ## 11. AI Worker
 

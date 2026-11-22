@@ -1,6 +1,6 @@
 # Operations Runbooks
 
-> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 market data and watchlists, Phase 6 research events, and Phase 7 news plus AI provider/model/routing and evidence-bound briefing reads are implemented (2026-11-22). The AI Worker is not implemented yet.<br>
+> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 market data and watchlists, Phase 6 research events, and Phase 7 news plus AI provider/model/routing, evidence-bound briefing requests, and the supervised AI Worker are implemented (2026-11-22).<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## Build the Agent and sample worker
@@ -128,6 +128,7 @@ Expected result:
 - an action shows `Waiting for the Agent to finish…` while the operation is pending and then the terminal operation status with the Agent's result summary;
 - the `EN`/`VI` toggle switches every label, and the choice is remembered for the session;
 - the Watchlists panel lists the authenticated subject's lists, marks the default one, and lets you create a list, replace its symbols with a comma-separated field, and delete it; the server normalizes symbols, so `btcusdt` is stored as `BTCUSDT` and duplicates collapse;
+- the AI Briefing panel lists the authenticated owner's research events, queues one `research_explanation` request for the selected event, shows its queued, claimed, or terminal status, and exposes the published briefing after success;
 - closing the window leaves the Agent and its workers running; the worker is spawned detached and is not a child of the Desktop process.
 
 The WebView2 profile lives in `<exe_dir>/data/desktop`. Override it with `TM_TRADING_DESKTOP_DATA_DIR` when the executable directory is read-only. If the window never appears while `msedgewebview2.exe` crash events with `0x80000003` are logged, the profile directory is the first thing to relocate.
@@ -352,6 +353,37 @@ With `TM_TRADING_NEWS_SOURCE_OF_TRUTH` unset or `0`, the worker exits with code 
 - A cycle that exceeds `TM_TRADING_NEWS_CYCLE_TIMEOUT_MS` is cancelled and reported as a timeout.
 - An Agent shutdown aborts an in-flight cycle and reports `drained: false`.
 
+## Run the AI Worker
+
+The AI Worker is opt-in and runs under the Agent. It requires MongoDB, an enabled
+`research_explanation` route, its enabled provider and model, and the provider credential
+named by the profile. The credential namespace is forwarded to this worker only.
+
+```powershell
+cargo build -p tm-trading-agent -p tm-trading-ai-worker
+
+$env:TM_TRADING_AI_WORKER_ENABLED = "1"
+$env:TM_DATABASE_URI = "mongodb://localhost:27018/?tls=true&tlsCAFile=D:/certs/ca.pem"
+$env:TM_DATABASE_NAME = "tm-trading-rust"
+$env:TM_TRADING_AI_SECRET_PRIMARY = "<provider-secret>"
+.\target\debug\tm-trading-agent.exe --worker-dir .\target\debug --state-dir .\target\tmp\agent-local
+```
+
+In this example, the configured provider profile names
+`TM_TRADING_AI_SECRET_PRIMARY`; the secret value is never stored in the profile,
+briefing, job, logs, or Desktop state.
+
+Expected result:
+
+- `GET /api/v1/services` lists `ai-worker` alongside the other enabled workers;
+- `ai-worker` becomes `READY` only after the route, provider, model, and credential resolve;
+- a request from the Desktop or `POST /api/v1/ai/jobs` moves from `QUEUED` to `CLAIMED` and then to a terminal status;
+- a successful job publishes its briefing before changing to `SUCCEEDED`, so the returned briefing ID is readable;
+- a failed request records a sanitized error code and never publishes a partial briefing;
+- a lease that lapses during execution becomes `OUTCOME_UNKNOWN`, not `SUCCEEDED` or `FAILED`.
+
+With `TM_TRADING_AI_WORKER_ENABLED` unset or `0`, the worker exits with code `78` before opening MongoDB. The Agent does not register the worker unless that flag is enabled.
+
 ## Market read model
 The Management API serves the closed candles written by the Market Worker:
 
@@ -449,7 +481,7 @@ curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
 - Each briefing response separates facts, model interpretations, and uncertainties and includes typed evidence references, input snapshot IDs, missing/stale disclosures, provider/model/prompt provenance, producer/schema stamps, and the UTC generation time.
 - A job request must name at least one valid research-event or news identifier and at most 50 combined inputs. Only `research_explanation` can be queued today. The owner scope is never accepted from the request body.
 - A new job returns `201`; an identical replay returns `200` with the stored job. Reusing an idempotency key with a different request returns `409`. Without an explicit key, the request fingerprint is the replay key. The job carries the server-generated correlation ID used to follow the request through execution.
-- The Desktop AI Briefing panel keeps its own loading, empty, and error state and does not blank the Dashboard when this API call fails. Its detail Slideover shows the complete evidence and provenance and ignores a late response for a briefing that is no longer selected.
+- The Desktop AI Briefing panel keeps its own loading, empty, and error state and does not blank the Dashboard when this API call fails. It selects one owner-scoped research event, queues the request without an owner field, and shows the latest job through `QUEUED`, `CLAIMED`, `SUCCEEDED`, `FAILED`, `EXPIRED`, or `OUTCOME_UNKNOWN`. A successful job exposes its briefing in the panel. Its detail Slideover shows the complete evidence and provenance and ignores a late response for a briefing that is no longer selected.
 
 Briefings are stored in `ai_briefings` with camelCase fields and the `{ ownerScope, generatedAt }` read index. Publication is insert-once: replaying an identifier preserves the first published content. Jobs are stored in `ai_jobs`; one document is both the owner-scoped request and the work item the worker claims.
 

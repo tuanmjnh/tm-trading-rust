@@ -470,6 +470,38 @@ td.numeric {
   padding: 14px 18px 0;
 }
 
+.ai-briefing-request {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 14px 18px 0;
+}
+
+.ai-briefing-request-field {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-briefing-request-hint {
+  padding: 6px 18px 0;
+}
+
+.ai-briefing-job {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 18px 0;
+  font-size: 12px;
+}
+
+.ai-briefing-job .operation-id {
+  overflow-wrap: anywhere;
+}
+
 .text-input {
   flex: 1;
   min-width: 0;
@@ -935,6 +967,11 @@ td.numeric {
 
   .content {
     padding: 16px 12px 24px;
+  }
+
+  .ai-briefing-request {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .signal-center-head,

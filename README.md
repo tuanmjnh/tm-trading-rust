@@ -6,9 +6,9 @@ The authoritative product and architecture specification is [`docs/TM-TRADING-RU
 
 ## Current status
 
-The implemented platform now includes the Axum Management API, typed API client, Dioxus Desktop Control Center, Market Overview/Market Pulse panels and Signal Center with a research-event detail Slideover, independent Host Agent, opt-in Market and Research workers, MongoDB-backed durable operations, provider configuration, owner-scoped watchlists and research-event reads, the deterministic TA/indicator/VSA research engine, the legacy-compatible news source registry and news item store, the RSS/Atom feed adapter with the opt-in News Worker, the owner-scoped news read API, the Desktop News & Events panel with its story detail Slideover, the AI provider/model/task-route registries, evidence-bound AI briefing storage and owner-scoped reads, and the Desktop AI Briefing panel with its detail Slideover.
+The implemented platform now includes the Axum Management API, typed API client, Dioxus Desktop Control Center, Market Overview/Market Pulse panels and Signal Center with a research-event detail Slideover, independent Host Agent, opt-in Market, Research, News, and AI workers, MongoDB-backed durable operations, provider configuration, owner-scoped watchlists and research-event reads, the deterministic TA/indicator/VSA research engine, the legacy-compatible news source registry and news item store, the RSS/Atom feed adapter with the opt-in News Worker, the owner-scoped news read API, the Desktop News & Events panel with its story detail Slideover, the AI provider/model/task-route registries, evidence-bound AI briefing storage and owner-scoped reads, the durable owner-scoped AI job queue, and the Desktop AI Briefing panel with its research-event request action and detail Slideover.
 
-The next milestone is Phase 7 continued: deterministic news scoring and clustering plus the AI Worker that performs bounded generation and task-route fallback. The project continues to reuse the existing MongoDB data where practical and does not perform a destructive migration.
+Phase 7 is implemented. The next milestone is Phase 8: the durable Telegram notification plane and notification center. The project continues to reuse the existing MongoDB data where practical and does not perform a destructive migration.
 
 ## Product boundary
 

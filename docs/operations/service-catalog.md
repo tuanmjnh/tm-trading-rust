@@ -272,5 +272,4 @@ The worker claims at most one job per tick, oldest first. A claim takes a bounde
 ### Current limitations
 
 - Only the `research_explanation` task is executed; the other routes have no job producer.
-- The Management API exposes the owner-scoped request source; the Desktop briefing-request action is not implemented yet.
 - Unix runtime shutdown and descendant-containment drills remain unverified.

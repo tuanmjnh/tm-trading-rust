@@ -302,6 +302,20 @@ pub struct UiStrings {
     pub ai_briefing_reference_source_url: &'static str,
     pub ai_briefing_snapshots: &'static str,
     pub ai_briefing_references: &'static str,
+    pub ai_briefing_request_label: &'static str,
+    pub ai_briefing_request_select: &'static str,
+    pub ai_briefing_request_button: &'static str,
+    pub ai_briefing_request_unavailable: &'static str,
+    pub ai_briefing_request_failed: &'static str,
+    pub ai_briefing_jobs_unavailable_hint: &'static str,
+    pub ai_briefing_job_status: &'static str,
+    pub ai_briefing_job_queued: &'static str,
+    pub ai_briefing_job_claimed: &'static str,
+    pub ai_briefing_job_succeeded: &'static str,
+    pub ai_briefing_job_failed: &'static str,
+    pub ai_briefing_job_expired: &'static str,
+    pub ai_briefing_job_outcome_unknown: &'static str,
+    pub ai_briefing_open_briefing: &'static str,
 }
 
 impl UiStrings {
@@ -587,6 +601,20 @@ impl UiStrings {
             ai_briefing_reference_source_url: "Source URL",
             ai_briefing_snapshots: "snapshots",
             ai_briefing_references: "references",
+            ai_briefing_request_label: "Research event",
+            ai_briefing_request_select: "Select a research event",
+            ai_briefing_request_button: "Request explanation",
+            ai_briefing_request_unavailable: "No owner-scoped research events are available to explain.",
+            ai_briefing_request_failed: "The AI briefing request could not be queued.",
+            ai_briefing_jobs_unavailable_hint: "The Management API could not load AI job status.",
+            ai_briefing_job_status: "Latest request",
+            ai_briefing_job_queued: "Queued",
+            ai_briefing_job_claimed: "Claimed",
+            ai_briefing_job_succeeded: "Succeeded",
+            ai_briefing_job_failed: "Failed",
+            ai_briefing_job_expired: "Expired",
+            ai_briefing_job_outcome_unknown: "Outcome unknown",
+            ai_briefing_open_briefing: "Open briefing",
         }
     }
 
@@ -864,6 +892,20 @@ impl UiStrings {
             ai_briefing_reference_source_url: "URL nguồn",
             ai_briefing_snapshots: "ảnh chụp",
             ai_briefing_references: "tham chiếu",
+            ai_briefing_request_label: "Sự kiện nghiên cứu",
+            ai_briefing_request_select: "Chọn một sự kiện nghiên cứu",
+            ai_briefing_request_button: "Yêu cầu giải thích",
+            ai_briefing_request_unavailable: "Không có sự kiện nghiên cứu thuộc phạm vi chủ sở hữu để giải thích.",
+            ai_briefing_request_failed: "Không thể xếp yêu cầu bản tóm tắt AI.",
+            ai_briefing_jobs_unavailable_hint: "Management API không tải được trạng thái tác vụ AI.",
+            ai_briefing_job_status: "Yêu cầu gần nhất",
+            ai_briefing_job_queued: "Đang chờ",
+            ai_briefing_job_claimed: "Đã nhận",
+            ai_briefing_job_succeeded: "Thành công",
+            ai_briefing_job_failed: "Thất bại",
+            ai_briefing_job_expired: "Đã hết hạn",
+            ai_briefing_job_outcome_unknown: "Không rõ kết quả",
+            ai_briefing_open_briefing: "Mở bản tóm tắt",
         }
     }
 }

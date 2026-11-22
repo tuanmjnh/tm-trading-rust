@@ -16,9 +16,9 @@ use dioxus::prelude::*;
 use futures_util::StreamExt;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
-    AiBriefingQueryDto, MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto,
-    MarketSymbolDto, NewsQueryDto, OperationActionDto, OperationResponse, OperationStatusDto,
-    ResearchEventQueryDto, ServiceSnapshot, WatchlistDto,
+    AiBriefingQueryDto, AiBriefingTaskDto, AiJobQueryDto, MarketMoverDto, MarketOverviewDto,
+    MarketPulseDto, MarketStateDto, MarketSymbolDto, NewAiJobDto, NewsQueryDto, OperationActionDto,
+    OperationResponse, OperationStatusDto, ResearchEventQueryDto, ServiceSnapshot, WatchlistDto,
 };
 
 use ai_briefings::{AiBriefingPanel, AiBriefingPanelState, AiBriefingSlideover};
@@ -91,6 +91,9 @@ enum UiAction {
         briefing_id: String,
     },
     CloseAiBriefing,
+    RequestAiBriefing {
+        research_event_id: String,
+    },
     TestAiProvider {
         id: String,
     },
@@ -243,6 +246,24 @@ fn App() -> Element {
                             Some(UiAction::CloseAiBriefing) => {
                                 ai_briefings.write().close();
                             }
+                            Some(UiAction::RequestAiBriefing { research_event_id }) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                let request = NewAiJobDto {
+                                    task: AiBriefingTaskDto::ResearchExplanation,
+                                    research_event_ids: vec![research_event_id],
+                                    news_item_ids: Vec::new(),
+                                    idempotency_key: None,
+                                };
+                                match client.create_ai_job(&request).await {
+                                    Ok(job) => ai_briefings.write().request_created(job),
+                                    Err(error) => {
+                                        tracing::error!(%error, "failed to queue AI briefing request");
+                                        ai_briefings.write().request_failed();
+                                    }
+                                }
+                            }
                             Some(UiAction::TestAiProvider { id }) => {
                                 let Some(client) = client.as_ref() else {
                                     break;
@@ -366,6 +387,18 @@ fn App() -> Element {
                     }
                 }
 
+                let ai_job_query = AiJobQueryDto {
+                    task: Some(AiBriefingTaskDto::ResearchExplanation),
+                    limit: Some(20),
+                };
+                match client.list_ai_jobs(&ai_job_query).await {
+                    Ok(list) => ai_briefings.write().jobs_loaded(list.jobs),
+                    Err(error) => {
+                        tracing::error!(%error, "failed to list AI jobs");
+                        ai_briefings.write().jobs_failed();
+                    }
+                }
+
                 match client.list_ai_provider_profiles().await {
                     Ok(list) => ai_providers.write().list_loaded(list),
                     Err(error) => ai_providers.write().list_failed(error.to_string()),
@@ -421,8 +454,10 @@ fn App() -> Element {
     let news_open_sender = actions;
     let news_close_sender = actions;
     let ai_briefings_state = ai_briefings();
+    let research_events = research_state.events.clone().unwrap_or_default();
     let ai_briefing_open_sender = actions;
     let ai_briefing_close_sender = actions;
+    let ai_briefing_request_sender = actions;
     let ai_providers_state = ai_providers();
     let ai_test_sender = actions;
     let ai_model_test_sender = actions;
@@ -721,8 +756,14 @@ fn App() -> Element {
                 AiBriefingPanel {
                     state: ai_briefings_state.clone(),
                     strings: strings(),
+                    research_events,
                     on_open: move |briefing_id| {
                         ai_briefing_open_sender.send(UiAction::OpenAiBriefing { briefing_id });
+                    },
+                    on_request: move |research_event_id| {
+                        ai_briefing_request_sender.send(UiAction::RequestAiBriefing {
+                            research_event_id,
+                        });
                     },
                 }
                 AiProviderPanel {

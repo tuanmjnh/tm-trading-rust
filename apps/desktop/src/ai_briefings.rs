@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
-use tm_trading_contracts::{AiBriefingDto, AiBriefingReferenceKindDto, AiBriefingTaskDto};
+use tm_trading_contracts::{
+    AiBriefingDto, AiBriefingReferenceKindDto, AiBriefingTaskDto, AiJobDto, AiJobStatusDto,
+    ResearchEventDto,
+};
 
 use crate::i18n::UiStrings;
 use crate::slideover::Slideover;
@@ -10,6 +13,8 @@ use crate::slideover::Slideover;
 pub enum AiBriefingPanelError {
     List,
     Detail,
+    Jobs,
+    Request,
 }
 
 /// Independent state for the AI Briefing panel and its detail overlay.
@@ -20,6 +25,9 @@ pub struct AiBriefingPanelState {
     pub selected_id: Option<String>,
     pub detail: Option<AiBriefingDto>,
     pub detail_error: Option<AiBriefingPanelError>,
+    pub latest_job: Option<AiJobDto>,
+    pub job_error: Option<AiBriefingPanelError>,
+    pub request_error: Option<AiBriefingPanelError>,
 }
 
 impl AiBriefingPanelState {
@@ -30,6 +38,26 @@ impl AiBriefingPanelState {
 
     pub fn list_failed(&mut self) {
         self.list_error = Some(AiBriefingPanelError::List);
+    }
+
+    pub fn jobs_loaded(&mut self, jobs: Vec<AiJobDto>) {
+        if let Some(job) = jobs.first() {
+            self.latest_job = Some(job.clone());
+        }
+        self.job_error = None;
+    }
+
+    pub fn jobs_failed(&mut self) {
+        self.job_error = Some(AiBriefingPanelError::Jobs);
+    }
+
+    pub fn request_created(&mut self, job: AiJobDto) {
+        self.latest_job = Some(job);
+        self.request_error = None;
+    }
+
+    pub fn request_failed(&mut self) {
+        self.request_error = Some(AiBriefingPanelError::Request);
     }
 
     pub fn open(&mut self, briefing_id: String) {
@@ -64,9 +92,14 @@ impl AiBriefingPanelState {
 pub fn AiBriefingPanel(
     state: AiBriefingPanelState,
     strings: UiStrings,
+    research_events: Vec<ResearchEventDto>,
     on_open: EventHandler<String>,
+    on_request: EventHandler<String>,
 ) -> Element {
     let briefing_count = state.briefings.as_ref().map_or(0, Vec::len);
+    let mut selected_research_event_id = use_signal(String::new);
+    let selected_id = selected_research_event_id.read().clone();
+    let can_request = research_events.iter().any(|event| event.id == selected_id);
 
     rsx! {
         section { class: "panel ai-briefing-panel",
@@ -77,6 +110,65 @@ pub fn AiBriefingPanel(
                 }
                 div { class: "signal-summary", aria_label: "{strings.ai_briefing_summary}",
                     span { strong { "{briefing_count}" } " {strings.ai_briefing_briefings_count}" }
+                }
+            }
+            div { class: "ai-briefing-request",
+                div { class: "ai-briefing-request-field",
+                    span { class: "detail-label", "{strings.ai_briefing_request_label}" }
+                    select {
+                        class: "text-input",
+                        value: "{selected_id}",
+                        aria_label: "{strings.ai_briefing_request_label}",
+                        disabled: research_events.is_empty(),
+                        onchange: move |event| selected_research_event_id.set(event.value()),
+                        option { value: "", disabled: true, "{strings.ai_briefing_request_select}" }
+                        for event in research_events.iter() {
+                            option { value: "{event.id}",
+                                "{event.symbol} · {event.event_type} · {event.id}"
+                            }
+                        }
+                    }
+                }
+                button {
+                    class: "button primary",
+                    type: "button",
+                    disabled: !can_request,
+                    onclick: move |_| on_request.call(selected_id.clone()),
+                    "{strings.ai_briefing_request_button}"
+                }
+            }
+            if research_events.is_empty() {
+                p { class: "panel-subtitle ai-briefing-request-hint", "{strings.ai_briefing_request_unavailable}" }
+            }
+            if state.request_error.is_some() {
+                div { class: "banner error", role: "alert", "{strings.ai_briefing_request_failed}" }
+            }
+            if state.job_error.is_some() {
+                div { class: "banner error", role: "alert", "{strings.ai_briefing_jobs_unavailable_hint}" }
+            }
+            if let Some(job) = state.latest_job.as_ref() {
+                {
+                    let open_briefing_id = job.briefing_id.clone();
+                    rsx! {
+                        div { class: "ai-briefing-job", role: "status",
+                            span { class: "detail-label", "{strings.ai_briefing_job_status}" }
+                            span { class: "pill {job_status_class(job.status)}",
+                                "{job_status_label(job.status, &strings)}"
+                            }
+                            span { class: "operation-id", "{job.id}" }
+                            if let Some(error_code) = job.error_code.as_ref() {
+                                span { class: "error-text", "{error_code}" }
+                            }
+                            if let Some(briefing_id) = open_briefing_id {
+                                button {
+                                    class: "button",
+                                    type: "button",
+                                    onclick: move |_| on_open.call(briefing_id.clone()),
+                                    "{strings.ai_briefing_open_briefing}"
+                                }
+                            }
+                        }
+                    }
                 }
             }
             if state.list_error.is_some() {
@@ -342,6 +434,26 @@ fn task_label(task: AiBriefingTaskDto, strings: &UiStrings) -> &'static str {
     }
 }
 
+fn job_status_label(status: AiJobStatusDto, strings: &UiStrings) -> &'static str {
+    match status {
+        AiJobStatusDto::Queued => strings.ai_briefing_job_queued,
+        AiJobStatusDto::Claimed => strings.ai_briefing_job_claimed,
+        AiJobStatusDto::Succeeded => strings.ai_briefing_job_succeeded,
+        AiJobStatusDto::Failed => strings.ai_briefing_job_failed,
+        AiJobStatusDto::Expired => strings.ai_briefing_job_expired,
+        AiJobStatusDto::OutcomeUnknown => strings.ai_briefing_job_outcome_unknown,
+    }
+}
+
+fn job_status_class(status: AiJobStatusDto) -> &'static str {
+    match status {
+        AiJobStatusDto::Queued | AiJobStatusDto::Claimed => "status-progress",
+        AiJobStatusDto::Succeeded => "status-succeeded",
+        AiJobStatusDto::Failed => "status-failed",
+        AiJobStatusDto::Expired | AiJobStatusDto::OutcomeUnknown => "status-cancelled",
+    }
+}
+
 fn reference_kind_label(kind: AiBriefingReferenceKindDto, strings: &UiStrings) -> &'static str {
     match kind {
         AiBriefingReferenceKindDto::ResearchEvent => strings.ai_briefing_reference_research_event,
@@ -437,6 +549,64 @@ mod tests {
         assert_ne!(
             task_label(AiBriefingTaskDto::MarketBriefing, &english),
             task_label(AiBriefingTaskDto::MarketBriefing, &vietnamese)
+        );
+    }
+
+    fn job(
+        id: &str,
+        status: tm_trading_contracts::AiJobStatusDto,
+    ) -> tm_trading_contracts::AiJobDto {
+        tm_trading_contracts::AiJobDto {
+            id: id.to_owned(),
+            owner_scope: "local-operator".to_owned(),
+            correlation_id: "correlation-1".to_owned(),
+            task: AiBriefingTaskDto::ResearchExplanation,
+            status,
+            attempt: 0,
+            research_event_ids: vec!["rev1_0123456789abcdef".to_owned()],
+            news_item_ids: Vec::new(),
+            requested_at: at(),
+            expires_at: at(),
+            finished_at: None,
+            briefing_id: None,
+            error_code: None,
+        }
+    }
+
+    #[test]
+    fn a_created_request_tracks_the_latest_job_and_clears_the_request_error() {
+        let mut state = AiBriefingPanelState::default();
+        state.request_failed();
+        state.request_created(job(
+            "aijob1_1",
+            tm_trading_contracts::AiJobStatusDto::Queued,
+        ));
+
+        assert_eq!(state.latest_job.as_ref().unwrap().id, "aijob1_1");
+        assert!(state.request_error.is_none());
+    }
+
+    #[test]
+    fn a_failed_job_refresh_keeps_the_last_loaded_job() {
+        let mut state = AiBriefingPanelState::default();
+        state.jobs_loaded(vec![job(
+            "aijob1_1",
+            tm_trading_contracts::AiJobStatusDto::Claimed,
+        )]);
+        state.jobs_failed();
+
+        assert_eq!(state.latest_job.as_ref().unwrap().id, "aijob1_1");
+        assert_eq!(state.job_error, Some(AiBriefingPanelError::Jobs));
+    }
+
+    #[test]
+    fn job_status_labels_are_localized() {
+        let english = UiStrings::for_locale(Locale::English);
+        let vietnamese = UiStrings::for_locale(Locale::Vietnamese);
+
+        assert_ne!(
+            job_status_label(tm_trading_contracts::AiJobStatusDto::Queued, &english),
+            job_status_label(tm_trading_contracts::AiJobStatusDto::Queued, &vietnamese)
         );
     }
 }
