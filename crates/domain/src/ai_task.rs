@@ -268,17 +268,26 @@ fn normalize_chain(
     if fallbacks.len() + 1 > usize::from(MAX_AI_TASK_MAX_ATTEMPTS) {
         return Err(AiTaskRouteError::TooManyProviders(fallbacks.len() + 1));
     }
-    let mut seen: Vec<String> = vec![primary.clone()];
+    let mut seen: Vec<String> = vec![provider_id(&primary)];
     let mut normalized = Vec::with_capacity(fallbacks.len());
     for fallback in fallbacks {
         let fallback = normalize_entry(fallback)?;
-        if seen.iter().any(|existing| existing == &fallback) {
-            return Err(AiTaskRouteError::DuplicateProvider(fallback));
+        let provider_id = provider_id(&fallback);
+        if seen.iter().any(|existing| existing == &provider_id) {
+            return Err(AiTaskRouteError::DuplicateProvider(provider_id));
         }
-        seen.push(fallback.clone());
+        seen.push(provider_id);
         normalized.push(fallback);
     }
     Ok((primary, normalized))
+}
+
+fn provider_id(value: &str) -> String {
+    value
+        .split_once(':')
+        .map_or(value, |(provider_id, _)| provider_id)
+        .trim()
+        .to_owned()
 }
 
 fn normalize_entry(value: String) -> Result<String, AiTaskRouteError> {
@@ -407,6 +416,14 @@ mod tests {
         );
         assert_eq!(
             AiTaskRoute::new(new_route("primary", &["primary"], 2)).unwrap_err(),
+            AiTaskRouteError::DuplicateProvider("primary".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_route_rejects_two_models_from_the_same_provider() {
+        assert_eq!(
+            AiTaskRoute::new(new_route("primary:model-a", &["primary:model-b"], 2)).unwrap_err(),
             AiTaskRouteError::DuplicateProvider("primary".to_owned())
         );
     }
