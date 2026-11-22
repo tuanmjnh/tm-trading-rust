@@ -45,24 +45,23 @@ impl MongoAiJobRepository {
         Ok(Self { collection })
     }
 
-    /// Replaces a document only if its fencing token still matches the value we read.
+    /// Replaces a document only if the state read before the transition is unchanged.
     async fn replace_if_unchanged(
         &self,
         job: &AiJob,
         previous_fencing_token: u64,
+        previous_status: AiJobStatus,
+        previous_lease_owner: Option<&str>,
     ) -> Result<bool, RepositoryError> {
         let mut document = to_document(job)?;
         document.remove("_id");
-        let result = self
-            .collection
-            .replace_one(
-                doc! {
-                    "_id": job.id().to_string(),
-                    "fencingToken": bson_i64(previous_fencing_token)?,
-                },
-                document,
-            )
-            .await?;
+        let filter = transition_filter(
+            job.id(),
+            previous_fencing_token,
+            previous_status,
+            previous_lease_owner,
+        )?;
+        let result = self.collection.replace_one(filter, document).await?;
         Ok(result.matched_count == 1)
     }
 
@@ -83,9 +82,16 @@ impl MongoAiJobRepository {
                 .ok_or(RepositoryError::AiJobNotFound)?;
             let mut job = from_document(document)?;
             let previous_fencing_token = job.fencing_token();
+            let previous_status = job.status();
+            let previous_lease_owner = job.lease_owner().map(str::to_owned);
             transition(&mut job)?;
             if self
-                .replace_if_unchanged(&job, previous_fencing_token)
+                .replace_if_unchanged(
+                    &job,
+                    previous_fencing_token,
+                    previous_status,
+                    previous_lease_owner.as_deref(),
+                )
                 .await?
             {
                 return Ok(job);
@@ -184,11 +190,18 @@ impl AiJobRepository for MongoAiJobRepository {
             };
             let mut job = from_document(document)?;
             let previous_fencing_token = job.fencing_token();
+            let previous_status = job.status();
+            let previous_lease_owner = job.lease_owner().map(str::to_owned);
             if job.claim(worker_id, now, lease_expires_at).is_err() {
                 continue;
             }
             if self
-                .replace_if_unchanged(&job, previous_fencing_token)
+                .replace_if_unchanged(
+                    &job,
+                    previous_fencing_token,
+                    previous_status,
+                    previous_lease_owner.as_deref(),
+                )
                 .await?
             {
                 return Ok(Some(job));
@@ -246,6 +259,8 @@ impl AiJobRepository for MongoAiJobRepository {
         while let Some(document) = cursor.try_next().await? {
             let mut job = from_document(document)?;
             let previous_fencing_token = job.fencing_token();
+            let previous_status = job.status();
+            let previous_lease_owner = job.lease_owner().map(str::to_owned);
             if job.is_expired_at(now) {
                 if job.expire(now).is_err() {
                     continue;
@@ -261,7 +276,12 @@ impl AiJobRepository for MongoAiJobRepository {
                 continue;
             }
             if self
-                .replace_if_unchanged(&job, previous_fencing_token)
+                .replace_if_unchanged(
+                    &job,
+                    previous_fencing_token,
+                    previous_status,
+                    previous_lease_owner.as_deref(),
+                )
                 .await?
             {
                 closed += 1;
@@ -276,6 +296,23 @@ const CAS_ATTEMPTS: usize = 3;
 
 fn bson_i64(value: u64) -> Result<i64, RepositoryError> {
     i64::try_from(value).map_err(|_| RepositoryError::CorruptRecord("fencingToken"))
+}
+
+fn transition_filter(
+    job_id: AiJobId,
+    previous_fencing_token: u64,
+    previous_status: AiJobStatus,
+    previous_lease_owner: Option<&str>,
+) -> Result<Document, RepositoryError> {
+    let mut filter = doc! {
+        "_id": job_id.to_string(),
+        "fencingToken": bson_i64(previous_fencing_token)?,
+        "status": previous_status.as_str(),
+    };
+    if let Some(lease_owner) = previous_lease_owner {
+        filter.insert("leaseOwner", lease_owner);
+    }
+    Ok(filter)
 }
 
 fn to_document(job: &AiJob) -> Result<Document, RepositoryError> {
@@ -402,5 +439,30 @@ fn optional_timestamp(
         None | Some(Bson::Null) => Ok(None),
         Some(Bson::DateTime(value)) => Ok(Some(from_timestamp(*value)?)),
         Some(_) => Err(RepositoryError::CorruptRecord(field)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn terminal_transition_filter_requires_the_claimed_status_and_lease_owner() {
+        let job_id = AiJobId::from_uuid(Uuid::from_u128(1));
+        let filter = transition_filter(job_id, 7, AiJobStatus::Claimed, Some("worker-1")).unwrap();
+
+        assert_eq!(filter.get_str("status"), Ok("CLAIMED"));
+        assert_eq!(filter.get_str("leaseOwner"), Ok("worker-1"));
+        assert_eq!(filter.get_i64("fencingToken"), Ok(7));
+    }
+
+    #[test]
+    fn queued_transition_filter_does_not_match_a_lease_owner() {
+        let job_id = AiJobId::from_uuid(Uuid::from_u128(2));
+        let filter = transition_filter(job_id, 0, AiJobStatus::Queued, None).unwrap();
+
+        assert_eq!(filter.get_str("status"), Ok("QUEUED"));
+        assert!(!filter.contains_key("leaseOwner"));
     }
 }
