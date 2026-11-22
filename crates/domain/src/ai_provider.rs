@@ -4,6 +4,10 @@ use thiserror::Error;
 pub const MAX_AI_PROVIDER_DISPLAY_NAME_CHARS: usize = 80;
 pub const MIN_AI_PROVIDER_TIMEOUT_MS: u64 = 500;
 pub const MAX_AI_PROVIDER_TIMEOUT_MS: u64 = 60_000;
+/// Only environment variables in this namespace may hold AI provider credentials.
+pub const AI_PROVIDER_API_KEY_ENV_PREFIX: &str = "TM_TRADING_AI_";
+/// Environment name used by profiles stored without an explicit secret reference.
+pub const DEFAULT_AI_PROVIDER_API_KEY_ENV: &str = "TM_TRADING_AI_OPENAI_API_KEY";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiProviderKind {
@@ -269,7 +273,14 @@ fn normalize_env_name(value: &str) -> Result<String, AiProviderProfileError> {
     if value.is_empty() {
         return Err(AiProviderProfileError::EmptyApiKeyEnv);
     }
-    if !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+    let Some(suffix) = value.strip_prefix(AI_PROVIDER_API_KEY_ENV_PREFIX) else {
+        return Err(AiProviderProfileError::InvalidApiKeyEnv);
+    };
+    if suffix.is_empty()
+        || !suffix
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+    {
         return Err(AiProviderProfileError::InvalidApiKeyEnv);
     }
     Ok(value.to_owned())
@@ -291,7 +302,9 @@ pub enum AiProviderProfileError {
     TimeoutOutOfRange,
     #[error("ai provider API key environment variable name must not be empty")]
     EmptyApiKeyEnv,
-    #[error("ai provider API key environment variable name is invalid")]
+    #[error(
+        "ai provider API key environment variable must use the TM_TRADING_AI_ uppercase namespace"
+    )]
     InvalidApiKeyEnv,
 }
 
@@ -302,19 +315,65 @@ mod tests {
     fn at() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 11, 20, 8, 0, 0).unwrap()
     }
-    #[test]
-    fn creates_profile() {
-        let p = AiProviderProfile::new(NewAiProviderProfile {
+    fn new_profile(api_key_env: &str) -> Result<AiProviderProfile, AiProviderProfileError> {
+        AiProviderProfile::new(NewAiProviderProfile {
             id: "p1".into(),
             kind: AiProviderKind::OpenAiCompatible,
             display_name: "Local".into(),
             base_url: "http://localhost:11434/v1".into(),
             default_model: "llama3".into(),
             timeout_ms: 5000,
-            api_key_env: "OPENAI_API_KEY".into(),
+            api_key_env: api_key_env.into(),
             created_at: at(),
         })
-        .unwrap();
+    }
+
+    #[test]
+    fn creates_profile() {
+        let p = new_profile("TM_TRADING_AI_OPENAI_API_KEY").unwrap();
         assert_eq!(p.id(), "p1");
+    }
+
+    #[test]
+    fn rejects_api_key_environment_names_outside_the_ai_namespace() {
+        for name in [
+            "PATH",
+            "OPENAI_API_KEY",
+            "TM_TEST_AI_KEY",
+            "TM_TRADING_AI_",
+            "TM_TRADING_AI_lowercase",
+            "TM_TRADING_AI_BAD-NAME",
+        ] {
+            assert!(
+                matches!(
+                    new_profile(name),
+                    Err(AiProviderProfileError::InvalidApiKeyEnv)
+                ),
+                "{name} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn stored_profiles_cannot_bypass_the_api_key_namespace() {
+        let result = AiProviderProfile::from_stored(StoredAiProviderProfile {
+            id: "p1".into(),
+            kind: AiProviderKind::OpenAiCompatible,
+            display_name: "Local".into(),
+            enabled: true,
+            base_url: "http://localhost:11434/v1".into(),
+            default_model: "llama3".into(),
+            timeout_ms: 5000,
+            api_key_env: "PATH".into(),
+            health_state: AiProviderHealthState::Unknown,
+            last_health_check_at: None,
+            last_error_code: None,
+            created_at: at(),
+            updated_at: at(),
+        });
+        assert!(matches!(
+            result,
+            Err(AiProviderProfileError::InvalidApiKeyEnv)
+        ));
     }
 }

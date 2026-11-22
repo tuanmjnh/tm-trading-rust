@@ -1230,12 +1230,27 @@ fn ai_provider_body(overrides: serde_json::Value) -> serde_json::Value {
         "base_url": "https://api.example.com",
         "default_model": "model-a",
         "timeout_ms": 5000,
-        "api_key_env": "TM_TEST_AI_KEY"
+        "api_key_env": "TM_TRADING_AI_TEST_KEY"
     });
     for (key, value) in overrides.as_object().expect("object") {
         body[key.as_str()] = value.clone();
     }
     body
+}
+
+#[tokio::test]
+async fn ai_provider_profiles_reject_environment_names_outside_the_ai_namespace() {
+    let app = router(state());
+    let rejected = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers",
+            Some(USER_TOKEN),
+            Some(ai_provider_body(json!({ "api_key_env": "PATH" }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
@@ -1255,7 +1270,7 @@ async fn ai_provider_profiles_are_configured_and_health_checked() {
     assert_eq!(created.status(), StatusCode::OK);
     let created = json_body(created).await;
     assert_eq!(created["id"], "primary");
-    assert_eq!(created["api_key_env"], "TM_TEST_AI_KEY");
+    assert_eq!(created["api_key_env"], "TM_TRADING_AI_TEST_KEY");
     assert_eq!(created["health_state"], "UNKNOWN");
     assert!(created["last_health_check_at"].is_null());
 

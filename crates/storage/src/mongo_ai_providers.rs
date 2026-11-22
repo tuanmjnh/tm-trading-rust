@@ -5,7 +5,8 @@ use mongodb::options::IndexOptions;
 use mongodb::{Collection, Database, IndexModel};
 
 use tm_trading_domain::{
-    AiProviderHealthState, AiProviderKind, AiProviderProfile, StoredAiProviderProfile,
+    AiProviderHealthState, AiProviderKind, AiProviderProfile, DEFAULT_AI_PROVIDER_API_KEY_ENV,
+    StoredAiProviderProfile,
 };
 
 use crate::bson_support::{from_timestamp, timestamp};
@@ -103,8 +104,8 @@ fn from_document(document: Document) -> Result<AiProviderProfile, RepositoryErro
         .and_then(Bson::as_i64)
         .and_then(|value| u64::try_from(value).ok())
         .unwrap_or(5000);
-    let api_key_env =
-        optional_text(&document, "apiKeyEnv")?.unwrap_or_else(|| "OPENAI_API_KEY".to_owned());
+    let api_key_env = optional_text(&document, "apiKeyEnv")?
+        .unwrap_or_else(|| DEFAULT_AI_PROVIDER_API_KEY_ENV.to_owned());
     let health_state = match optional_text(&document, "healthState")?.as_deref() {
         None => AiProviderHealthState::Unknown,
         Some(value) => AiProviderHealthState::parse(value)

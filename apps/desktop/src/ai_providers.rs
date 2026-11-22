@@ -402,7 +402,7 @@ mod tests {
             base_url: "https://api.example.com/v1".to_owned(),
             default_model: "model-a".to_owned(),
             timeout_ms: 5_000,
-            api_key_env: "AI_PRIMARY_KEY".to_owned(),
+            api_key_env: "TM_TRADING_AI_PRIMARY_KEY".to_owned(),
             health_state: health.to_owned(),
             last_health_check_at: Some(now),
             last_error_code: None,

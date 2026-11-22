@@ -22,9 +22,10 @@ pub use ai_model::{
     MAX_AI_MODEL_OUTPUT_TOKENS, NewAiModel, StoredAiModel,
 };
 pub use ai_provider::{
-    AiProviderHealthState, AiProviderKind, AiProviderProfile, AiProviderProfileError,
-    MAX_AI_PROVIDER_DISPLAY_NAME_CHARS, MAX_AI_PROVIDER_TIMEOUT_MS, MIN_AI_PROVIDER_TIMEOUT_MS,
-    NewAiProviderProfile, StoredAiProviderProfile,
+    AI_PROVIDER_API_KEY_ENV_PREFIX, AiProviderHealthState, AiProviderKind, AiProviderProfile,
+    AiProviderProfileError, DEFAULT_AI_PROVIDER_API_KEY_ENV, MAX_AI_PROVIDER_DISPLAY_NAME_CHARS,
+    MAX_AI_PROVIDER_TIMEOUT_MS, MIN_AI_PROVIDER_TIMEOUT_MS, NewAiProviderProfile,
+    StoredAiProviderProfile,
 };
 pub use ai_task::{
     AiTaskKind, AiTaskModelRef, AiTaskRoute, AiTaskRouteError, MAX_AI_TASK_CONCURRENCY,

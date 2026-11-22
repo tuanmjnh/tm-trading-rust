@@ -6,7 +6,7 @@
 
 AI providers are configuration, not execution. A profile records where an OpenAI-compatible Chat Completions endpoint lives, which model is the default, and how long one request may take. The platform never places orders or reads balances through a provider, and no provider response can trigger a trading action.
 
-Profiles carry no secret. `api_key_env` is the *name* of an environment variable; the secret value is read from the environment of the Management API process at request time, used for one HTTP request, and never stored, returned, logged, or attached to an error.
+Profiles carry no secret. `api_key_env` is the *name* of an environment variable in the dedicated `TM_TRADING_AI_` namespace; the secret value is read from the environment of the Management API process at request time, used for one HTTP request, and never stored, returned, logged, or attached to an error. Names outside that namespace are rejected, so a profile cannot read an unrelated process secret such as `PATH` or a platform token.
 
 ## 2. Profile contract
 
@@ -19,12 +19,12 @@ Profiles carry no secret. `api_key_env` is the *name* of an environment variable
 | `base_url` | `https` endpoint, or `http` only for loopback |
 | `default_model` | Model name passed to the provider |
 | `timeout_ms` | Request timeout, 500 to 60000 ms |
-| `api_key_env` | Environment variable name holding the API key |
+| `api_key_env` | Environment variable name holding the API key; `TM_TRADING_AI_` followed by uppercase letters, digits, or underscores |
 | `health_state` | `UNKNOWN`, `HEALTHY`, or `UNHEALTHY` |
 | `last_health_check_at` | Observation time of the last health test |
 | `last_error_code` | Sanitized diagnostic code from the last failed test |
 
-The domain normalizes the display name, base URL, model, and environment variable name, and rejects an empty identifier, model, or key environment name. Invalid configurations are rejected before storage with `422`.
+The domain normalizes the display name, base URL, model, and environment variable name. It rejects an empty identifier, model, or key environment name and any key environment name outside the `TM_TRADING_AI_` uppercase namespace. The same rule is enforced when a stored profile is loaded, so a legacy profile that names an arbitrary process variable cannot be probed or used by the worker. Invalid configurations are rejected before storage with `422`.
 
 ## 3. Base URL safety
 
