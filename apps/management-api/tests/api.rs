@@ -1589,7 +1589,7 @@ fn ai_task_route_body(overrides: serde_json::Value) -> serde_json::Value {
     let mut body = json!({
         "task": "market_briefing",
         "primary": "primary:primary-large",
-        "fallbacks": ["primary:secondary-small"],
+        "fallbacks": ["secondary:secondary-small"],
         "timeout_ms": 5000,
         "max_attempts": 2,
         "concurrency": 1,
@@ -1629,11 +1629,26 @@ async fn ai_task_routes_bind_to_registered_models_and_bound_the_fallback_chain()
         .expect("response");
     assert_eq!(model.status(), StatusCode::OK);
 
+    let fallback_provider = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai-providers",
+            Some(USER_TOKEN),
+            Some(ai_provider_body(json!({
+                "id": "secondary",
+                "display_name": "Secondary"
+            }))),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(fallback_provider.status(), StatusCode::OK);
+
     let fallback_model = app
         .clone()
         .oneshot(request(
             "POST",
-            "/api/v1/ai-providers/primary/models",
+            "/api/v1/ai-providers/secondary/models",
             Some(USER_TOKEN),
             Some(ai_model_body(json!({ "id": "secondary-small" }))),
         ))
