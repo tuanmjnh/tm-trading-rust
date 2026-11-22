@@ -193,6 +193,13 @@ async fn run() -> Result<(), RunError> {
                             &worker.failed(&job_id.to_string(), error_code),
                         )?;
                     }
+                    Ok(AiJobOutcome::OutcomeUnknown { job_id }) => {
+                        worker.record_failure();
+                        send(
+                            &mut output,
+                            &worker.failed(&job_id.to_string(), "lease_lapsed"),
+                        )?;
+                    }
                     Err(error) => {
                         worker.record_failure();
                         eprintln!("[ai-worker] job processing failed: {error}");

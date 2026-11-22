@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use tm_trading_domain::{AiJob, AiJobId, AiTaskKind};
+use tm_trading_domain::{AiBriefing, AiJob, AiJobId, AiTaskKind};
 use tm_trading_storage::{AiBriefingRepository, AiJobRepository, RepositoryError};
 
 use crate::evidence::{
@@ -20,6 +20,18 @@ use crate::{AiRouteError, AiRouteExecutor};
 
 /// Output budget requested from the configured route for one briefing.
 pub const BRIEFING_MAX_OUTPUT_TOKENS: u32 = 1_024;
+
+trait AiJobClock: Send + Sync {
+    fn now(&self) -> DateTime<Utc>;
+}
+
+struct SystemAiJobClock;
+
+impl AiJobClock for SystemAiJobClock {
+    fn now(&self) -> DateTime<Utc> {
+        Utc::now()
+    }
+}
 
 /// Result of one claim attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +46,8 @@ pub enum AiJobOutcome {
         job_id: AiJobId,
         error_code: &'static str,
     },
+    /// The lease expired before the result could be observed.
+    OutcomeUnknown { job_id: AiJobId },
 }
 
 /// Claims and processes durable AI jobs against one provider route.
@@ -44,6 +58,7 @@ pub struct AiJobProcessor {
     assembler: BriefingEvidenceAssembler,
     executor: AiRouteExecutor,
     evidence_max_age: Duration,
+    clock: Arc<dyn AiJobClock>,
 }
 
 impl AiJobProcessor {
@@ -55,12 +70,31 @@ impl AiJobProcessor {
         executor: AiRouteExecutor,
         evidence_max_age: Duration,
     ) -> Self {
+        Self::new_with_clock(
+            jobs,
+            briefings,
+            assembler,
+            executor,
+            evidence_max_age,
+            Arc::new(SystemAiJobClock),
+        )
+    }
+
+    fn new_with_clock(
+        jobs: Arc<dyn AiJobRepository>,
+        briefings: Arc<dyn AiBriefingRepository>,
+        assembler: BriefingEvidenceAssembler,
+        executor: AiRouteExecutor,
+        evidence_max_age: Duration,
+        clock: Arc<dyn AiJobClock>,
+    ) -> Self {
         Self {
             jobs,
             briefings,
             assembler,
             executor,
             evidence_max_age,
+            clock,
         }
     }
 
@@ -80,28 +114,66 @@ impl AiJobProcessor {
         let job_id = job.id();
         let fencing_token = job.fencing_token();
 
-        let published = self.run(&job, now).await;
-        let (briefing_id, error_code) = match published {
-            Ok(briefing_id) => (briefing_id, None),
-            Err(code) => (String::new(), Some(code)),
+        let prepared = self.prepare(&job, now).await;
+        let transition_at = self.clock.now();
+        if job.lease_lapsed_at(transition_at) {
+            self.jobs.expire_due(transition_at).await?;
+            return Ok(AiJobOutcome::OutcomeUnknown { job_id });
+        }
+
+        let briefing = match prepared {
+            Ok(briefing) => briefing,
+            Err(error_code) => {
+                self.jobs
+                    .fail(
+                        &job_id,
+                        worker_id,
+                        fencing_token,
+                        error_code.to_owned(),
+                        None,
+                        transition_at,
+                    )
+                    .await?;
+                return Ok(AiJobOutcome::Failed { job_id, error_code });
+            }
         };
 
-        if let Some(error_code) = error_code {
+        if self.briefings.upsert(&briefing).await.is_err() {
+            let failed_at = self.clock.now();
+            if job.lease_lapsed_at(failed_at) {
+                self.jobs.expire_due(failed_at).await?;
+                return Ok(AiJobOutcome::OutcomeUnknown { job_id });
+            }
             self.jobs
                 .fail(
                     &job_id,
                     worker_id,
                     fencing_token,
-                    error_code.to_owned(),
+                    "publish_failed".to_owned(),
                     None,
-                    now,
+                    failed_at,
                 )
                 .await?;
-            return Ok(AiJobOutcome::Failed { job_id, error_code });
+            return Ok(AiJobOutcome::Failed {
+                job_id,
+                error_code: "publish_failed",
+            });
         }
 
+        let completed_at = self.clock.now();
+        if job.lease_lapsed_at(completed_at) {
+            self.jobs.expire_due(completed_at).await?;
+            return Ok(AiJobOutcome::OutcomeUnknown { job_id });
+        }
+        let briefing_id = briefing.id().to_owned();
         self.jobs
-            .complete(&job_id, worker_id, fencing_token, &briefing_id, now)
+            .complete(
+                &job_id,
+                worker_id,
+                fencing_token,
+                &briefing_id,
+                completed_at,
+            )
             .await?;
         Ok(AiJobOutcome::Published {
             job_id,
@@ -109,8 +181,8 @@ impl AiJobProcessor {
         })
     }
 
-    /// Runs evidence assembly, generation, validation, and publication for a claimed job.
-    async fn run(&self, job: &AiJob, now: DateTime<Utc>) -> Result<String, &'static str> {
+    /// Runs evidence assembly, generation, and validation for a claimed job.
+    async fn prepare(&self, job: &AiJob, now: DateTime<Utc>) -> Result<AiBriefing, &'static str> {
         if job.task() != AiTaskKind::ResearchExplanation {
             return Err("unsupported_task");
         }
@@ -135,21 +207,16 @@ impl AiJobProcessor {
             .await
             .map_err(route_code)?;
         let output = parse_model_output(&execution.response.content).map_err(evidence_code)?;
-        let briefing = build_briefing(
+        build_briefing(
             job.owner_scope(),
             AiTaskKind::ResearchExplanation,
             RESEARCH_EXPLANATION_PROMPT_VERSION,
             &execution,
             &evidence,
             &output,
-            now,
+            self.clock.now(),
         )
-        .map_err(|_| "invalid_briefing")?;
-        self.briefings
-            .upsert(&briefing)
-            .await
-            .map_err(|_| "publish_failed")?;
-        Ok(briefing.id().to_owned())
+        .map_err(|_| "invalid_briefing")
     }
 }
 
@@ -178,6 +245,7 @@ fn route_code(error: AiRouteError) -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::sync::Mutex;
 
     use async_trait::async_trait;
     use chrono::TimeZone;
@@ -202,6 +270,29 @@ mod tests {
 
     fn at() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 11, 22, 8, 0, 0).unwrap()
+    }
+
+    struct TestClock {
+        now: Mutex<DateTime<Utc>>,
+    }
+
+    impl TestClock {
+        fn new() -> Self {
+            Self {
+                now: Mutex::new(at()),
+            }
+        }
+
+        fn advance(&self, duration: Duration) {
+            let mut now = self.now.lock().unwrap();
+            *now += chrono::Duration::from_std(duration).unwrap();
+        }
+    }
+
+    impl AiJobClock for TestClock {
+        fn now(&self) -> DateTime<Utc> {
+            *self.now.lock().unwrap()
+        }
     }
 
     fn research_event(owner_scope: &str) -> ResearchEvent {
@@ -232,6 +323,8 @@ mod tests {
     struct MockProvider {
         content: String,
         calls: std::sync::Mutex<usize>,
+        clock: Arc<TestClock>,
+        advance_on_generate: Option<Duration>,
     }
 
     #[async_trait]
@@ -248,6 +341,9 @@ mod tests {
             _request: &tm_trading_ai_providers::AiGenerationRequest,
         ) -> Result<AiGenerationResponse, AiProviderError> {
             *self.calls.lock().unwrap() += 1;
+            if let Some(duration) = self.advance_on_generate {
+                self.clock.advance(duration);
+            }
             Ok(AiGenerationResponse {
                 content: self.content.clone(),
                 model: "mock".to_owned(),
@@ -324,6 +420,14 @@ mod tests {
     }
 
     async fn harness(content: &str, event_owner: &str) -> Harness {
+        harness_with_delay(content, event_owner, None).await
+    }
+
+    async fn harness_with_delay(
+        content: &str,
+        event_owner: &str,
+        advance_on_generate: Option<Duration>,
+    ) -> Harness {
         let research = Arc::new(InMemoryResearchEventRepository::new());
         let event = research_event(event_owner);
         research.upsert(std::slice::from_ref(&event)).await.unwrap();
@@ -338,9 +442,12 @@ mod tests {
         let models = Arc::new(InMemoryAiModelRepository::new());
         models.upsert(&model()).await.unwrap();
 
+        let clock = Arc::new(TestClock::new());
         let provider = Arc::new(MockProvider {
             content: content.to_owned(),
             calls: std::sync::Mutex::new(0),
+            clock: Arc::clone(&clock),
+            advance_on_generate,
         });
         let executor = AiRouteExecutor::new(
             routes,
@@ -351,12 +458,13 @@ mod tests {
 
         let jobs = Arc::new(InMemoryAiJobRepository::new());
         let briefings = Arc::new(InMemoryAiBriefingRepository::new());
-        let processor = AiJobProcessor::new(
+        let processor = AiJobProcessor::new_with_clock(
             Arc::clone(&jobs) as Arc<dyn tm_trading_storage::AiJobRepository>,
             Arc::clone(&briefings) as Arc<dyn tm_trading_storage::AiBriefingRepository>,
             assembler,
             executor,
             crate::evidence::DEFAULT_EVIDENCE_MAX_AGE,
+            Arc::clone(&clock) as Arc<dyn AiJobClock>,
         );
         Harness {
             processor,
@@ -432,6 +540,41 @@ mod tests {
                 .await
                 .unwrap(),
             AiJobOutcome::Idle
+        );
+    }
+
+    #[tokio::test]
+    async fn a_lapsed_lease_is_unknown_and_publishes_no_briefing() {
+        let event = research_event("local-operator");
+        let harness = harness_with_delay(
+            r#"{"interpretations":["Momentum is strengthening."],"uncertainties":[]}"#,
+            "local-operator",
+            Some(Duration::from_secs(61)),
+        )
+        .await;
+        let job_id = enqueue(&harness, event.id(), "local-operator").await;
+
+        let outcome = harness
+            .processor
+            .process_next("ai-worker", at(), Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert_eq!(outcome, AiJobOutcome::OutcomeUnknown { job_id });
+
+        let job = harness.jobs.get(&job_id).await.unwrap().unwrap();
+        assert_eq!(job.status(), tm_trading_domain::AiJobStatus::OutcomeUnknown);
+        assert_eq!(job.error_code(), Some("lease_lapsed"));
+        assert!(
+            harness
+                .briefings
+                .list(&AiBriefingQuery {
+                    owner_scope: "local-operator".to_owned(),
+                    task: None,
+                    limit: 10,
+                })
+                .await
+                .unwrap()
+                .is_empty()
         );
     }
 
