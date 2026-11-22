@@ -16,6 +16,14 @@ use tm_trading_storage::{
     AiModelRepository, AiProviderProfileRepository, AiTaskRouteRepository, RepositoryError,
 };
 
+mod evidence;
+
+pub use evidence::{
+    BriefingEvidence, BriefingEvidenceAssembler, BriefingEvidenceRequest, DEFAULT_EVIDENCE_MAX_AGE,
+    EvidenceError, ModelBriefing, RESEARCH_EXPLANATION_PROMPT_VERSION, build_briefing,
+    parse_model_output, research_explanation_request,
+};
+
 /// Resolves one configured provider/model pair to a callable provider.
 ///
 /// The resolver owns secret lookup so the route executor never receives or logs a secret value.

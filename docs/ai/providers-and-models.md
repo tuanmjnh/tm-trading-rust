@@ -1,6 +1,6 @@
 # AI Providers and Models
 
-> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, and evidence-bound briefing contract/API/UI are implemented (2026-11-22). The AI Worker executable is not implemented yet.
+> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, and evidence-bound briefing contract/API/UI are implemented (2026-11-22). The AI Worker executable and durable request source are not implemented yet.
 
 ## 1. Scope
 
@@ -183,7 +183,11 @@ The list accepts an exact task filter and a limit from 1 to 200, defaulting to 5
 
 The Desktop AI Briefing panel reads the owner-scoped list and shows the task, summary, model/provider, evidence counts, and generation time. Its detail Slideover shows the separated claims, source references, input snapshots, missing/stale disclosures, and complete provenance in EN and VI.
 
+The AI Worker assembles evidence before any provider call. It accepts a bounded set of research-event and news identifiers, reads each record, and keeps only research events whose owner scope matches the request. A foreign event is disclosed exactly like a missing one, so the worker never confirms another owner's record exists. News is used only when its rights snapshot allows both display and summarization; a restricted item is disclosed instead. Evidence older than the configured age is still used but listed in `stale_inputs`, and every unusable input is listed in `missing_inputs`. Duplicate identifiers are collapsed, and a request with no usable input fails before a billable provider request.
+
+Facts, references, input snapshots, disclosures, and provenance are server-owned. The model receives only the assembled facts plus the disclosure lines, and must answer with a JSON object that has only `interpretations` and `uncertainties`. Any other field, including model-authored facts or references, is rejected, so a hallucinated citation cannot enter a briefing. The system prompt, schema, and output bound are fixed by the producer version.
+
 ## 10. Pending
 
-- the AI Worker executable, durable request source, evidence assembly, and briefing publication;
+- the AI Worker executable, durable request source, and briefing publication;
 - dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them.
