@@ -460,7 +460,8 @@ HTTP(S) without userinfo, query parameters, or fragments. A briefing must cite
 at least one input snapshot or reference and explicitly disclose missing or stale inputs.
 The stable `aibr1_` identifier covers the complete content and evidence payload,
 including owner, task, provider, model, prompt version, generation time, claims,
-references, input snapshots, and missing/stale disclosures. Distinct payloads therefore
+references, input snapshots, missing/stale disclosures, producer version, and schema
+version. Distinct payloads therefore
 receive distinct identifiers even in the same millisecond; the same identifier is written
 only once so an exact replay cannot rewrite an already published briefing.
 

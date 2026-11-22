@@ -120,6 +120,19 @@ fn a_stored_briefing_keeps_its_producer_and_schema_stamps() {
 }
 
 #[test]
+fn producer_and_schema_stamps_are_part_of_the_identifier() {
+    let current = AiBriefing::new(input()).unwrap();
+    let previous = AiBriefing::from_stored(
+        input(),
+        "producer/previous".to_owned(),
+        "ai-briefing.previous".to_owned(),
+    )
+    .unwrap();
+
+    assert_ne!(current.id(), previous.id());
+}
+
+#[test]
 fn required_identity_fields_reject_blank_values() {
     let mut without_provider = input();
     without_provider.provider_id = "  ".to_owned();

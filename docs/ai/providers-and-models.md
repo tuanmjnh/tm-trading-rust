@@ -162,7 +162,7 @@ A briefing is an immutable, owner-scoped record of one model response. It separa
 
 The domain rejects a briefing with no content or no evidence. Reference values must match their kind: `research_event` values use the exact `rev1_` identifier shape, `news_item` values use the exact `news_` identifier shape, and `source_url` values are HTTP(S) URLs without userinfo, query parameters, or fragments so token-bearing links cannot be persisted. Input snapshot identifiers use the exact `rsnap1_` identifier shape.
 
-Briefing identifiers use `aibr1_` plus 16 lowercase hexadecimal characters. The identifier covers the complete content and evidence payload, so two distinct briefings generated in the same millisecond cannot overwrite each other.
+Briefing identifiers use `aibr1_` plus 16 lowercase hexadecimal characters. The identifier covers the complete content and evidence payload, including producer and schema stamps, so two distinct briefings generated in the same millisecond cannot overwrite each other.
 
 Briefings live in the new `ai_briefings` collection with an `{ ownerScope, generatedAt }` read index. Publication is insert-once: replaying an identifier preserves the first published content.
 

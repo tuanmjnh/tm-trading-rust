@@ -327,6 +327,8 @@ fn briefing_id(briefing: &AiBriefing) -> String {
         &mut canonical,
         &briefing.generated_at().timestamp_millis().to_string(),
     );
+    push_component(&mut canonical, briefing.producer_version());
+    push_component(&mut canonical, briefing.schema_version());
     format!(
         "{AI_BRIEFING_ID_PREFIX}{}",
         short_sha1_hex(canonical.as_bytes())
