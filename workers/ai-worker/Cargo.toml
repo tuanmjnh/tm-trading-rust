@@ -1,0 +1,21 @@
+[package]
+name = "tm-trading-ai-worker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+
+tm-trading-ai-providers.workspace = true
+tm-trading-domain.workspace = true
+tm-trading-storage.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

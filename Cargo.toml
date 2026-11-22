@@ -20,6 +20,7 @@ members = [
     "workers/sample-worker",
     "workers/market-worker",
     "workers/news-worker",
+    "workers/ai-worker",
 ]
 
 [workspace.package]
@@ -50,13 +51,13 @@ uuid = { version = "=1.29.3", features = ["v4"] }
 windows = { version = "=0.62.2", default-features = false, features = ["Win32_System_Threading"] }
 
 tm-trading-agent-protocol = { path = "crates/agent-protocol" }
+tm-trading-ai-providers = { path = "crates/ai-providers" }
 tm-trading-api-client = { path = "crates/api-client" }
 tm-trading-config = { path = "crates/config" }
 tm-trading-contracts = { path = "crates/contracts" }
 tm-trading-domain = { path = "crates/domain" }
 tm-trading-market-providers = { path = "crates/market-providers" }
 tm-trading-news-providers = { path = "crates/news-providers" }
-tm-trading-ai-providers = { path = "crates/ai-providers" }
 tm-trading-observability = { path = "crates/observability" }
 tm-trading-research-engine = { path = "crates/research-engine" }
 tm-trading-storage = { path = "crates/storage" }

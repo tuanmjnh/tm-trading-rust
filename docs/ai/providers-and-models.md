@@ -1,6 +1,6 @@
 # AI Providers and Models
 
-> Status: the AI provider profile registry, generic OpenAI-compatible health adapter, model registry, task routing, and evidence-bound briefing contract/API/UI are implemented (2026-11-22). Bounded generation, task-route fallback execution, and the AI Worker are not implemented yet.
+> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, and evidence-bound briefing contract/API/UI are implemented (2026-11-22). The AI Worker executable is not implemented yet.
 
 ## 1. Scope
 
@@ -144,7 +144,9 @@ A route names its models as `provider_id:model_registry_id`, for example `primar
 | `PATCH` | `/api/v1/ai-task-routes/{task}` | `trading.ai.write` |
 | `DELETE` | `/api/v1/ai-task-routes/{task}` | `trading.ai.write` |
 
-Routes live in the `ai_task_routes` collection with an `updatedAt` index. The Desktop AI Provider Center lists each task, its primary and fallback models, and how many providers the route can reach. The AI Worker still owns request execution and the fallback decision, so no route can trigger an AI request by itself.
+Routes live in the `ai_task_routes` collection with an `updatedAt` index. The Desktop AI Provider Center lists each task, its primary and fallback models, and how many providers the route can reach. No route can trigger an AI request by itself.
+
+The AI Worker crate's route executor owns request execution. It rejects disabled routes, providers, and models; checks that each model belongs to the named provider and declares JSON mode; caps output at the smallest of route, model, and request limits; applies the smaller of route and provider timeouts per attempt; bounds concurrency per task; and stops at the route attempt budget. Only a transient provider failure moves to the next configured fallback. Invalid configuration, missing credentials, permission failures, invalid requests, and malformed responses stop at the current provider.
 
 ## 9. Evidence-bound briefings
 
@@ -183,5 +185,5 @@ The Desktop AI Briefing panel reads the owner-scoped list and shows the task, su
 
 ## 10. Pending
 
-- the AI Worker that executes a route, applies bounded fallback, and publishes briefings;
+- the AI Worker executable, durable request source, evidence assembly, and briefing publication;
 - dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them.
