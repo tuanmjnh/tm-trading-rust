@@ -1,4 +1,5 @@
 mod ai_briefing;
+mod ai_job;
 mod ai_model;
 mod ai_provider;
 mod ai_task;
@@ -16,6 +17,10 @@ pub use ai_briefing::{
     AI_BRIEFING_ID_PREFIX, AI_BRIEFING_PRODUCER_VERSION, AI_BRIEFING_SCHEMA_VERSION, AiBriefing,
     AiBriefingError, AiBriefingReference, AiBriefingReferenceKind, MAX_AI_BRIEFING_CONTENT_CHARS,
     MAX_AI_BRIEFING_LIST_ITEMS, MAX_AI_BRIEFING_TEXT_CHARS, NewAiBriefing, is_valid_ai_briefing_id,
+};
+pub use ai_job::{
+    AI_JOB_ID_PREFIX, AI_JOB_SCHEMA_VERSION, AiJob, AiJobError, AiJobId, AiJobStatus,
+    MAX_AI_JOB_INPUTS, MAX_AI_JOB_LIFETIME_HOURS, NewAiJob, PersistedAiJob,
 };
 pub use ai_model::{
     AiModel, AiModelError, MAX_AI_MODEL_CONTEXT_WINDOW, MAX_AI_MODEL_DISPLAY_NAME_CHARS,

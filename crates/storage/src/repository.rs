@@ -6,9 +6,9 @@ use thiserror::Error;
 
 use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{
-    AiBriefingError, AiModelError, AiProviderProfile, AiProviderProfileError, AiTaskRouteError,
-    Candle, CandleError, NewNewsSource, NewsCluster, NewsClusterError, NewsItem, NewsItemError,
-    NewsLevel, NewsSource, NewsSourceError, Operation, OperationError, OperationId,
+    AiBriefingError, AiJobError, AiModelError, AiProviderProfile, AiProviderProfileError,
+    AiTaskRouteError, Candle, CandleError, NewNewsSource, NewsCluster, NewsClusterError, NewsItem,
+    NewsItemError, NewsLevel, NewsSource, NewsSourceError, Operation, OperationError, OperationId,
     ProviderInstance, ProviderInstanceError, ResearchEvent, ResearchEventError, Watchlist,
     WatchlistError,
 };
@@ -474,6 +474,10 @@ pub enum RepositoryError {
     AiTaskRouteNotFound,
     #[error("ai briefing identifier already contains different content")]
     AiBriefingConflict,
+    #[error("ai job was not found")]
+    AiJobNotFound,
+    #[error(transparent)]
+    AiJob(#[from] AiJobError),
     #[error("news source was not found")]
     NewsSourceNotFound,
     #[error(transparent)]

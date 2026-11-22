@@ -1,6 +1,6 @@
 # AI Providers and Models
 
-> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, and evidence-bound briefing contract/API/UI are implemented (2026-11-22). The AI Worker executable and durable request source are not implemented yet.
+> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, evidence-bound briefing contract/API/UI, and the durable `ai_jobs` request queue are implemented (2026-11-22). The AI Worker executable is not implemented yet.
 
 ## 1. Scope
 
@@ -187,7 +187,40 @@ The AI Worker assembles evidence before any provider call. It accepts a bounded 
 
 Facts, references, input snapshots, disclosures, and provenance are server-owned. The model receives only the assembled facts plus the disclosure lines, and must answer with a JSON object that has only `interpretations` and `uncertainties`. Any other field, including model-authored facts or references, is rejected, so a hallucinated citation cannot enter a briefing. The system prompt, schema, and output bound are fixed by the producer version.
 
-## 10. Pending
+## 10. Durable AI job queue
 
-- the AI Worker executable, durable request source, and briefing publication;
+A briefing is produced by the AI Worker from a durable request, not from an ad-hoc call.
+One `ai_jobs` document is one owner-scoped request and is also the work item the worker
+claims.
+
+| Field | Meaning |
+|---|---|
+| `id` | Stable `aijob1_` identifier |
+| `owner_scope` | Owner the request belongs to |
+| `idempotency_key` / `request_hash` | Replay identity and request fingerprint |
+| `task` | AI task to run |
+| `research_event_ids` / `news_item_ids` | Requested evidence identifiers |
+| `status` | `QUEUED`, `CLAIMED`, `SUCCEEDED`, `FAILED`, `EXPIRED`, or `OUTCOME_UNKNOWN` |
+| `attempt` | How many times the job was claimed |
+| `lease_owner` / `lease_expires_at` | Current claim holder and lease deadline |
+| `fencing_token` | Increments on every claim; guards stale writers |
+| `requested_at` / `expires_at` | Request time and bounded lifetime |
+| `finished_at` | Terminal transition time |
+| `briefing_id` | Briefing published by a successful job |
+| `error_code` / `redacted_error` | Sanitized failure diagnostics |
+
+A job is created once per `{ ownerScope, idempotencyKey }`. Replaying the same key with
+the same request returns the stored job; replaying it with a different request is an
+idempotency conflict. A claim is an atomic transition that increments the fencing token
+and takes a bounded lease. Completion and failure require the current lease holder and
+the current fencing token, so a worker that lost its lease cannot overwrite a newer
+state.
+
+A queued job that passes its expiry becomes `EXPIRED`. A claimed job whose lease lapses
+becomes `OUTCOME_UNKNOWN`, never `FAILED`: an unobserved provider call is not evidence of
+a failed or successful run.
+
+## 11. Pending
+
+- the AI Worker executable and briefing publication;
 - dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them.

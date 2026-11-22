@@ -17,12 +17,14 @@ use tm_trading_storage::{
 };
 
 mod evidence;
+mod job;
 
 pub use evidence::{
     BriefingEvidence, BriefingEvidenceAssembler, BriefingEvidenceRequest, DEFAULT_EVIDENCE_MAX_AGE,
     EvidenceError, ModelBriefing, RESEARCH_EXPLANATION_PROMPT_VERSION, build_briefing,
     parse_model_output, research_explanation_request,
 };
+pub use job::{AiJobOutcome, AiJobProcessor, BRIEFING_MAX_OUTPUT_TOKENS};
 
 /// Resolves one configured provider/model pair to a callable provider.
 ///

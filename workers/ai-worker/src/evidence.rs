@@ -73,6 +73,7 @@ impl BriefingEvidence {
 }
 
 /// Assembles owner-scoped evidence from stored research and news.
+#[derive(Clone)]
 pub struct BriefingEvidenceAssembler {
     research: Arc<dyn ResearchEventRepository>,
     news: Arc<dyn NewsItemRepository>,

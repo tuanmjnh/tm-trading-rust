@@ -469,6 +469,47 @@ The MongoDB repository declares a read index on `{ ownerScope, generatedAt }`. T
 Management API always derives owner scope from the authenticated subject, and another
 owner's briefing identifier returns `404`.
 
+### 6.14 `ai_jobs` (new in Rust)
+
+There is no legacy collection with this name. The collection is the durable request source
+for the AI Worker: one document is one owner-scoped request to publish an evidence-bound
+briefing, and it is also the work item the worker claims.
+
+Required fields:
+
+```text
+_id / jobId
+schemaVersion
+ownerScope
+idempotencyKey
+requestHash
+task
+researchEventIds
+newsItemIds
+status
+attempt
+leaseOwner
+leaseExpiresAt
+fencingToken
+requestedAt
+expiresAt
+finishedAt
+briefingId
+errorCode
+redactedError
+```
+
+`status` is one of `QUEUED`, `CLAIMED`, `SUCCEEDED`, `FAILED`, `EXPIRED`, or
+`OUTCOME_UNKNOWN`. A job is created once per `{ ownerScope, idempotencyKey }`; replaying
+the same key with a different request is an idempotency conflict, not a second job. A
+claim is an atomic transition that increments `fencingToken` and takes a bounded lease.
+Completion and failure require the current lease holder and fencing token. A queued job
+that passes `expiresAt` becomes `EXPIRED`; a claimed job whose lease lapses becomes
+`OUTCOME_UNKNOWN`, because an unobserved provider call is not a failed or successful run.
+
+The MongoDB repository declares a unique index on `{ ownerScope, idempotencyKey }`, a
+claim index on `{ status, expiresAt }`, and a read index on `{ ownerScope, requestedAt }`.
+
 ## 7. Event contracts
 
 ### 7.1 Existing domain-event envelope
