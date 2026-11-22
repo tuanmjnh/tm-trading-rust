@@ -24,8 +24,8 @@ use tm_trading_contracts::{
 };
 use tm_trading_domain::{DesiredState, ObservedState, Readiness};
 use tm_trading_supervisor_core::{
-    MARKET_WORKER_ID, NEWS_WORKER_ID, RESEARCH_WORKER_ID, ServiceState, SupervisorError,
-    WorkerDefinition, WorkerProcessIdentity, WorkerRegistry,
+    AI_WORKER_ID, MARKET_WORKER_ID, NEWS_WORKER_ID, RESEARCH_WORKER_ID, ServiceState,
+    SupervisorError, WorkerDefinition, WorkerProcessIdentity, WorkerRegistry,
 };
 
 pub use api::ManagementApiClient;
@@ -77,6 +77,21 @@ const NEWS_WORKER_ENVIRONMENT: &[&str] = &[
     "TM_TRADING_NEWS_HEARTBEAT_MS",
     "TM_TRADING_NEWS_SOURCE_OF_TRUTH",
 ];
+/// Environment handed to the AI worker only.
+const AI_WORKER_ENVIRONMENT: &[&str] = &[
+    "TM_DATABASE_URI",
+    "TM_DATABASE_NAME",
+    "TM_TRADING_AI_WORKER_ENABLED",
+    "TM_TRADING_AI_CLAIM_MS",
+    "TM_TRADING_AI_HEARTBEAT_MS",
+    "TM_TRADING_AI_LEASE_MS",
+];
+/// Namespace of the provider credential variables the AI worker may read.
+///
+/// Every AI provider profile names its credential inside this namespace, so the Agent
+/// forwards the namespace itself instead of one hard-coded variable name. No other
+/// worker receives these values.
+const AI_PROVIDER_SECRET_PREFIX: &str = "TM_TRADING_AI_";
 const FORCED_TERMINATION_TIMEOUT: Duration = Duration::from_secs(5);
 const FINAL_EVENT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -839,6 +854,10 @@ impl Agent {
         if definition.id == NEWS_WORKER_ID {
             worker_specific_environment(command.command_mut(), NEWS_WORKER_ENVIRONMENT);
         }
+        if definition.id == AI_WORKER_ID {
+            worker_specific_environment(command.command_mut(), AI_WORKER_ENVIRONMENT);
+            ai_provider_secret_environment(command.command_mut());
+        }
         if let Some(crash_after_ms) = self.crash_after_ms {
             command.command_mut().env(
                 "TM_SAMPLE_WORKER_CRASH_AFTER_MS",
@@ -1193,6 +1212,17 @@ fn allowlisted_environment(command: &mut Command) {
 fn worker_specific_environment(command: &mut Command, keys: &[&str]) {
     for key in keys {
         if let Ok(value) = std::env::var(key) {
+            command.env(key, value);
+        }
+    }
+}
+
+/// Forwards the AI provider credential namespace to the AI worker.
+///
+/// The values stay in the process environment and are never logged or persisted.
+fn ai_provider_secret_environment(command: &mut Command) {
+    for (key, value) in std::env::vars() {
+        if key.starts_with(AI_PROVIDER_SECRET_PREFIX) {
             command.env(key, value);
         }
     }

@@ -11,6 +11,7 @@ pub const SAMPLE_WORKER_ID: &str = "sample-worker";
 pub const MARKET_WORKER_ID: &str = "market-worker";
 pub const RESEARCH_WORKER_ID: &str = "research-worker";
 pub const NEWS_WORKER_ID: &str = "news-worker";
+pub const AI_WORKER_ID: &str = "ai-worker";
 pub const MAX_LOG_ENTRIES: usize = 100;
 pub const MAX_LOG_LINE_CHARS: usize = 1_000;
 const FUTURE_TIMESTAMP_SKEW: Duration = Duration::from_secs(5);
@@ -105,6 +106,7 @@ impl WorkerRegistry {
         market_worker_enabled: bool,
         research_worker_enabled: bool,
         news_worker_enabled: bool,
+        ai_worker_enabled: bool,
     ) -> Self {
         let mut sample = sample_worker_definition();
         sample.executable_version = executable_version;
@@ -123,6 +125,11 @@ impl WorkerRegistry {
             let mut news = news_worker_definition();
             news.executable_version = executable_version;
             workers.push(news);
+        }
+        if ai_worker_enabled {
+            let mut ai = ai_worker_definition();
+            ai.executable_version = executable_version;
+            workers.push(ai);
         }
         Self { workers }
     }
@@ -667,6 +674,51 @@ pub fn news_worker_definition() -> WorkerDefinition {
 }
 
 #[must_use]
+pub fn ai_worker_definition() -> WorkerDefinition {
+    WorkerDefinition {
+        id: AI_WORKER_ID,
+        executable_name: if cfg!(windows) {
+            "tm-trading-ai-worker.exe"
+        } else {
+            "tm-trading-ai-worker"
+        },
+        executable_version: env!("CARGO_PKG_VERSION"),
+        readiness_rules: vec![
+            ReadinessRule {
+                id: "process-alive",
+                required: true,
+                max_age: None,
+            },
+            ReadinessRule {
+                id: "capability-verified",
+                required: true,
+                max_age: None,
+            },
+            ReadinessRule {
+                id: "recent-heartbeat",
+                required: true,
+                max_age: Some(Duration::from_secs(30)),
+            },
+            ReadinessRule {
+                id: "dependencies-reachable",
+                required: true,
+                max_age: None,
+            },
+            // The AI worker is idle between queued jobs, so a missing briefing is not a
+            // failure. A stale one only degrades the service.
+            ReadinessRule {
+                id: "recent-success",
+                required: false,
+                max_age: Some(Duration::from_secs(3_600)),
+            },
+        ],
+        startup_timeout: Duration::from_secs(120),
+        stop_grace: Duration::from_secs(15),
+        max_restart_attempts: 5,
+    }
+}
+
+#[must_use]
 pub fn evaluate_readiness(
     definition: &WorkerDefinition,
     process_alive: Option<bool>,
@@ -781,14 +833,15 @@ mod tests {
 
     #[test]
     fn domain_workers_are_only_registered_when_they_are_enabled() {
-        let disabled = WorkerRegistry::local_with_version("0.1.0", false, false, false);
+        let disabled = WorkerRegistry::local_with_version("0.1.0", false, false, false, false);
         assert_eq!(disabled.iter().count(), 1);
         assert!(disabled.get(SAMPLE_WORKER_ID).is_some());
         assert!(disabled.get(MARKET_WORKER_ID).is_none());
         assert!(disabled.get(RESEARCH_WORKER_ID).is_none());
         assert!(disabled.get(NEWS_WORKER_ID).is_none());
+        assert!(disabled.get(AI_WORKER_ID).is_none());
 
-        let news = WorkerRegistry::local_with_version("0.1.0", false, false, true);
+        let news = WorkerRegistry::local_with_version("0.1.0", false, false, true, false);
         assert_eq!(news.iter().count(), 2);
         let news = news.get(NEWS_WORKER_ID).expect("news worker");
         assert_eq!(news.executable_version, "0.1.0");
@@ -798,7 +851,7 @@ mod tests {
                 .any(|rule| rule.id == "recent-success" && rule.required)
         );
 
-        let market = WorkerRegistry::local_with_version("0.1.0", true, false, false);
+        let market = WorkerRegistry::local_with_version("0.1.0", true, false, false, false);
         assert_eq!(market.iter().count(), 2);
         let market = market.get(MARKET_WORKER_ID).expect("market worker");
         assert_eq!(market.executable_version, "0.1.0");
@@ -809,7 +862,7 @@ mod tests {
                 .any(|rule| rule.id == "recent-success" && rule.required)
         );
 
-        let research = WorkerRegistry::local_with_version("0.1.0", false, true, false);
+        let research = WorkerRegistry::local_with_version("0.1.0", false, true, false, false);
         assert_eq!(research.iter().count(), 2);
         let research = research.get(RESEARCH_WORKER_ID).expect("research worker");
         assert_eq!(research.executable_version, "0.1.0");
@@ -818,6 +871,16 @@ mod tests {
                 .readiness_rules
                 .iter()
                 .any(|rule| rule.id == "recent-success" && rule.required)
+        );
+
+        let ai = WorkerRegistry::local_with_version("0.1.0", false, false, false, true);
+        assert_eq!(ai.iter().count(), 2);
+        let ai = ai.get(AI_WORKER_ID).expect("ai worker");
+        assert_eq!(ai.executable_version, "0.1.0");
+        assert!(
+            ai.readiness_rules
+                .iter()
+                .any(|rule| rule.id == "recent-success" && !rule.required)
         );
     }
 

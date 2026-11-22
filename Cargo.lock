@@ -5621,6 +5621,7 @@ dependencies = [
  "chrono",
  "serde_json",
  "thiserror 2.0.21",
+ "tm-trading-agent-protocol",
  "tm-trading-ai-providers",
  "tm-trading-domain",
  "tm-trading-storage",

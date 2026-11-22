@@ -1,6 +1,6 @@
 # AI Providers and Models
 
-> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, evidence-bound briefing contract/API/UI, and the durable `ai_jobs` request queue are implemented (2026-11-22). The AI Worker executable is not implemented yet.
+> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, evidence-bound briefing contract/API/UI, the durable `ai_jobs` request queue, and the supervised AI Worker are implemented (2026-11-22).
 
 ## 1. Scope
 
@@ -220,7 +220,34 @@ A queued job that passes its expiry becomes `EXPIRED`. A claimed job whose lease
 becomes `OUTCOME_UNKNOWN`, never `FAILED`: an unobserved provider call is not evidence of
 a failed or successful run.
 
-## 11. Pending
+## 11. AI Worker
 
-- the AI Worker executable and briefing publication;
+The AI Worker executable is a supervised process. It claims one durable job at a time,
+assembles owner-scoped evidence, runs the configured route, validates the model output,
+publishes the briefing, and only then completes the job.
+
+| Variable | Meaning |
+|---|---|
+| `TM_TRADING_AI_WORKER_ENABLED` | `1`/`true` allows the worker to publish briefings; defaults off |
+| `TM_TRADING_AI_CLAIM_MS` | Delay between two claim attempts, default `5000` |
+| `TM_TRADING_AI_HEARTBEAT_MS` | Heartbeat interval, default `5000` |
+| `TM_TRADING_AI_LEASE_MS` | Lease taken on a claimed job, default `300000` |
+
+The Agent registers `ai-worker` in its static registry only when
+`TM_TRADING_AI_WORKER_ENABLED=1`, and it forwards the `TM_TRADING_AI_` credential
+namespace to that worker alone. The worker is not given a shell command or an arbitrary
+executable.
+
+Before reporting readiness the worker verifies that the `research_explanation` route, its
+provider profile, and its model are enabled and that the provider credential resolves.
+The probe never calls the provider, so readiness never costs a billable request.
+
+A job failure is recorded on the job with a sanitized code (`no_usable_evidence`,
+`invalid_request`, `evidence_too_large`, `invalid_model_output`, `provider_failed`,
+`route_unavailable`, `publish_failed`, or `unsupported_task`). The raw provider response
+is never stored.
+
+## 12. Pending
+
+- a request source over the API so an owner can enqueue a briefing job;
 - dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them.

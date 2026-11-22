@@ -41,6 +41,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             worker_enabled("TM_TRADING_MARKET_WORKER_ENABLED"),
             worker_enabled("TM_TRADING_RESEARCH_WORKER_ENABLED"),
             worker_enabled("TM_TRADING_NEWS_WORKER_ENABLED"),
+            worker_enabled("TM_TRADING_AI_WORKER_ENABLED"),
         ),
     )?;
     agent.spawn_shutdown_listener();

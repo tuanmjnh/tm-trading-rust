@@ -1,6 +1,6 @@
 # Service Catalog
 
-> Status: Phase 2 sample-worker runtime implemented and hardened on 2026-11-18; Phase 5 market-worker runtime implemented on 2026-11-20; Phase 6 research-worker runtime implemented on 2026-11-20; Phase 7 news-worker runtime implemented on 2026-11-20<br>
+> Status: Phase 2 sample-worker runtime implemented and hardened on 2026-11-18; Phase 5 market-worker runtime implemented on 2026-11-20; Phase 6 research-worker runtime implemented on 2026-11-20; Phase 7 news-worker runtime implemented on 2026-11-20; Phase 7 ai-worker runtime implemented on 2026-11-22<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## `sample-worker`
@@ -223,4 +223,54 @@ Sources are considered only when their declared `pollIntervalSec` has elapsed si
 - RSS/Atom/RDF only; no source-specific API adapters and no news clustering yet.
 - Items are stored with default `level = med` and `dir = flat`; deterministic scoring and event classification remain subsequent work.
 - Items are not yet served by a Management API read model or the Desktop News & Events panel.
+- Unix runtime shutdown and descendant-containment drills remain unverified.
+
+## `ai-worker`
+
+| Field | Value |
+|---|---|
+| Service definition ID | `ai-worker` |
+| Executable | `tm-trading-ai-worker.exe` on Windows; `tm-trading-ai-worker` on other platforms |
+| Process owner | The single Host Agent for the host |
+| Purpose | Claims one durable `ai_jobs` request at a time and publishes an evidence-bound briefing in `ai_briefings` |
+| IPC schema | `worker.v2` |
+| Control channel | One JSON object per line over the worker stdin/stdout pipes |
+| Shutdown | The Agent sends an explicit `shutdown` command; the worker stops claiming, reports `stopped`, and exits |
+
+The worker is opt-in. It is registered only when `TM_TRADING_AI_WORKER_ENABLED=1`; otherwise the Agent does not launch it.
+
+### Configuration
+
+| Variable | Meaning |
+|---|---|
+| `TM_DATABASE_URI` | TLS MongoDB URI; only the domain workers receive it |
+| `TM_DATABASE_NAME` | Database name, default `tm-trading-rust` |
+| `TM_TRADING_AI_WORKER_ENABLED` | `1`/`true` allows the worker to publish briefings; defaults off |
+| `TM_TRADING_AI_CLAIM_MS` | Delay between two claim attempts, default `5000` |
+| `TM_TRADING_AI_HEARTBEAT_MS` | Heartbeat interval, default `5000` |
+| `TM_TRADING_AI_LEASE_MS` | Lease taken on a claimed job, default `300000` |
+| `TM_TRADING_AI_*` | Provider credential namespace; the Agent forwards it to this worker only |
+
+`TM_TRADING_AI_WORKER_ENABLED` is off by default, and the worker exits with code `78` before opening MongoDB when it is disabled, so an installation cannot publish briefings by accident. The provider credential namespace is forwarded because every AI provider profile names its credential inside `TM_TRADING_AI_`; the values stay in the process environment and are never logged or persisted.
+
+### Readiness evidence
+
+| Check | Required | Meaning |
+|---|---:|---|
+| `process-alive` | Yes | The Agent still owns a live child process |
+| `capability-verified` | Yes | The `research_explanation` route, its provider, and its model are enabled and the credential resolves |
+| `recent-heartbeat` | Yes | A heartbeat was observed within 30 seconds |
+| `dependencies-reachable` | Yes | MongoDB and the job, briefing, evidence, and route stores were reachable |
+| `recent-success` | No | A briefing was published within the last hour; a stale one degrades the service |
+
+The readiness probe resolves the provider and its credential but never calls the provider, so readiness never costs a billable request. The worker is idle between queued jobs, so a missing briefing is not a failure.
+
+### Claim and publish path
+
+The worker claims at most one job per tick, oldest first. A claim takes a bounded lease and increments the fencing token; completion and failure require the current lease holder and token. The worker assembles owner-scoped evidence, runs the configured route with the route's attempt, timeout, and output budgets, validates that the model returned only interpretations and uncertainties, stores the briefing, and only then completes the job. A request with no usable evidence fails before any provider call. A job whose lease lapses before completion stays `OUTCOME_UNKNOWN`; the worker never reports an unobserved run as successful.
+
+### Current limitations
+
+- Only the `research_explanation` task is executed; the other routes have no job producer.
+- The worker reports readiness but does not expose a request source over the API yet.
 - Unix runtime shutdown and descendant-containment drills remain unverified.
