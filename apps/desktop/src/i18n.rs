@@ -315,6 +315,15 @@ pub struct UiStrings {
     pub ai_briefing_job_failed: &'static str,
     pub ai_briefing_job_expired: &'static str,
     pub ai_briefing_job_outcome_unknown: &'static str,
+    pub ai_briefing_job_error_invalid_request: &'static str,
+    pub ai_briefing_job_error_evidence_unavailable: &'static str,
+    pub ai_briefing_job_error_evidence_too_large: &'static str,
+    pub ai_briefing_job_error_invalid_model_output: &'static str,
+    pub ai_briefing_job_error_provider_failed: &'static str,
+    pub ai_briefing_job_error_route_unavailable: &'static str,
+    pub ai_briefing_job_error_publish_failed: &'static str,
+    pub ai_briefing_job_error_lease_lapsed: &'static str,
+    pub ai_briefing_job_error_unknown: &'static str,
     pub ai_briefing_open_briefing: &'static str,
 }
 
@@ -614,6 +623,15 @@ impl UiStrings {
             ai_briefing_job_failed: "Failed",
             ai_briefing_job_expired: "Expired",
             ai_briefing_job_outcome_unknown: "Outcome unknown",
+            ai_briefing_job_error_invalid_request: "The request was invalid.",
+            ai_briefing_job_error_evidence_unavailable: "No usable owner-scoped evidence was available.",
+            ai_briefing_job_error_evidence_too_large: "The evidence exceeded the request limit.",
+            ai_briefing_job_error_invalid_model_output: "The model output did not match the required format.",
+            ai_briefing_job_error_provider_failed: "The AI provider request failed.",
+            ai_briefing_job_error_route_unavailable: "The AI model route is unavailable.",
+            ai_briefing_job_error_publish_failed: "The briefing could not be published.",
+            ai_briefing_job_error_lease_lapsed: "The request lease expired before the result was observed.",
+            ai_briefing_job_error_unknown: "The request failed for an unknown reason.",
             ai_briefing_open_briefing: "Open briefing",
         }
     }
@@ -905,6 +923,15 @@ impl UiStrings {
             ai_briefing_job_failed: "Thất bại",
             ai_briefing_job_expired: "Đã hết hạn",
             ai_briefing_job_outcome_unknown: "Không rõ kết quả",
+            ai_briefing_job_error_invalid_request: "Yêu cầu không hợp lệ.",
+            ai_briefing_job_error_evidence_unavailable: "Không có bằng chứng dùng được thuộc phạm vi chủ sở hữu.",
+            ai_briefing_job_error_evidence_too_large: "Bằng chứng vượt quá giới hạn yêu cầu.",
+            ai_briefing_job_error_invalid_model_output: "Kết quả từ mô hình không đúng định dạng bắt buộc.",
+            ai_briefing_job_error_provider_failed: "Yêu cầu đến nhà cung cấp AI đã thất bại.",
+            ai_briefing_job_error_route_unavailable: "Tuyến mô hình AI không khả dụng.",
+            ai_briefing_job_error_publish_failed: "Không thể xuất bản bản tóm tắt.",
+            ai_briefing_job_error_lease_lapsed: "Yêu cầu đã hết hạn trước khi có thể xác nhận kết quả.",
+            ai_briefing_job_error_unknown: "Yêu cầu thất bại vì lý do không xác định.",
             ai_briefing_open_briefing: "Mở bản tóm tắt",
         }
     }

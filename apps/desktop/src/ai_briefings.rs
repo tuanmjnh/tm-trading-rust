@@ -26,6 +26,7 @@ pub struct AiBriefingPanelState {
     pub detail: Option<AiBriefingDto>,
     pub detail_error: Option<AiBriefingPanelError>,
     pub latest_job: Option<AiJobDto>,
+    tracked_job_id: Option<String>,
     pub job_error: Option<AiBriefingPanelError>,
     pub request_error: Option<AiBriefingPanelError>,
 }
@@ -41,10 +42,25 @@ impl AiBriefingPanelState {
     }
 
     pub fn jobs_loaded(&mut self, jobs: Vec<AiJobDto>) {
-        if let Some(job) = jobs.first() {
+        if let Some(tracked_job_id) = self.tracked_job_id.as_ref() {
+            if let Some(job) = jobs.iter().find(|job| &job.id == tracked_job_id) {
+                self.latest_job = Some(job.clone());
+            }
+        } else if let Some(job) = jobs.first() {
             self.latest_job = Some(job.clone());
         }
         self.job_error = None;
+    }
+
+    pub fn tracked_job_loaded(&mut self, job: AiJobDto) {
+        if self.tracked_job_id.as_deref() == Some(job.id.as_str()) {
+            self.latest_job = Some(job);
+        }
+        self.job_error = None;
+    }
+
+    pub fn tracked_job_id(&self) -> Option<&str> {
+        self.tracked_job_id.as_deref()
     }
 
     pub fn jobs_failed(&mut self) {
@@ -52,6 +68,7 @@ impl AiBriefingPanelState {
     }
 
     pub fn request_created(&mut self, job: AiJobDto) {
+        self.tracked_job_id = Some(job.id.clone());
         self.latest_job = Some(job);
         self.request_error = None;
     }
@@ -157,7 +174,9 @@ pub fn AiBriefingPanel(
                             }
                             span { class: "operation-id", "{job.id}" }
                             if let Some(error_code) = job.error_code.as_ref() {
-                                span { class: "error-text", "{error_code}" }
+                                span { class: "error-text", title: "{error_code}",
+                                    "{job_error_label(error_code, &strings)}"
+                                }
                             }
                             if let Some(briefing_id) = open_briefing_id {
                                 button {
@@ -445,6 +464,24 @@ fn job_status_label(status: AiJobStatusDto, strings: &UiStrings) -> &'static str
     }
 }
 
+fn job_error_label(error_code: &str, strings: &UiStrings) -> &'static str {
+    match error_code {
+        "unsupported_task" | "invalid_request" => strings.ai_briefing_job_error_invalid_request,
+        "no_usable_evidence" | "evidence_unavailable" => {
+            strings.ai_briefing_job_error_evidence_unavailable
+        }
+        "evidence_too_large" => strings.ai_briefing_job_error_evidence_too_large,
+        "invalid_model_output" | "invalid_briefing" => {
+            strings.ai_briefing_job_error_invalid_model_output
+        }
+        "provider_failed" => strings.ai_briefing_job_error_provider_failed,
+        "route_unavailable" => strings.ai_briefing_job_error_route_unavailable,
+        "publish_failed" => strings.ai_briefing_job_error_publish_failed,
+        "lease_lapsed" => strings.ai_briefing_job_error_lease_lapsed,
+        _ => strings.ai_briefing_job_error_unknown,
+    }
+}
+
 fn job_status_class(status: AiJobStatusDto) -> &'static str {
     match status {
         AiJobStatusDto::Queued | AiJobStatusDto::Claimed => "status-progress",
@@ -587,6 +624,23 @@ mod tests {
     }
 
     #[test]
+    fn an_unrelated_job_refresh_does_not_replace_the_requested_job() {
+        let mut state = AiBriefingPanelState::default();
+        state.request_created(job(
+            "aijob1_1",
+            tm_trading_contracts::AiJobStatusDto::Queued,
+        ));
+        state.jobs_loaded(vec![
+            job("aijob1_2", tm_trading_contracts::AiJobStatusDto::Queued),
+            job("aijob1_1", tm_trading_contracts::AiJobStatusDto::Claimed),
+        ]);
+
+        let latest = state.latest_job.as_ref().unwrap();
+        assert_eq!(latest.id, "aijob1_1");
+        assert_eq!(latest.status, tm_trading_contracts::AiJobStatusDto::Claimed);
+    }
+
+    #[test]
     fn a_failed_job_refresh_keeps_the_last_loaded_job() {
         let mut state = AiBriefingPanelState::default();
         state.jobs_loaded(vec![job(
@@ -597,6 +651,17 @@ mod tests {
 
         assert_eq!(state.latest_job.as_ref().unwrap().id, "aijob1_1");
         assert_eq!(state.job_error, Some(AiBriefingPanelError::Jobs));
+    }
+
+    #[test]
+    fn job_failure_messages_are_localized() {
+        let english = UiStrings::for_locale(Locale::English);
+        let vietnamese = UiStrings::for_locale(Locale::Vietnamese);
+
+        assert_ne!(
+            job_error_label("provider_failed", &english),
+            job_error_label("provider_failed", &vietnamese)
+        );
     }
 
     #[test]

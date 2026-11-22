@@ -387,15 +387,26 @@ fn App() -> Element {
                     }
                 }
 
-                let ai_job_query = AiJobQueryDto {
-                    task: Some(AiBriefingTaskDto::ResearchExplanation),
-                    limit: Some(20),
-                };
-                match client.list_ai_jobs(&ai_job_query).await {
-                    Ok(list) => ai_briefings.write().jobs_loaded(list.jobs),
-                    Err(error) => {
-                        tracing::error!(%error, "failed to list AI jobs");
-                        ai_briefings.write().jobs_failed();
+                let tracked_job_id = ai_briefings.read().tracked_job_id().map(str::to_owned);
+                if let Some(job_id) = tracked_job_id {
+                    match client.get_ai_job(&job_id).await {
+                        Ok(job) => ai_briefings.write().tracked_job_loaded(job),
+                        Err(error) => {
+                            tracing::error!(%error, job_id = %job_id, "failed to load AI job");
+                            ai_briefings.write().jobs_failed();
+                        }
+                    }
+                } else {
+                    let ai_job_query = AiJobQueryDto {
+                        task: Some(AiBriefingTaskDto::ResearchExplanation),
+                        limit: Some(20),
+                    };
+                    match client.list_ai_jobs(&ai_job_query).await {
+                        Ok(list) => ai_briefings.write().jobs_loaded(list.jobs),
+                        Err(error) => {
+                            tracing::error!(%error, "failed to list AI jobs");
+                            ai_briefings.write().jobs_failed();
+                        }
                     }
                 }
 
