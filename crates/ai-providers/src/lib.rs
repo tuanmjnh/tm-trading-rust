@@ -164,7 +164,7 @@ impl AiProvider for OpenAiCompatibleProvider {
             "temperature": 0
         });
         let started = Instant::now();
-        let response = self
+        let mut response = self
             .client
             .post(url)
             .bearer_auth(&self.api_key)
@@ -179,16 +179,10 @@ impl AiProvider for OpenAiCompatibleProvider {
                 }
             })?;
         let status = response.status();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| AiProviderError::Request(error.to_string()))?;
-        if bytes.len() > MAX_HEALTH_RESPONSE_BYTES {
-            return Err(AiProviderError::ResponseTooLarge);
-        }
         if !status.is_success() {
             return Err(AiProviderError::HttpStatus(status.as_u16()));
         }
+        let bytes = read_bounded_body(&mut response, MAX_HEALTH_RESPONSE_BYTES).await?;
         let value: serde_json::Value =
             serde_json::from_slice(&bytes).map_err(|_| AiProviderError::InvalidResponse)?;
         let content = value
@@ -212,7 +206,7 @@ impl AiProvider for OpenAiCompatibleProvider {
     ) -> Result<AiGenerationResponse, AiProviderError> {
         let body = generation_body(&self.model, request)?;
         let started = Instant::now();
-        let response = self
+        let mut response = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
             .bearer_auth(&self.api_key)
@@ -227,20 +221,53 @@ impl AiProvider for OpenAiCompatibleProvider {
                 }
             })?;
         let status = response.status();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| AiProviderError::Request(error.to_string()))?;
-        if bytes.len() > MAX_GENERATION_RESPONSE_BYTES {
-            return Err(AiProviderError::ResponseTooLarge);
-        }
         if !status.is_success() {
             return Err(AiProviderError::HttpStatus(status.as_u16()));
         }
+        let bytes = read_bounded_body(&mut response, MAX_GENERATION_RESPONSE_BYTES).await?;
         let value: serde_json::Value =
             serde_json::from_slice(&bytes).map_err(|_| AiProviderError::InvalidResponse)?;
         parse_generation_response(value, &self.model, started.elapsed().as_millis() as u64)
     }
+}
+
+async fn read_bounded_body(
+    response: &mut reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, AiProviderError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        return Err(AiProviderError::ResponseTooLarge);
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        if error.is_timeout() {
+            AiProviderError::Timeout
+        } else {
+            AiProviderError::Request(error.to_string())
+        }
+    })? {
+        append_bounded_body(&mut body, &chunk, max_bytes)?;
+    }
+    Ok(body)
+}
+
+fn append_bounded_body(
+    body: &mut Vec<u8>,
+    chunk: &[u8],
+    max_bytes: usize,
+) -> Result<(), AiProviderError> {
+    if body
+        .len()
+        .checked_add(chunk.len())
+        .is_none_or(|length| length > max_bytes)
+    {
+        return Err(AiProviderError::ResponseTooLarge);
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
 }
 
 fn generation_body(
@@ -422,6 +449,19 @@ mod tests {
         assert!(!AiProviderError::HttpStatus(401).is_transient());
         assert!(!AiProviderError::InvalidResponse.is_transient());
         assert!(!AiProviderError::MissingApiKey.is_transient());
+    }
+
+    #[test]
+    fn bounded_body_rejects_content_before_buffering_it() {
+        let mut body = Vec::new();
+
+        assert!(append_bounded_body(&mut body, b"123", 4).is_ok());
+        assert_eq!(body, b"123");
+        assert!(matches!(
+            append_bounded_body(&mut body, b"45", 4),
+            Err(AiProviderError::ResponseTooLarge)
+        ));
+        assert_eq!(body, b"123");
     }
 
     #[test]
