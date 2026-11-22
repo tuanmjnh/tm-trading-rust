@@ -55,7 +55,13 @@ Failure codes: `invalid_base_url`, `forbidden_host`, `insecure_base_url`, `clien
 
 A failed test is still a successful observation: the endpoint returns `200` with the recorded `UNHEALTHY` state instead of failing the request. Provider liveness and platform health stay separate.
 
-## 5. Endpoints and capabilities
+## 5. Bounded generation
+
+The OpenAI-compatible adapter also exposes one bounded Chat Completions generation operation. It accepts a system prompt, user prompt, output-token ceiling, and an explicit JSON-mode flag. The combined prompt is capped at 256 KiB, the response body at 256 KiB, temperature is fixed at zero, and redirects remain disabled. Provider usage is returned when the endpoint reports it.
+
+Provider failures are classified as transient only for network failures, timeouts, HTTP 408/429, and HTTP 5xx. Authentication, configuration, invalid input, malformed output, and other 4xx responses are not transient and must not silently switch the task to another model.
+
+## 6. Endpoints and capabilities
 
 | Method | Path | Capability |
 |---|---|---|
@@ -70,7 +76,7 @@ All paths require a user credential; an Agent credential is always rejected. Pro
 
 The Desktop AI Provider Center reads the list through `api-client`, shows each profile's kind, default model, health, last check, and last sanitized error, and offers a bounded Test action per enabled profile.
 
-## 6. Model registry
+## 7. Model registry
 
 A model belongs to exactly one provider profile. `provider_id` comes from the path, never from the body. Registering a model against an unknown provider fails with `422`, and deleting a provider also deletes its models, so no model can reference a missing provider.
 
@@ -104,7 +110,7 @@ Capabilities are declared, not probed. A model is stored with `UNKNOWN` health u
 
 Models live in the `ai_models` collection with an `updatedAt` index and a `providerId` index. The Desktop AI Provider Center lists registered models under the provider table.
 
-## 7. Task routing
+## 8. Task routing
 
 Each AI task has one route: a primary model, an optional fallback chain, and the budget that bounds a request.
 
@@ -140,7 +146,7 @@ A route names its models as `provider_id:model_registry_id`, for example `primar
 
 Routes live in the `ai_task_routes` collection with an `updatedAt` index. The Desktop AI Provider Center lists each task, its primary and fallback models, and how many providers the route can reach. The AI Worker still owns request execution and the fallback decision, so no route can trigger an AI request by itself.
 
-## 8. Evidence-bound briefings
+## 9. Evidence-bound briefings
 
 A briefing is an immutable, owner-scoped record of one model response. It separates reported facts, model interpretations, and uncertainty instead of presenting them as equivalent claims.
 
@@ -175,7 +181,7 @@ The list accepts an exact task filter and a limit from 1 to 200, defaulting to 5
 
 The Desktop AI Briefing panel reads the owner-scoped list and shows the task, summary, model/provider, evidence counts, and generation time. Its detail Slideover shows the separated claims, source references, input snapshots, missing/stale disclosures, and complete provenance in EN and VI.
 
-## 9. Pending
+## 10. Pending
 
 - the AI Worker that executes a route, applies bounded fallback, and publishes briefings;
 - dedicated OpenAI, Anthropic, Gemini, and OpenRouter adapters where protocol differences require them.

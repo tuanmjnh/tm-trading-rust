@@ -13,9 +13,34 @@ use url::Url;
 /// Largest response body accepted from one provider health request.
 pub const MAX_HEALTH_RESPONSE_BYTES: usize = 64 * 1024;
 
+/// Largest combined system and user prompt accepted for one generation request.
+pub const MAX_GENERATION_PROMPT_BYTES: usize = 256 * 1024;
+
+/// Largest response body accepted from one generation request.
+pub const MAX_GENERATION_RESPONSE_BYTES: usize = 256 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AiProviderHealth {
     pub model: String,
+    pub latency_ms: u64,
+}
+
+/// One bounded text-generation request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AiGenerationRequest {
+    pub system_prompt: String,
+    pub user_prompt: String,
+    pub max_output_tokens: u32,
+    pub json_mode: bool,
+}
+
+/// One bounded text-generation response.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AiGenerationResponse {
+    pub content: String,
+    pub model: String,
+    pub prompt_tokens: Option<u32>,
+    pub completion_tokens: Option<u32>,
     pub latency_ms: u64,
 }
 
@@ -41,6 +66,8 @@ pub enum AiProviderError {
     InvalidResponse,
     #[error("ai provider response was too large")]
     ResponseTooLarge,
+    #[error("ai provider request is invalid")]
+    InvalidRequest,
     #[error("ai provider API key environment variable is not set")]
     MissingApiKey,
 }
@@ -69,7 +96,18 @@ impl AiProviderError {
             }
             Self::InvalidResponse => "invalid_response",
             Self::ResponseTooLarge => "response_too_large",
+            Self::InvalidRequest => "invalid_request",
             Self::MissingApiKey => "missing_api_key",
+        }
+    }
+
+    /// Whether another model in the same route may be tried after this failure.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Request(_) | Self::Timeout => true,
+            Self::HttpStatus(status) => *status == 408 || *status == 429 || *status >= 500,
+            _ => false,
         }
     }
 }
@@ -77,6 +115,10 @@ impl AiProviderError {
 #[async_trait]
 pub trait AiProvider: Send + Sync {
     async fn health(&self) -> Result<AiProviderHealth, AiProviderError>;
+    async fn generate(
+        &self,
+        request: &AiGenerationRequest,
+    ) -> Result<AiGenerationResponse, AiProviderError>;
 }
 
 /// Generic OpenAI-compatible Chat Completions adapter.
@@ -163,6 +205,96 @@ impl AiProvider for OpenAiCompatibleProvider {
             latency_ms: started.elapsed().as_millis() as u64,
         })
     }
+
+    async fn generate(
+        &self,
+        request: &AiGenerationRequest,
+    ) -> Result<AiGenerationResponse, AiProviderError> {
+        let body = generation_body(&self.model, request)?;
+        let started = Instant::now();
+        let response = self
+            .client
+            .post(format!("{}/chat/completions", self.base_url))
+            .bearer_auth(&self.api_key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| {
+                if error.is_timeout() {
+                    AiProviderError::Timeout
+                } else {
+                    AiProviderError::Request(error.to_string())
+                }
+            })?;
+        let status = response.status();
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|error| AiProviderError::Request(error.to_string()))?;
+        if bytes.len() > MAX_GENERATION_RESPONSE_BYTES {
+            return Err(AiProviderError::ResponseTooLarge);
+        }
+        if !status.is_success() {
+            return Err(AiProviderError::HttpStatus(status.as_u16()));
+        }
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|_| AiProviderError::InvalidResponse)?;
+        parse_generation_response(value, &self.model, started.elapsed().as_millis() as u64)
+    }
+}
+
+fn generation_body(
+    model: &str,
+    request: &AiGenerationRequest,
+) -> Result<serde_json::Value, AiProviderError> {
+    if request.max_output_tokens == 0
+        || request.system_prompt.len() + request.user_prompt.len() > MAX_GENERATION_PROMPT_BYTES
+    {
+        return Err(AiProviderError::InvalidRequest);
+    }
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": request.system_prompt},
+            {"role": "user", "content": request.user_prompt}
+        ],
+        "max_tokens": request.max_output_tokens,
+        "temperature": 0,
+        "stream": false
+    });
+    if request.json_mode {
+        body["response_format"] = serde_json::json!({"type": "json_object"});
+    }
+    Ok(body)
+}
+
+fn parse_generation_response(
+    value: serde_json::Value,
+    model: &str,
+    latency_ms: u64,
+) -> Result<AiGenerationResponse, AiProviderError> {
+    let content = value
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .filter(|content| !content.trim().is_empty())
+        .ok_or(AiProviderError::InvalidResponse)?;
+    let usage = value.get("usage");
+    Ok(AiGenerationResponse {
+        content: content.to_owned(),
+        model: model.to_owned(),
+        prompt_tokens: usage
+            .and_then(|usage| usage.get("prompt_tokens"))
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok()),
+        completion_tokens: usage
+            .and_then(|usage| usage.get("completion_tokens"))
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok()),
+        latency_ms,
+    })
 }
 
 pub fn validate_ai_provider_base_url(value: &str) -> Result<(), AiProviderError> {
@@ -226,6 +358,71 @@ fn is_private_or_reserved_host(host: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builds_a_bounded_json_generation_request() {
+        let request = AiGenerationRequest {
+            system_prompt: "Return evidence-bound JSON.".to_owned(),
+            user_prompt: "Summarize the supplied evidence.".to_owned(),
+            max_output_tokens: 512,
+            json_mode: true,
+        };
+
+        let body = generation_body("model-a", &request).unwrap();
+
+        assert_eq!(body["model"], "model-a");
+        assert_eq!(body["max_tokens"], 512);
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][1]["role"], "user");
+        assert_eq!(body["response_format"]["type"], "json_object");
+    }
+
+    #[test]
+    fn rejects_an_invalid_generation_budget() {
+        let request = AiGenerationRequest {
+            system_prompt: "system".to_owned(),
+            user_prompt: "user".to_owned(),
+            max_output_tokens: 0,
+            json_mode: true,
+        };
+
+        assert!(matches!(
+            generation_body("model-a", &request).unwrap_err(),
+            AiProviderError::InvalidRequest
+        ));
+    }
+
+    #[test]
+    fn parses_generation_content_and_usage() {
+        let value = serde_json::json!({
+            "choices": [{
+                "message": {"content": "{\"facts\":[]}"}
+            }],
+            "usage": {
+                "prompt_tokens": 12,
+                "completion_tokens": 8
+            }
+        });
+
+        let response = parse_generation_response(value, "model-a", 25).unwrap();
+
+        assert_eq!(response.content, "{\"facts\":[]}");
+        assert_eq!(response.model, "model-a");
+        assert_eq!(response.prompt_tokens, Some(12));
+        assert_eq!(response.completion_tokens, Some(8));
+        assert_eq!(response.latency_ms, 25);
+    }
+
+    #[test]
+    fn classifies_only_retryable_provider_failures_as_transient() {
+        assert!(AiProviderError::Timeout.is_transient());
+        assert!(AiProviderError::Request("network".to_owned()).is_transient());
+        assert!(AiProviderError::HttpStatus(429).is_transient());
+        assert!(AiProviderError::HttpStatus(503).is_transient());
+        assert!(!AiProviderError::HttpStatus(401).is_transient());
+        assert!(!AiProviderError::InvalidResponse.is_transient());
+        assert!(!AiProviderError::MissingApiKey.is_transient());
+    }
 
     #[test]
     fn validates_loopback_http() {
