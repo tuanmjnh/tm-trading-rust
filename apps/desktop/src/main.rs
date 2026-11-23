@@ -4,7 +4,9 @@
 
 mod ai_briefings;
 mod ai_providers;
+mod dropdown;
 mod i18n;
+mod modal;
 mod news;
 mod notifications;
 mod signal_center;
@@ -16,6 +18,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use dioxus::prelude::*;
+use dropdown::{ActionDropdown, DropdownItem};
 use futures_util::StreamExt;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
@@ -151,6 +154,18 @@ enum ConnectionState {
     Disconnected(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum DesktopTab {
+    #[default]
+    Overview,
+    Market,
+    NewsAi,
+    AiConfig,
+    Notifications,
+    Diagnostics,
+    All,
+}
+
 #[component]
 fn App() -> Element {
     let client = use_hook(|| {
@@ -167,6 +182,7 @@ fn App() -> Element {
     });
 
     let mut locale = use_signal(Locale::from_env);
+    let mut active_tab = use_signal(DesktopTab::default);
     let strings = use_memo(move || UiStrings::for_locale(locale()));
     let services = use_signal(Vec::<ServiceSnapshot>::new);
     let connection = use_signal(|| ConnectionState::Connecting);
@@ -571,9 +587,35 @@ fn App() -> Element {
         .map_or("", |current| current.status.as_str())
         .to_owned();
 
+    // Derived KPI values for immediate display
+    let ready_services_count = rows
+        .iter()
+        .filter(|s| s.readiness == tm_trading_contracts::ReadinessDto::Ready)
+        .count();
+    let total_services_count = rows.len();
+    let pulse_state_label = pulse
+        .as_ref()
+        .map_or("N/A", |p| market_state_label(p.state, &strings()));
+    let signals_count = research_events.len();
+    let news_count = news_state.items.as_ref().map_or(0, |items| items.len());
+    let routes_count = ai_providers_state
+        .routes
+        .as_ref()
+        .map_or(0, |routes| routes.len());
+    let outbox_count = notifications_state
+        .outbox
+        .as_ref()
+        .map_or(0, |items| items.len());
+    let webview2_version = system_diagnostics_state
+        .webview2
+        .version
+        .as_deref()
+        .unwrap_or("System default");
+
     rsx! {
         AppStyles {}
         div { class: "shell",
+            // Topbar Brand & Network Connection
             header { class: "topbar",
                 div { class: "brand",
                     span { class: "brand-mark" }
@@ -601,48 +643,346 @@ fn App() -> Element {
                     }
                 }
             }
+
+            // Executive KPI Ribbon - immediate high-level awareness on app launch
+            div { class: "kpi-ribbon",
+                div { class: "kpi-chip",
+                    span { class: "kpi-title", "{strings().kpi_services}" }
+                    span { class: "kpi-value", "{ready_services_count}/{total_services_count}" }
+                }
+                div { class: "kpi-chip",
+                    span { class: "kpi-title", "{strings().kpi_market}" }
+                    span { class: "kpi-value", "{pulse_state_label}" }
+                }
+                div { class: "kpi-chip",
+                    span { class: "kpi-title", "{strings().kpi_signals}" }
+                    span { class: "kpi-value", "{signals_count}" }
+                }
+                div { class: "kpi-chip",
+                    span { class: "kpi-title", "{strings().kpi_news}" }
+                    span { class: "kpi-value", "{news_count}" }
+                }
+                div { class: "kpi-chip",
+                    span { class: "kpi-title", "{strings().kpi_ai_routes}" }
+                    span { class: "kpi-value", "{routes_count}" }
+                }
+                div { class: "kpi-chip",
+                    span { class: "kpi-title", "{strings().kpi_outbox}" }
+                    span { class: "kpi-value", "{outbox_count}" }
+                }
+                div { class: "kpi-chip",
+                    span { class: "kpi-title", "{strings().kpi_runtime}" }
+                    span { class: "kpi-value", "{webview2_version}" }
+                }
+            }
+
+            // Terminal Navigation Tab Bar
+            nav { class: "nav-tab-bar", role: "tablist", aria_label: "Navigation Tabs",
+                button {
+                    class: if active_tab() == DesktopTab::Overview { "nav-tab-btn active" } else { "nav-tab-btn" },
+                    role: "tab",
+                    aria_selected: "{active_tab() == DesktopTab::Overview}",
+                    onclick: move |_| active_tab.set(DesktopTab::Overview),
+                    "📊 {strings().tab_overview}"
+                }
+                button {
+                    class: if active_tab() == DesktopTab::Market { "nav-tab-btn active" } else { "nav-tab-btn" },
+                    role: "tab",
+                    aria_selected: "{active_tab() == DesktopTab::Market}",
+                    onclick: move |_| active_tab.set(DesktopTab::Market),
+                    "📈 {strings().tab_market}"
+                }
+                button {
+                    class: if active_tab() == DesktopTab::NewsAi { "nav-tab-btn active" } else { "nav-tab-btn" },
+                    role: "tab",
+                    aria_selected: "{active_tab() == DesktopTab::NewsAi}",
+                    onclick: move |_| active_tab.set(DesktopTab::NewsAi),
+                    "📰 {strings().tab_news_ai}"
+                }
+                button {
+                    class: if active_tab() == DesktopTab::AiConfig { "nav-tab-btn active" } else { "nav-tab-btn" },
+                    role: "tab",
+                    aria_selected: "{active_tab() == DesktopTab::AiConfig}",
+                    onclick: move |_| active_tab.set(DesktopTab::AiConfig),
+                    "🤖 {strings().tab_ai_settings}"
+                }
+                button {
+                    class: if active_tab() == DesktopTab::Notifications { "nav-tab-btn active" } else { "nav-tab-btn" },
+                    role: "tab",
+                    aria_selected: "{active_tab() == DesktopTab::Notifications}",
+                    onclick: move |_| active_tab.set(DesktopTab::Notifications),
+                    "🔔 {strings().tab_notifications}"
+                }
+                button {
+                    class: if active_tab() == DesktopTab::Diagnostics { "nav-tab-btn active" } else { "nav-tab-btn" },
+                    role: "tab",
+                    aria_selected: "{active_tab() == DesktopTab::Diagnostics}",
+                    onclick: move |_| active_tab.set(DesktopTab::Diagnostics),
+                    "⚙️ {strings().tab_diagnostics}"
+                }
+                button {
+                    class: if active_tab() == DesktopTab::All { "nav-tab-btn active" } else { "nav-tab-btn" },
+                    role: "tab",
+                    aria_selected: "{active_tab() == DesktopTab::All}",
+                    onclick: move |_| active_tab.set(DesktopTab::All),
+                    "📑 {strings().tab_all}"
+                }
+            }
+
             main { class: "content",
-                section { class: "panel",
-                    div { class: "panel-head",
-                        h2 { "{strings().services_and_agents}" }
-                        span { class: "panel-meta", "{refreshed_label}" }
-                    }
-                    if rows.is_empty() {
-                        div { class: "empty",
-                            p { class: "empty-title", "{strings().no_services}" }
-                            p { "{strings().no_services_hint}" }
-                        }
-                    } else {
-                        div { class: "table-wrap",
-                            table { class: "services",
-                                thead {
-                                    tr {
-                                        th { "{strings().service_column}" }
-                                        th { "{strings().agent_column}" }
-                                        th { "{strings().desired_column}" }
-                                        th { "{strings().observed_column}" }
-                                        th { "{strings().readiness_column}" }
-                                        th { class: "numeric", "{strings().restarts_column}" }
-                                        th { class: "numeric", "{strings().last_exit_column}" }
-                                        th { class: "actions-head", "{strings().actions_column}" }
+                if active_tab() == DesktopTab::Overview {
+                    div { class: "dashboard-split-grid",
+                        div { class: "column-primary",
+                            section { class: "panel",
+                                div { class: "panel-head",
+                                    h2 { "{strings().services_and_agents}" }
+                                    span { class: "panel-meta", "{refreshed_label}" }
+                                }
+                                if rows.is_empty() {
+                                    div { class: "empty",
+                                        p { class: "empty-title", "{strings().no_services}" }
+                                        p { "{strings().no_services_hint}" }
+                                    }
+                                } else {
+                                    div { class: "table-wrap",
+                                        table { class: "services",
+                                            thead {
+                                                tr {
+                                                    th { "{strings().service_column}" }
+                                                    th { "{strings().agent_column}" }
+                                                    th { "{strings().desired_column}" }
+                                                    th { "{strings().observed_column}" }
+                                                    th { "{strings().readiness_column}" }
+                                                    th { class: "numeric", "{strings().restarts_column}" }
+                                                    th { class: "numeric", "{strings().last_exit_column}" }
+                                                    th { class: "actions-head", "{strings().actions_column}" }
+                                                }
+                                            }
+                                            tbody {
+                                                for service in rows.iter() {
+                                                    {
+                                                        let snapshot = service.clone();
+                                                        let service_id = snapshot.service_instance_id.clone();
+                                                        rsx! {
+                                                            ServiceRow {
+                                                                service: snapshot,
+                                                                strings: strings(),
+                                                                disabled: pending,
+                                                                on_command: move |action| {
+                                                                    action_sender.send(UiAction::Command {
+                                                                        service_instance_id: service_id.clone(),
+                                                                        action,
+                                                                    });
+                                                                },
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
-                                tbody {
-                                    for service in rows.iter() {
-                                        {
-                                            let snapshot = service.clone();
-                                            let service_id = snapshot.service_instance_id.clone();
-                                            rsx! {
-                                                ServiceRow {
-                                                    service: snapshot,
+                            }
+                            section { class: "panel market-panel",
+                                div { class: "panel-head",
+                                    h2 { "{strings().market_pulse}" }
+                                    if let Some(pulse) = pulse.as_ref() {
+                                        span { class: "panel-meta",
+                                            "{pulse.timeframe} · {market_state_label(pulse.state, &strings())}"
+                                        }
+                                    }
+                                }
+                                if let Some(pulse) = pulse.as_ref() {
+                                    if pulse.movers.is_empty() {
+                                        div { class: "empty",
+                                            p { class: "empty-title", "{strings().market_empty}" }
+                                            p { "{strings().market_empty_hint}" }
+                                        }
+                                    } else {
+                                        div { class: "table-wrap",
+                                            table { class: "services",
+                                                thead {
+                                                    tr {
+                                                        th { "{strings().market_symbol_column}" }
+                                                        th { class: "numeric", "{strings().market_last_close_column}" }
+                                                        th { class: "numeric", "{strings().market_change_column}" }
+                                                        th { class: "numeric", "{strings().market_volume_ratio_column}" }
+                                                        th { class: "numeric", "{strings().market_volatility_column}" }
+                                                        th { "{strings().market_status_column}" }
+                                                    }
+                                                }
+                                                tbody {
+                                                    for mover in pulse.movers.iter().take(6) {
+                                                        MarketMoverRow {
+                                                            key: "{mover.symbol}",
+                                                            mover: mover.clone(),
+                                                            strings: strings(),
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        div { class: "column-secondary",
+                            section { class: "panel operation-panel",
+                                div { class: "panel-head",
+                                    h2 { "{strings().operation}" }
+                                }
+                                if let Some(error) = command_error() {
+                                    div { class: "banner error", role: "alert", "{error}" }
+                                }
+                                if let Some(current) = current_operation.as_ref() {
+                                    div { class: "operation-body",
+                                        div { class: "operation-status",
+                                            span { class: status_class.clone(), "{status_label}" }
+                                        }
+                                        div { class: "operation-detail",
+                                            p { class: "operation-id", "{current.operation_id}" }
+                                            if let Some(summary) = current.result_summary.clone() {
+                                                p { class: "operation-summary", "{summary}" }
+                                            } else if let Some(error) = current.redacted_error.clone() {
+                                                p { class: "operation-summary error-text", "{error}" }
+                                            } else {
+                                                p { class: "operation-summary muted", "{strings().operation_pending}" }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    p { class: "muted", "{strings().operation_none}" }
+                                }
+                            }
+                            SignalCenterPanel {
+                                state: research_state.clone(),
+                                strings: strings(),
+                                on_open: move |event_id| {
+                                    research_open_sender.send(UiAction::OpenResearchEvent { event_id });
+                                },
+                            }
+                            NewsPanel {
+                                state: news_state.clone(),
+                                strings: strings(),
+                                on_open: move |news_id| {
+                                    news_open_sender.send(UiAction::OpenNewsItem { news_id });
+                                },
+                            }
+                        }
+                    }
+                }
+
+                if active_tab() == DesktopTab::Market || active_tab() == DesktopTab::All {
+                    section { class: "panel watchlists-panel",
+                        div { class: "panel-head",
+                            h2 { "{strings().watchlists}" }
+                            span { class: "panel-meta", "{lists.len()}" }
+                        }
+                        if let Some(error) = watchlist_error_message.as_ref() {
+                            div { class: "banner error", role: "alert", "{error}" }
+                        }
+                        div { class: "watchlist-create",
+                            input {
+                                class: "text-input",
+                                value: "{name_value}",
+                                placeholder: "{strings().watchlist_new_placeholder}",
+                                aria_label: "{strings().watchlist_new_placeholder}",
+                                oninput: move |event| new_list_name.set(event.value()),
+                            }
+                            button {
+                                class: "button primary",
+                                onclick: move |_| {
+                                    let name = new_list_name().trim().to_owned();
+                                    if name.is_empty() {
+                                        return;
+                                    }
+                                    list_sender.send(UiAction::Watchlist(WatchlistAction::Create {
+                                        name,
+                                        symbols: Vec::new(),
+                                    }));
+                                    new_list_name.set(String::new());
+                                },
+                                "{strings().watchlist_add}"
+                            }
+                        }
+                        if lists.is_empty() {
+                            div { class: "empty",
+                                p { class: "empty-title", "{strings().watchlist_empty}" }
+                                p { "{strings().watchlist_empty_hint}" }
+                            }
+                        } else {
+                            div { class: "watchlist-grid",
+                                for list in lists.iter() {
+                                    {
+                                        let watchlist = list.clone();
+                                        let replace_id = watchlist.id.clone();
+                                        let delete_id = watchlist.id.clone();
+                                        let replace_sender = list_sender;
+                                        let delete_sender = list_sender;
+                                        rsx! {
+                                            WatchlistCard {
+                                                key: "{watchlist.id}",
+                                                watchlist,
+                                                strings: strings(),
+                                                on_replace: move |symbols| {
+                                                    replace_sender.send(UiAction::Watchlist(
+                                                        WatchlistAction::ReplaceSymbols {
+                                                            watchlist_id: replace_id.clone(),
+                                                            symbols,
+                                                        },
+                                                    ));
+                                                },
+                                                on_delete: move |_| {
+                                                    delete_sender.send(UiAction::Watchlist(
+                                                        WatchlistAction::Delete {
+                                                            watchlist_id: delete_id.clone(),
+                                                        },
+                                                    ));
+                                                },
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    section { class: "panel market-panel",
+                        div { class: "panel-head",
+                            h2 { "{strings().market_overview}" }
+                            if let Some(overview) = overview.as_ref() {
+                                span { class: "panel-meta",
+                                    "{overview.timeframe} · {market_state_label(overview.state, &strings())}"
+                                }
+                            }
+                        }
+                        if let Some(error) = market_error_message.as_ref() {
+                            div { class: "banner error", role: "alert", "{error}" }
+                        }
+                        if let Some(overview) = overview.as_ref() {
+                            if overview.symbols.is_empty() {
+                                div { class: "empty",
+                                    p { class: "empty-title", "{strings().market_empty}" }
+                                    p { "{strings().market_empty_hint}" }
+                                }
+                            } else {
+                                div { class: "table-wrap",
+                                    table { class: "services",
+                                        thead {
+                                            tr {
+                                                th { "{strings().market_symbol_column}" }
+                                                th { class: "numeric", "{strings().market_last_close_column}" }
+                                                th { class: "numeric", "{strings().market_change_column}" }
+                                                th { class: "numeric", "{strings().market_volume_column}" }
+                                                th { class: "numeric", "{strings().market_age_column}" }
+                                                th { "{strings().market_status_column}" }
+                                            }
+                                        }
+                                        tbody {
+                                            for item in overview.symbols.iter() {
+                                                MarketSymbolRow {
+                                                    key: "{item.symbol}",
+                                                    symbol: item.clone(),
                                                     strings: strings(),
-                                                    disabled: pending,
-                                                    on_command: move |action| {
-                                                        action_sender.send(UiAction::Command {
-                                                            service_instance_id: service_id.clone(),
-                                                            action,
-                                                        });
-                                                    },
                                                 }
                                             }
                                         }
@@ -651,248 +991,119 @@ fn App() -> Element {
                             }
                         }
                     }
-                }
-                section { class: "panel operation-panel",
-                    div { class: "panel-head",
-                        h2 { "{strings().operation}" }
-                    }
-                    if let Some(error) = command_error() {
-                        div { class: "banner error", role: "alert", "{error}" }
-                    }
-                    if let Some(current) = current_operation.as_ref() {
-                        div { class: "operation-body",
-                            div { class: "operation-status",
-                                span { class: status_class, "{status_label}" }
+                    if active_tab() != DesktopTab::All {
+                        section { class: "panel market-panel",
+                            div { class: "panel-head",
+                                h2 { "{strings().market_pulse}" }
+                                if let Some(pulse) = pulse.as_ref() {
+                                    span { class: "panel-meta",
+                                        "{pulse.timeframe} · {market_state_label(pulse.state, &strings())}"
+                                    }
+                                }
                             }
-                            div { class: "operation-detail",
-                                p { class: "operation-id", "{current.operation_id}" }
-                                if let Some(summary) = current.result_summary.clone() {
-                                    p { class: "operation-summary", "{summary}" }
-                                } else if let Some(error) = current.redacted_error.clone() {
-                                    p { class: "operation-summary error-text", "{error}" }
+                            if let Some(pulse) = pulse.as_ref() {
+                                if pulse.movers.is_empty() {
+                                    div { class: "empty",
+                                        p { class: "empty-title", "{strings().market_empty}" }
+                                        p { "{strings().market_empty_hint}" }
+                                    }
                                 } else {
-                                    p { class: "operation-summary muted", "{strings().operation_pending}" }
+                                    div { class: "table-wrap",
+                                        table { class: "services",
+                                            thead {
+                                                tr {
+                                                    th { "{strings().market_symbol_column}" }
+                                                    th { class: "numeric", "{strings().market_last_close_column}" }
+                                                    th { class: "numeric", "{strings().market_change_column}" }
+                                                    th { class: "numeric", "{strings().market_volume_ratio_column}" }
+                                                    th { class: "numeric", "{strings().market_volatility_column}" }
+                                                    th { "{strings().market_status_column}" }
+                                                }
+                                            }
+                                            tbody {
+                                                for mover in pulse.movers.iter() {
+                                                    MarketMoverRow {
+                                                        key: "{mover.symbol}",
+                                                        mover: mover.clone(),
+                                                        strings: strings(),
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-                    } else {
-                        p { class: "muted", "{strings().operation_none}" }
-                    }
-                }
-                section { class: "panel watchlists-panel",
-                    div { class: "panel-head",
-                        h2 { "{strings().watchlists}" }
-                        span { class: "panel-meta", "{lists.len()}" }
-                    }
-                    if let Some(error) = watchlist_error_message.as_ref() {
-                        div { class: "banner error", role: "alert", "{error}" }
-                    }
-                    div { class: "watchlist-create",
-                        input {
-                            class: "text-input",
-                            value: "{name_value}",
-                            placeholder: "{strings().watchlist_new_placeholder}",
-                            aria_label: "{strings().watchlist_new_placeholder}",
-                            oninput: move |event| new_list_name.set(event.value()),
-                        }
-                        button {
-                            class: "button primary",
-                            onclick: move |_| {
-                                let name = new_list_name().trim().to_owned();
-                                if name.is_empty() {
-                                    return;
-                                }
-                                list_sender.send(UiAction::Watchlist(WatchlistAction::Create {
-                                    name,
-                                    symbols: Vec::new(),
-                                }));
-                                new_list_name.set(String::new());
+                        SignalCenterPanel {
+                            state: research_state.clone(),
+                            strings: strings(),
+                            on_open: move |event_id| {
+                                research_open_sender.send(UiAction::OpenResearchEvent { event_id });
                             },
-                            "{strings().watchlist_add}"
-                        }
-                    }
-                    if lists.is_empty() {
-                        div { class: "empty",
-                            p { class: "empty-title", "{strings().watchlist_empty}" }
-                            p { "{strings().watchlist_empty_hint}" }
-                        }
-                    } else {
-                        div { class: "watchlist-grid",
-                            for list in lists.iter() {
-                                {
-                                    let watchlist = list.clone();
-                                    let replace_id = watchlist.id.clone();
-                                    let delete_id = watchlist.id.clone();
-                                    let replace_sender = list_sender;
-                                    let delete_sender = list_sender;
-                                    rsx! {
-                                        WatchlistCard {
-                                            key: "{watchlist.id}",
-                                            watchlist,
-                                            strings: strings(),
-                                            on_replace: move |symbols| {
-                                                replace_sender.send(UiAction::Watchlist(
-                                                    WatchlistAction::ReplaceSymbols {
-                                                        watchlist_id: replace_id.clone(),
-                                                        symbols,
-                                                    },
-                                                ));
-                                            },
-                                            on_delete: move |_| {
-                                                delete_sender.send(UiAction::Watchlist(
-                                                    WatchlistAction::Delete {
-                                                        watchlist_id: delete_id.clone(),
-                                                    },
-                                                ));
-                                            },
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
-                section { class: "panel market-panel",
-                    div { class: "panel-head",
-                        h2 { "{strings().market_overview}" }
-                        if let Some(overview) = overview.as_ref() {
-                            span { class: "panel-meta",
-                                "{overview.timeframe} · {market_state_label(overview.state, &strings())}"
-                            }
+
+                if active_tab() == DesktopTab::NewsAi || active_tab() == DesktopTab::All {
+                    if active_tab() != DesktopTab::All {
+                        NewsPanel {
+                            state: news_state.clone(),
+                            strings: strings(),
+                            on_open: move |news_id| {
+                                news_open_sender.send(UiAction::OpenNewsItem { news_id });
+                            },
                         }
                     }
-                    if let Some(error) = market_error_message.as_ref() {
-                        div { class: "banner error", role: "alert", "{error}" }
-                    }
-                    if let Some(overview) = overview.as_ref() {
-                        if overview.symbols.is_empty() {
-                            div { class: "empty",
-                                p { class: "empty-title", "{strings().market_empty}" }
-                                p { "{strings().market_empty_hint}" }
-                            }
-                        } else {
-                            div { class: "table-wrap",
-                                table { class: "services",
-                                    thead {
-                                        tr {
-                                            th { "{strings().market_symbol_column}" }
-                                            th { class: "numeric", "{strings().market_last_close_column}" }
-                                            th { class: "numeric", "{strings().market_change_column}" }
-                                            th { class: "numeric", "{strings().market_volume_column}" }
-                                            th { class: "numeric", "{strings().market_age_column}" }
-                                            th { "{strings().market_status_column}" }
-                                        }
-                                    }
-                                    tbody {
-                                        for item in overview.symbols.iter() {
-                                            MarketSymbolRow {
-                                                key: "{item.symbol}",
-                                                symbol: item.clone(),
-                                                strings: strings(),
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    AiBriefingPanel {
+                        state: ai_briefings_state.clone(),
+                        strings: strings(),
+                        research_events,
+                        on_open: move |briefing_id| {
+                            ai_briefing_open_sender.send(UiAction::OpenAiBriefing { briefing_id });
+                        },
+                        on_request: move |research_event_id| {
+                            ai_briefing_request_sender.send(UiAction::RequestAiBriefing {
+                                research_event_id,
+                            });
+                        },
                     }
                 }
-                section { class: "panel market-panel",
-                    div { class: "panel-head",
-                        h2 { "{strings().market_pulse}" }
-                        if let Some(pulse) = pulse.as_ref() {
-                            span { class: "panel-meta",
-                                "{pulse.timeframe} · {market_state_label(pulse.state, &strings())}"
-                            }
-                        }
-                    }
-                    if let Some(pulse) = pulse.as_ref() {
-                        if pulse.movers.is_empty() {
-                            div { class: "empty",
-                                p { class: "empty-title", "{strings().market_empty}" }
-                                p { "{strings().market_empty_hint}" }
-                            }
-                        } else {
-                            div { class: "table-wrap",
-                                table { class: "services",
-                                    thead {
-                                        tr {
-                                            th { "{strings().market_symbol_column}" }
-                                            th { class: "numeric", "{strings().market_last_close_column}" }
-                                            th { class: "numeric", "{strings().market_change_column}" }
-                                            th { class: "numeric", "{strings().market_volume_ratio_column}" }
-                                            th { class: "numeric", "{strings().market_volatility_column}" }
-                                            th { "{strings().market_status_column}" }
-                                        }
-                                    }
-                                    tbody {
-                                        for mover in pulse.movers.iter() {
-                                            MarketMoverRow {
-                                                key: "{mover.symbol}",
-                                                mover: mover.clone(),
-                                                strings: strings(),
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+
+                if active_tab() == DesktopTab::AiConfig || active_tab() == DesktopTab::All {
+                    AiProviderPanel {
+                        state: ai_providers_state.clone(),
+                        strings: strings(),
+                        on_test: move |id| {
+                            ai_test_sender.send(UiAction::TestAiProvider { id });
+                        },
+                        on_test_model: move |id| {
+                            ai_model_test_sender.send(UiAction::TestAiModel { id });
+                        },
                     }
                 }
-                SignalCenterPanel {
-                    state: research_state.clone(),
-                    strings: strings(),
-                    on_open: move |event_id| {
-                        research_open_sender.send(UiAction::OpenResearchEvent { event_id });
-                    },
+
+                if active_tab() == DesktopTab::Notifications || active_tab() == DesktopTab::All {
+                    NotificationCenterPanel {
+                        state: notifications_state,
+                        strings: strings(),
+                        on_send_test: move |(chat_id, message)| {
+                            notifications_test_sender.send(UiAction::SendTestNotification {
+                                chat_id,
+                                message,
+                            });
+                        },
+                    }
                 }
-                NewsPanel {
-                    state: news_state.clone(),
-                    strings: strings(),
-                    on_open: move |news_id| {
-                        news_open_sender.send(UiAction::OpenNewsItem { news_id });
-                    },
-                }
-                AiBriefingPanel {
-                    state: ai_briefings_state.clone(),
-                    strings: strings(),
-                    research_events,
-                    on_open: move |briefing_id| {
-                        ai_briefing_open_sender.send(UiAction::OpenAiBriefing { briefing_id });
-                    },
-                    on_request: move |research_event_id| {
-                        ai_briefing_request_sender.send(UiAction::RequestAiBriefing {
-                            research_event_id,
-                        });
-                    },
-                }
-                AiProviderPanel {
-                    state: ai_providers_state.clone(),
-                    strings: strings(),
-                    on_test: move |id| {
-                        ai_test_sender.send(UiAction::TestAiProvider { id });
-                    },
-                    on_test_model: move |id| {
-                        ai_model_test_sender.send(UiAction::TestAiModel { id });
-                    },
-                }
-                NotificationCenterPanel {
-                    state: notifications_state,
-                    strings: strings(),
-                    on_send_test: move |(chat_id, message)| {
-                        notifications_test_sender.send(UiAction::SendTestNotification {
-                            chat_id,
-                            message,
-                        });
-                    },
-                }
-                SystemDiagnosticsPanel {
-                    state: system_diagnostics_state,
-                    strings: strings(),
-                    disabled: pending,
-                    on_generate_bundle: move |_| {
-                        diagnostics_bundle_sender.send(UiAction::GenerateSupportBundle);
-                    },
+
+                if active_tab() == DesktopTab::Diagnostics || active_tab() == DesktopTab::All {
+                    SystemDiagnosticsPanel {
+                        state: system_diagnostics_state,
+                        strings: strings(),
+                        disabled: pending,
+                        on_generate_bundle: move |_| {
+                            diagnostics_bundle_sender.send(UiAction::GenerateSupportBundle);
+                        },
+                    }
                 }
             }
             if research_state.selected_id.is_some() {
@@ -998,23 +1209,52 @@ fn ServiceRow(
             td { class: "numeric", "{restart_count}" }
             td { class: "numeric", "{last_exit}" }
             td { class: "actions",
-                button {
-                    class: "button primary",
-                    disabled: disabled || running,
-                    onclick: move |_| on_command.call(OperationActionDto::Start),
-                    "{strings.start}"
+                if running {
+                    button {
+                        class: "button primary",
+                        disabled: disabled,
+                        onclick: move |_| on_command.call(OperationActionDto::Restart),
+                        "{strings.restart}"
+                    }
+                } else {
+                    button {
+                        class: "button primary",
+                        disabled: disabled,
+                        onclick: move |_| on_command.call(OperationActionDto::Start),
+                        "{strings.start}"
+                    }
                 }
-                button {
-                    class: "button",
-                    disabled: disabled || !running,
-                    onclick: move |_| on_command.call(OperationActionDto::Stop),
-                    "{strings.stop}"
-                }
-                button {
-                    class: "button",
-                    disabled: disabled || !running,
-                    onclick: move |_| on_command.call(OperationActionDto::Restart),
-                    "{strings.restart}"
+                ActionDropdown {
+                    trigger_label: "•••".to_owned(),
+                    disabled: disabled,
+                    items: vec![
+                        DropdownItem {
+                            id: "start".to_owned(),
+                            label: strings.start.to_owned(),
+                            class: Some("action-success".to_owned()),
+                            disabled: running,
+                        },
+                        DropdownItem {
+                            id: "restart".to_owned(),
+                            label: strings.restart.to_owned(),
+                            class: Some("action-warning".to_owned()),
+                            disabled: !running,
+                        },
+                        DropdownItem {
+                            id: "stop".to_owned(),
+                            label: strings.stop.to_owned(),
+                            class: Some("action-danger".to_owned()),
+                            disabled: !running,
+                        },
+                    ],
+                    on_select: move |action_id: String| {
+                        match action_id.as_str() {
+                            "start" => on_command.call(OperationActionDto::Start),
+                            "stop" => on_command.call(OperationActionDto::Stop),
+                            "restart" => on_command.call(OperationActionDto::Restart),
+                            _ => {}
+                        }
+                    },
                 }
             }
         }

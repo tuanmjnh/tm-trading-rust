@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use tm_trading_contracts::{SupportBundleDto, SystemDiagnosticsDto};
 
 use crate::i18n::UiStrings;
+use crate::modal::Modal;
 use crate::webview2_check::WebView2RuntimeStatus;
 
 #[derive(Clone, Default, PartialEq)]
@@ -64,6 +65,7 @@ pub fn SystemDiagnosticsPanel(
     let bundle = state.bundle;
     let is_generating = state.is_generating_bundle;
     let error_msg = state.error;
+    let mut show_bundle_modal = use_signal(|| false);
 
     rsx! {
         section { class: "panel",
@@ -172,15 +174,49 @@ pub fn SystemDiagnosticsPanel(
                 }
 
                 if let Some(b) = bundle.as_ref() {
-                    div { class: "bundle-result",
-                        div { class: "bundle-meta-bar",
-                            span { class: "badge success", "{strings.bundle_redacted_safe}" }
-                            span { class: "meta-subtle", "Bundle ID: {b.bundle_id}" }
-                            span { class: "meta-subtle", "Generated: {b.generated_at}" }
-                        }
-                        div { class: "json-viewer",
-                            pre {
-                                "{serde_json::to_string_pretty(&b).unwrap_or_default()}"
+                    {
+                        let json_str = serde_json::to_string_pretty(&b).unwrap_or_default();
+                        let json_preview = if json_str.len() > 300 {
+                            format!("{}...\n// (Click 'View Full in Modal' to view entire bundle)", &json_str[..300])
+                        } else {
+                            json_str.clone()
+                        };
+
+                        rsx! {
+                            div { class: "bundle-result",
+                                div { class: "bundle-meta-bar",
+                                    span { class: "badge success", "{strings.bundle_redacted_safe}" }
+                                    span { class: "meta-subtle", "Bundle ID: {b.bundle_id}" }
+                                    span { class: "meta-subtle", "Generated: {b.generated_at}" }
+                                    button {
+                                        class: "button secondary",
+                                        style: "margin-left: auto; font-size: 0.8rem; padding: 0.25rem 0.6rem;",
+                                        onclick: move |_| show_bundle_modal.set(true),
+                                        "🔍 View in Modal"
+                                    }
+                                }
+                                div { class: "json-viewer",
+                                    pre { "{json_preview}" }
+                                }
+                            }
+                            if show_bundle_modal() {
+                                Modal {
+                                    title: format!("Support Bundle [{}]", b.bundle_id),
+                                    close_label: strings.modal_close.to_owned(),
+                                    on_close: move |_| show_bundle_modal.set(false),
+                                    children: rsx! {
+                                        div { class: "json-viewer", style: "max-height: 480px; overflow-y: auto;",
+                                            pre { "{json_str}" }
+                                        }
+                                    },
+                                    footer: rsx! {
+                                        button {
+                                            class: "button primary",
+                                            onclick: move |_| show_bundle_modal.set(false),
+                                            "{strings.modal_close}"
+                                        }
+                                    },
+                                }
                             }
                         }
                     }
