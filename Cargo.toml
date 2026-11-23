@@ -22,6 +22,7 @@ members = [
     "workers/market-worker",
     "workers/news-worker",
     "workers/ai-worker",
+    "workers/notification-worker",
 ]
 
 [workspace.package]

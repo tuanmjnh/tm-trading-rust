@@ -5776,6 +5776,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tm-trading-notification-worker"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tm-trading-agent-protocol",
+ "tm-trading-domain",
+ "tm-trading-storage",
+ "tm-trading-telegram-client",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "tm-trading-observability"
 version = "0.1.0"
 dependencies = [
