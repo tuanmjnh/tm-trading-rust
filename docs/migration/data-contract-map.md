@@ -473,7 +473,11 @@ owner's briefing identifier returns `404`.
 
 There is no legacy collection with this name. The collection is the durable request source
 for the AI Worker: one document is one owner-scoped request to publish an evidence-bound
-briefing, and it is also the work item the worker claims.
+briefing, and it is also the work item the worker claims. `schemaVersion` is the numeric
+version `1`; the domain reader rejects every other value. The public request contract has
+accepted only `research_explanation` since the endpoint was introduced, so no legacy task
+payload needs a compatibility fallback. A manually inserted job with another task is not
+relabeled or silently accepted as a supported job.
 
 Required fields:
 

@@ -235,7 +235,7 @@ Sources are considered only when their declared `pollIntervalSec` has elapsed si
 | Purpose | Claims one durable `ai_jobs` request at a time and publishes an evidence-bound briefing in `ai_briefings` |
 | IPC schema | `worker.v2` |
 | Control channel | One JSON object per line over the worker stdin/stdout pipes |
-| Shutdown | The Agent sends an explicit `shutdown` command; the worker stops claiming, reports `stopped`, and exits |
+| Shutdown | The Agent sends an explicit `shutdown` command; the worker stops claiming, aborts any active job as unknown, reports `stopped`, and exits |
 
 The worker is opt-in. It is registered only when `TM_TRADING_AI_WORKER_ENABLED=1`; otherwise the Agent does not launch it.
 
@@ -258,12 +258,12 @@ The worker is opt-in. It is registered only when `TM_TRADING_AI_WORKER_ENABLED=1
 | Check | Required | Meaning |
 |---|---:|---|
 | `process-alive` | Yes | The Agent still owns a live child process |
-| `capability-verified` | Yes | The `research_explanation` route, its provider, and its model are enabled and the credential resolves |
+| `capability-verified` | Yes | The `research_explanation` route, its provider, and its model are enabled, the credential resolves, and MongoDB supports transactions |
 | `recent-heartbeat` | Yes | A heartbeat was observed within 30 seconds |
 | `dependencies-reachable` | Yes | MongoDB and the job, briefing, evidence, and route stores were reachable |
 | `recent-success` | No | A briefing was published within the last hour; a stale one degrades the service |
 
-The readiness probe resolves the provider and its credential but never calls the provider, so readiness never costs a billable request. The worker is idle between queued jobs, so a missing briefing is not a failure.
+The readiness probe resolves the provider and its credential but never calls the provider, so readiness never costs a billable request. The worker is idle between queued jobs, so a missing briefing is not a failure. A job-level failure or lease lapse does not revoke verified capability. A dependency or storage failure makes the worker not ready, and capability is restored only after a successful revalidation.
 
 ### Claim and publish path
 

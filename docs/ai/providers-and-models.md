@@ -277,9 +277,16 @@ The Agent registers `ai-worker` in its static registry only when
 namespace to that worker alone. The worker is not given a shell command or an arbitrary
 executable.
 
-Before reporting readiness the worker verifies that the `research_explanation` route, its
-provider profile, and its model are enabled and that the provider credential resolves.
-The probe never calls the provider, so readiness never costs a billable request.
+Before reporting readiness the worker verifies that MongoDB supports transactions and
+that the `research_explanation` route, its provider profile, and its model are enabled
+and that the provider credential resolves. The probe never calls the provider, so
+readiness never costs a billable request.
+
+A job-level failure or lease lapse does not revoke verified capability. A dependency or
+storage failure makes the worker not ready, and capability is restored only after a
+successful revalidation. The in-flight job runs in a cancellable task so heartbeat and
+shutdown commands remain responsive; shutdown aborts an active job and leaves its lease
+to expire as an unknown outcome.
 
 A job failure is recorded on the job with a sanitized code (`no_usable_evidence`,
 `invalid_request`, `evidence_too_large`, `invalid_model_output`, `provider_failed`,
