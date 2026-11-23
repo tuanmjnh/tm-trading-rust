@@ -1,8 +1,9 @@
-use mongodb::bson::doc;
+use mongodb::bson::{Document, doc};
 use mongodb::options::{ConnectionString, HostInfo, Tls};
 use mongodb::{Client, Database};
 
 use crate::RepositoryError;
+use crate::bson_support::number_as_i64;
 
 pub struct MongoConnection {
     database: Database,
@@ -42,6 +43,25 @@ impl MongoConnection {
         self.database.run_command(doc! { "ping": 1 }).await?;
         Ok(())
     }
+
+    /// Reports whether the deployment can commit multi-document transactions.
+    pub async fn transactions_supported(&self) -> Result<bool, RepositoryError> {
+        let hello = self.database.run_command(doc! { "hello": 1 }).await?;
+        Ok(supports_transactions(&hello))
+    }
+}
+
+fn supports_transactions(hello: &Document) -> bool {
+    let max_wire_version = hello
+        .get("maxWireVersion")
+        .and_then(|value| number_as_i64("maxWireVersion", value).ok())
+        .unwrap_or_default();
+    let replica_set = hello.get_str("setName").is_ok_and(|name| !name.is_empty());
+    let sharded_cluster = hello
+        .get_str("msg")
+        .is_ok_and(|message| message == "isdbgrid");
+
+    (replica_set && max_wire_version >= 7) || (sharded_cluster && max_wire_version >= 8)
 }
 
 #[cfg(test)]
@@ -62,6 +82,23 @@ mod tests {
                 .await;
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn transaction_topology_requires_a_replica_set_or_mongos() {
+        assert!(supports_transactions(&doc! {
+            "setName": "rs0",
+            "maxWireVersion": 21,
+        }));
+        assert!(supports_transactions(&doc! {
+            "msg": "isdbgrid",
+            "maxWireVersion": 21,
+        }));
+        assert!(!supports_transactions(&doc! { "maxWireVersion": 21 }));
+        assert!(!supports_transactions(&doc! {
+            "setName": "rs0",
+            "maxWireVersion": 6,
+        }));
     }
 
     #[tokio::test]
