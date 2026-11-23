@@ -91,6 +91,9 @@ pub struct AppState {
     pub notification_logs: Arc<dyn NotificationLogRepository>,
     pub telegram_client: Option<TelegramClient>,
     pub default_telegram_chat_id: Option<String>,
+    pub start_time: chrono::DateTime<chrono::Utc>,
+    pub storage_kind: String,
+    pub database_name: Option<String>,
     pub auth: AuthConfig,
 }
 
@@ -121,6 +124,9 @@ impl AppState {
             notification_logs: repositories.notification_logs,
             telegram_client: None,
             default_telegram_chat_id: None,
+            start_time: chrono::Utc::now(),
+            storage_kind: "memory".to_owned(),
+            database_name: None,
             auth,
         }
     }

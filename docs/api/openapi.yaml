@@ -2260,6 +2260,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/system/diagnostics:
+    get:
+      tags:
+      - System
+      operationId: system_diagnostics
+      responses:
+        '200':
+          description: Secret-redacted system diagnostics report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemDiagnosticsDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/system/support-bundle:
+    post:
+      tags:
+      - System
+      operationId: create_support_bundle
+      responses:
+        '200':
+          description: Redacted diagnostic support bundle
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportBundleDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/version:
     get:
       tags:
@@ -3750,6 +3810,22 @@ components:
       - telegram
       - webPush
       - electron
+    NotificationDiagnosticsDto:
+      type: object
+      description: Diagnostic summary of the notification subsystem.
+      required:
+      - telegram_configured
+      - outbox_queued
+      - outbox_dead
+      properties:
+        outbox_dead:
+          type: integer
+          minimum: 0
+        outbox_queued:
+          type: integer
+          minimum: 0
+        telegram_configured:
+          type: boolean
     NotificationLogItemDto:
       type: object
       description: One immutable record in the notification delivery audit ledger.
@@ -4524,6 +4600,77 @@ components:
         updated_at:
           type: string
           format: date-time
+    StorageDiagnosticsDto:
+      type: object
+      description: High-level diagnostic snapshot of backend storage.
+      required:
+      - storage_kind
+      - connected
+      properties:
+        connected:
+          type: boolean
+        database_name:
+          type:
+          - string
+          - 'null'
+        storage_kind:
+          type: string
+    SupportBundleDto:
+      type: object
+      description: Redacted diagnostic bundle for troubleshooting and support.
+      required:
+      - bundle_id
+      - generated_at
+      - diagnostics
+      - snapshot_count
+      - redacted_summary
+      properties:
+        bundle_id:
+          type: string
+        diagnostics:
+          $ref: '#/components/schemas/SystemDiagnosticsDto'
+        generated_at:
+          type: string
+          format: date-time
+        redacted_summary:
+          type: string
+        snapshot_count:
+          type: integer
+          minimum: 0
+    SystemDiagnosticsDto:
+      type: object
+      description: Comprehensive system diagnostic report (secret-redacted).
+      required:
+      - generated_at
+      - version
+      - os
+      - arch
+      - uptime_seconds
+      - storage
+      - workers
+      - notifications
+      properties:
+        arch:
+          type: string
+        generated_at:
+          type: string
+          format: date-time
+        notifications:
+          $ref: '#/components/schemas/NotificationDiagnosticsDto'
+        os:
+          type: string
+        storage:
+          $ref: '#/components/schemas/StorageDiagnosticsDto'
+        uptime_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+        version:
+          $ref: '#/components/schemas/ApiVersionInfo'
+        workers:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkerDiagnosticsDto'
     UpdateAiModelDto:
       type: object
       properties:
@@ -4682,6 +4829,33 @@ components:
         updated_at:
           type: string
           format: date-time
+    WorkerDiagnosticsDto:
+      type: object
+      description: Diagnostic health status of a supervised worker process.
+      required:
+      - service_instance_id
+      - observed_state
+      - readiness
+      - process_alive
+      - restart_count
+      properties:
+        last_heartbeat_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        observed_state:
+          type: string
+        process_alive:
+          type: boolean
+        readiness:
+          type: string
+        restart_count:
+          type: integer
+          format: int32
+          minimum: 0
+        service_instance_id:
+          type: string
 tags:
 - name: System
   description: Version and health endpoints

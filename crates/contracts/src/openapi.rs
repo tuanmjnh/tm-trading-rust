@@ -43,7 +43,10 @@ use crate::service::{
     ClaimCommandResponse, CompleteCommandRequest, CompleteCommandResponse, ProgressCommandRequest,
     ProgressCommandResponse, ServiceSnapshot,
 };
-use crate::system::{ApiVersionInfo, HealthResponse};
+use crate::system::{
+    ApiVersionInfo, HealthResponse, NotificationDiagnosticsDto, StorageDiagnosticsDto,
+    SupportBundleDto, SystemDiagnosticsDto, WorkerDiagnosticsDto,
+};
 use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, WatchlistDto};
 
 #[derive(OpenApi)]
@@ -56,6 +59,8 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
     paths(
         version,
         health,
+        system_diagnostics,
+        create_support_bundle,
         list_services,
         get_service,
         create_service_operation,
@@ -113,6 +118,11 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
     components(schemas(
         ApiVersionInfo,
         HealthResponse,
+        StorageDiagnosticsDto,
+        WorkerDiagnosticsDto,
+        NotificationDiagnosticsDto,
+        SystemDiagnosticsDto,
+        SupportBundleDto,
         ApiErrorResponse,
         CreateOperationRequest,
         OperationResponse,
@@ -232,6 +242,32 @@ pub fn version() {}
     )
 )]
 pub fn health() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/system/diagnostics",
+    tag = "System",
+    responses(
+        (status = 200, description = "Secret-redacted system diagnostics report", body = SystemDiagnosticsDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn system_diagnostics() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/system/support-bundle",
+    tag = "System",
+    responses(
+        (status = 200, description = "Redacted diagnostic support bundle", body = SupportBundleDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn create_support_bundle() {}
 
 #[utoipa::path(
     get,

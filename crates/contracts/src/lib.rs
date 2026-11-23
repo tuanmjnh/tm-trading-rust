@@ -62,7 +62,10 @@ pub use service::{
     ObservedStateDto, ProgressCommandRequest, ProgressCommandResponse, ReadinessDto,
     ServiceSnapshot,
 };
-pub use system::{ApiVersionInfo, HealthResponse, HealthStatus};
+pub use system::{
+    ApiVersionInfo, HealthResponse, HealthStatus, NotificationDiagnosticsDto,
+    StorageDiagnosticsDto, SupportBundleDto, SystemDiagnosticsDto, WorkerDiagnosticsDto,
+};
 pub use watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, WatchlistDto};
 
 pub const API_PREFIX: &str = "/api/v1";

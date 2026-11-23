@@ -11,6 +11,7 @@ mod notifications;
 mod research;
 mod routes;
 mod state;
+mod system;
 
 use axum::Router;
 use axum::routing::{get, post};
@@ -32,6 +33,14 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/health", get(routes::health))
         .route("/api/v1/version", get(routes::version))
+        .route(
+            "/api/v1/system/diagnostics",
+            get(system::system_diagnostics),
+        )
+        .route(
+            "/api/v1/system/support-bundle",
+            post(system::create_support_bundle),
+        )
         .route("/api/v1/openapi.json", get(openapi_document))
         .route("/api/v1/services", get(routes::list_services))
         .route(

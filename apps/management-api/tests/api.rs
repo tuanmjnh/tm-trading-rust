@@ -2700,3 +2700,78 @@ async fn notification_send_test_security_and_diagnostics() {
             .contains("Telegram client is not configured")
     );
 }
+
+#[tokio::test]
+async fn system_diagnostics_security_and_redaction() {
+    let state = state();
+    let app = router(state);
+
+    // 1. Anonymous access is unauthorized
+    let anon = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/system/diagnostics", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. User token receives structured diagnostics
+    let user_diag = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/system/diagnostics",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(user_diag.status(), StatusCode::OK);
+    let diag_json = json_body(user_diag).await;
+
+    assert_eq!(diag_json["version"]["api_version"], "v1");
+    assert_eq!(diag_json["version"]["contract_version"], "1.0.0");
+    assert_eq!(diag_json["storage"]["storage_kind"], "memory");
+    assert_eq!(diag_json["storage"]["connected"], true);
+    assert_eq!(diag_json["notifications"]["telegram_configured"], false);
+    assert!(diag_json["os"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(diag_json["arch"].as_str().is_some_and(|s| !s.is_empty()));
+}
+
+#[tokio::test]
+async fn system_support_bundle_creation_and_redaction() {
+    let state = state();
+    let app = router(state);
+
+    // 1. Anonymous access is unauthorized
+    let anon = app
+        .clone()
+        .oneshot(request("POST", "/api/v1/system/support-bundle", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. User token creates support bundle
+    let user_bundle = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/system/support-bundle",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(user_bundle.status(), StatusCode::OK);
+    let bundle_json = json_body(user_bundle).await;
+
+    let bundle_id = bundle_json["bundle_id"].as_str().unwrap();
+    assert!(bundle_id.starts_with("bundle_"));
+    assert_eq!(
+        bundle_json["diagnostics"]["storage"]["storage_kind"],
+        "memory"
+    );
+    assert!(
+        bundle_json["redacted_summary"]
+            .as_str()
+            .unwrap()
+            .contains("redacted")
+    );
+}

@@ -49,8 +49,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| DEFAULT_AGENT_ID.to_owned()),
     };
 
-    let repositories = stores().await?;
+    let (repositories, storage_kind, database_name) = stores().await?;
     let mut state = AppState::with_repositories(auth, repositories);
+    state.storage_kind = storage_kind;
+    state.database_name = database_name;
     if let Ok(token_str) = std::env::var("TM_TRADING_TELEGRAM_BOT_TOKEN")
         && let Ok(token) = tm_trading_telegram_client::TelegramBotToken::new(token_str)
     {
@@ -75,57 +77,68 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 ///
 /// Local development defaults to the in-memory stores so a developer does not need a
 /// database. Production fails closed instead of losing durable operations on restart.
-async fn stores() -> Result<Repositories, Box<dyn std::error::Error>> {
+async fn stores() -> Result<(Repositories, String, Option<String>), Box<dyn std::error::Error>> {
     let store = std::env::var("TM_TRADING_STORE").unwrap_or_else(|_| "memory".to_owned());
     let environment = std::env::var("TM_ENVIRONMENT").unwrap_or_else(|_| "development".to_owned());
     match store.as_str() {
         "memory" if environment == "production" => {
             Err("TM_TRADING_STORE must be 'mongodb' when TM_ENVIRONMENT=production".into())
         }
-        "memory" => Ok(Repositories::in_memory()),
+        "memory" => Ok((Repositories::in_memory(), "memory".to_owned(), None)),
         "mongodb" => {
             let uri = std::env::var("TM_DATABASE_URI")?;
             let database_name =
                 std::env::var("TM_DATABASE_NAME").unwrap_or_else(|_| "tm-trading-rust".to_owned());
             let connection = MongoConnection::connect(&uri, &database_name).await?;
-            Ok(Repositories {
-                operations: Arc::new(MongoOperationRepository::new(connection.database()).await?),
-                services: Arc::new(
-                    MongoServiceSnapshotRepository::new(connection.database()).await?,
-                ),
-                watchlists: Arc::new(MongoWatchlistRepository::new(connection.database()).await?),
-                providers: Arc::new(
-                    MongoProviderInstanceRepository::new(connection.database()).await?,
-                ),
-                ai_provider_profiles: Arc::new(
-                    MongoAiProviderProfileRepository::new(connection.database()).await?,
-                ),
-                ai_models: Arc::new(MongoAiModelRepository::new(connection.database()).await?),
-                ai_task_routes: Arc::new(
-                    MongoAiTaskRouteRepository::new(connection.database()).await?,
-                ),
-                ai_briefings: Arc::new(
-                    MongoAiBriefingRepository::new(connection.database()).await?,
-                ),
-                ai_jobs: Arc::new(MongoAiJobRepository::new(connection.database()).await?),
-                candles: Arc::new(MongoCandleRepository::new(connection.database()).await?),
-                research_events: Arc::new(
-                    MongoResearchEventRepository::new(connection.database()).await?,
-                ),
-                news_sources: Arc::new(
-                    MongoNewsSourceRepository::new(connection.database()).await?,
-                ),
-                news_items: Arc::new(MongoNewsItemRepository::new(connection.database()).await?),
-                news_clusters: Arc::new(
-                    MongoNewsClusterRepository::new(connection.database()).await?,
-                ),
-                notification_outbox: Arc::new(
-                    MongoNotificationOutboxRepository::new(connection.database()).await?,
-                ),
-                notification_logs: Arc::new(
-                    MongoNotificationLogRepository::new(connection.database()).await?,
-                ),
-            })
+            let db_name = connection.database().name().to_owned();
+            Ok((
+                Repositories {
+                    operations: Arc::new(
+                        MongoOperationRepository::new(connection.database()).await?,
+                    ),
+                    services: Arc::new(
+                        MongoServiceSnapshotRepository::new(connection.database()).await?,
+                    ),
+                    watchlists: Arc::new(
+                        MongoWatchlistRepository::new(connection.database()).await?,
+                    ),
+                    providers: Arc::new(
+                        MongoProviderInstanceRepository::new(connection.database()).await?,
+                    ),
+                    ai_provider_profiles: Arc::new(
+                        MongoAiProviderProfileRepository::new(connection.database()).await?,
+                    ),
+                    ai_models: Arc::new(MongoAiModelRepository::new(connection.database()).await?),
+                    ai_task_routes: Arc::new(
+                        MongoAiTaskRouteRepository::new(connection.database()).await?,
+                    ),
+                    ai_briefings: Arc::new(
+                        MongoAiBriefingRepository::new(connection.database()).await?,
+                    ),
+                    ai_jobs: Arc::new(MongoAiJobRepository::new(connection.database()).await?),
+                    candles: Arc::new(MongoCandleRepository::new(connection.database()).await?),
+                    research_events: Arc::new(
+                        MongoResearchEventRepository::new(connection.database()).await?,
+                    ),
+                    news_sources: Arc::new(
+                        MongoNewsSourceRepository::new(connection.database()).await?,
+                    ),
+                    news_items: Arc::new(
+                        MongoNewsItemRepository::new(connection.database()).await?,
+                    ),
+                    news_clusters: Arc::new(
+                        MongoNewsClusterRepository::new(connection.database()).await?,
+                    ),
+                    notification_outbox: Arc::new(
+                        MongoNotificationOutboxRepository::new(connection.database()).await?,
+                    ),
+                    notification_logs: Arc::new(
+                        MongoNotificationLogRepository::new(connection.database()).await?,
+                    ),
+                },
+                "mongodb".to_owned(),
+                Some(db_name),
+            ))
         }
         other => {
             Err(format!("TM_TRADING_STORE must be 'mongodb' or 'memory', got '{other}'").into())

@@ -12,7 +12,8 @@ use tm_trading_contracts::{
     NotificationOutboxSummaryDto, NotificationSummaryQueryDto, OperationActionDto,
     OperationResponse, ProviderDefinitionDto, ProviderInstanceDto, ReplaceWatchlistSymbolsRequest,
     ResearchEventDto, ResearchEventListDto, ResearchEventQueryDto, SendTestNotificationRequest,
-    SendTestNotificationResponse, ServiceSnapshot, UpdateProviderInstanceRequest, WatchlistDto,
+    SendTestNotificationResponse, ServiceSnapshot, SupportBundleDto, SystemDiagnosticsDto,
+    UpdateProviderInstanceRequest, WatchlistDto,
 };
 
 /// Typed client for the versioned Management API contract.
@@ -58,6 +59,36 @@ impl ManagementApiClient {
         let response = self
             .http
             .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn system_diagnostics(&self) -> Result<SystemDiagnosticsDto, ApiClientError> {
+        let path = "/api/v1/system/diagnostics";
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn create_support_bundle(&self) -> Result<SupportBundleDto, ApiClientError> {
+        let path = "/api/v1/system/support-bundle";
+        let response = self
+            .http
+            .post(format!("{}{path}", self.base_url))
             .bearer_auth(&self.token)
             .send()
             .await
