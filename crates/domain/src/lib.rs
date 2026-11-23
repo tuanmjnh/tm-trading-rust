@@ -3,8 +3,10 @@ mod ai_job;
 mod ai_model;
 mod ai_provider;
 mod ai_task;
+mod alert_rules;
 mod candle;
 mod lifecycle;
+mod market_intel;
 mod news;
 mod news_cluster;
 mod news_item;
@@ -38,8 +40,15 @@ pub use ai_task::{
     MAX_AI_TASK_MAX_ATTEMPTS, MAX_AI_TASK_OUTPUT_TOKENS, MIN_AI_TASK_CONCURRENCY,
     MIN_AI_TASK_MAX_ATTEMPTS, MIN_AI_TASK_OUTPUT_TOKENS, NewAiTaskRoute, StoredAiTaskRoute,
 };
+pub use alert_rules::{
+    AlertRule, AlertRuleKind, build_funding_alert, build_liquidation_alert, build_research_alert,
+};
 pub use candle::{CANDLE_SCHEMA_VERSION, Candle, CandleError, NewCandle, candle_id};
 pub use lifecycle::{DesiredState, ObservedState, Readiness};
+pub use market_intel::{
+    DEFAULT_FUNDING_ALERT_RATE, DEFAULT_LEVERAGE_BANDS, DEFAULT_MMR, FundingRateRecord,
+    LeverageBand, LiquidationSide, LiquidationZone, estimate_liquidation_zones, evaluate_funding,
+};
 pub use news::{
     DEFAULT_NEWS_POLL_INTERVAL_SEC, DEFAULT_NEWS_RETENTION_DAYS, MAX_NEWS_RETENTION_DAYS,
     NEWS_SOURCE_SCHEMA_VERSION, NewNewsSource, NewsHealthState, NewsLicenseGate, NewsLicenseStatus,

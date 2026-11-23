@@ -7,7 +7,10 @@
 mod binance;
 mod okx;
 
-pub use binance::{BINANCE_SPOT_BASE_URL, BinanceProvider};
+pub use binance::{
+    BINANCE_FUTURES_BASE_URL, BINANCE_SPOT_BASE_URL, BinanceProvider, fetch_open_interest,
+    fetch_premium_index,
+};
 pub use okx::{OKX_BASE_URL, OkxProvider};
 
 use std::time::Duration;
@@ -95,7 +98,10 @@ pub fn validate_provider_url(definition_id: &str, base_url: &str) -> Result<(), 
     }
     let loopback = is_loopback_host(host);
     let allowed = match definition_id {
-        "binance" => host.eq_ignore_ascii_case("api.binance.com"),
+        "binance" => {
+            host.eq_ignore_ascii_case("api.binance.com")
+                || host.eq_ignore_ascii_case("fapi.binance.com")
+        }
         "okx" => host.eq_ignore_ascii_case("www.okx.com"),
         _ => false,
     };

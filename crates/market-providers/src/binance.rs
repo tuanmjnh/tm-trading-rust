@@ -2,13 +2,14 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tm_trading_domain::{Candle, NewCandle};
+use tm_trading_domain::{Candle, FundingRateRecord, NewCandle};
 
 use crate::{
     MarketDataProvider, ProviderError, ProviderHealth, ProviderId, http_client, request_error,
 };
 
 pub const BINANCE_SPOT_BASE_URL: &str = "https://api.binance.com";
+pub const BINANCE_FUTURES_BASE_URL: &str = "https://fapi.binance.com";
 
 const PROVIDER: &str = "binance";
 const MARKET: &str = "spot";
@@ -184,6 +185,115 @@ fn unreadable(what: &'static str) -> ProviderError {
         provider: PROVIDER,
         what,
     }
+}
+
+/// Fetches all funding rates, mark prices, and next funding times from Binance Futures (`/fapi/v1/premiumIndex`).
+pub async fn fetch_premium_index(
+    http: &reqwest::Client,
+    base_url: &str,
+) -> Result<Vec<FundingRateRecord>, ProviderError> {
+    let url = format!("{}/fapi/v1/premiumIndex", base_url.trim_end_matches('/'));
+    let response = http
+        .get(&url)
+        .send()
+        .await
+        .map_err(|error| request_error(PROVIDER, error))?;
+
+    if !response.status().is_success() {
+        return Err(ProviderError::Status {
+            provider: PROVIDER,
+            status: response.status().as_u16(),
+        });
+    }
+
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|error| ProviderError::Payload {
+            provider: PROVIDER,
+            what: if error.is_decode() {
+                "invalid JSON"
+            } else {
+                "unreadable body"
+            },
+        })?;
+
+    let items = payload.as_array().ok_or(ProviderError::Payload {
+        provider: PROVIDER,
+        what: "expected JSON array of premiumIndex records",
+    })?;
+
+    let mut records = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(symbol) = item.get("symbol").and_then(Value::as_str) else {
+            continue;
+        };
+        let rate: f64 = item
+            .get("lastFundingRate")
+            .and_then(Value::as_str)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+        let next_funding_time: i64 = item
+            .get("nextFundingTime")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let price: f64 = item
+            .get("markPrice")
+            .and_then(Value::as_str)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+
+        if price > 0.0 {
+            records.push(FundingRateRecord::new(
+                symbol,
+                rate,
+                next_funding_time,
+                price,
+                None,
+                None,
+            ));
+        }
+    }
+
+    Ok(records)
+}
+
+/// Fetches current open interest contracts from Binance Futures (`/fapi/v1/openInterest`).
+pub async fn fetch_open_interest(
+    http: &reqwest::Client,
+    base_url: &str,
+    symbol: &str,
+) -> Result<Option<f64>, ProviderError> {
+    let url = format!("{}/fapi/v1/openInterest", base_url.trim_end_matches('/'));
+    let response = http
+        .get(&url)
+        .query(&[("symbol", symbol)])
+        .send()
+        .await
+        .map_err(|error| request_error(PROVIDER, error))?;
+
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|error| ProviderError::Payload {
+            provider: PROVIDER,
+            what: if error.is_decode() {
+                "invalid JSON"
+            } else {
+                "unreadable body"
+            },
+        })?;
+
+    let oi = payload
+        .get("openInterest")
+        .and_then(Value::as_str)
+        .and_then(|s| s.parse().ok());
+
+    Ok(oi)
 }
 
 #[cfg(test)]

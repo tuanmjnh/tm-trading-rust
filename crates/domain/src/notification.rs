@@ -2,6 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Schema version for outbox queue documents.
@@ -56,7 +57,7 @@ pub enum NotificationError {
 }
 
 /// Destination delivery channel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NotificationChannel {
     Telegram,
     WebPush,
@@ -94,7 +95,7 @@ impl FromStr for NotificationChannel {
 }
 
 /// Severity ladder for notifications.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum NotificationPriority {
     Info,
     Normal,
