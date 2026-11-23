@@ -516,6 +516,124 @@ Briefings are stored in `ai_briefings` with camelCase fields and the `{ ownerSco
 - A missing or invalid bearer credential is rejected with `401`; an Agent credential used on a user endpoint, or a user credential used on an Agent endpoint, is rejected with `403`. An operation without an `Idempotency-Key` header is rejected with `400`.
 - The service read model is rebuilt from Agent heartbeats. When no Agent heartbeat has been received, the service list is empty rather than assumed healthy.
 
+## System Diagnostics & Redacted Support Bundle
+
+Phase 9 introduces standardized diagnostic and support bundle endpoints to inspect host health and securely export diagnostic evidence without disclosing secrets.
+
+### Inspect Diagnostics
+
+```powershell
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/system/diagnostics"
+```
+
+- Requires `trading.service.read` capability.
+- Returns host OS, CPU architecture, server version, service uptime, storage engine (`redb` / `postgres` / `memory`), worker heartbeat snapshots, and notification queue statistics.
+- Secrets (tokens, keys, user credentials) are unconditionally stripped from all diagnostics structures.
+
+### Generate Support Bundle
+
+```powershell
+curl -X POST `
+  -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/system/support-bundle"
+```
+
+- Returns a timestamped `bundle_<uuid>` containing a full system diagnostics snapshot, active worker states, and redaction confirmation statement suitable for sharing with engineers or support tickets.
+- Also available as a one-click button in the Desktop Control Center -> System Diagnostics panel.
+
+---
+
+## Configuration Backup & Restore Tooling
+
+Configurations (watchlists, AI provider profiles, and AI task routes) can be exported, verified, and restored with cryptographic SHA-256 integrity checks.
+
+### Export Configuration Backup
+
+```powershell
+curl -X POST `
+  -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/system/backup/export" > backup.json
+```
+
+- Creates a portable JSON backup archive containing:
+  - `version`: API and contract metadata.
+  - `exported_at`: UTC export timestamp.
+  - `sha256_checksum`: SHA-256 hash computed over the canonical serialized payload.
+  - `payload`: Watchlists, AI task routes, and sanitized provider profiles (API keys omitted).
+
+### Verify Backup Archive Integrity
+
+```powershell
+curl -X POST `
+  -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  -H "Content-Type: application/json" `
+  --data @backup.json `
+  "http://127.0.0.1:8787/api/v1/system/backup/verify"
+```
+
+- Verifies SHA-256 checksum against payload data without applying any modifications.
+- Returns `{ "checksum_verified": true, ... }` if valid, or `{ "checksum_verified": false }` if altered or corrupted.
+
+### Restore Configuration Backup
+
+```powershell
+# Restore with merge (overwrite_existing: false):
+curl -X POST `
+  -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  -H "Content-Type: application/json" `
+  --data '{"archive": <archive_json_object>, "overwrite_existing": false}' `
+  "http://127.0.0.1:8787/api/v1/system/backup/restore"
+```
+
+- Requires `trading.service.control` capability.
+- Validates the SHA-256 checksum first. A checksum mismatch returns `400 Bad Request` and aborts immediately without touching storage.
+- Safely upserts watchlists and AI task routes into the database. Existing secret credentials on the target host are protected.
+
+---
+
+## Notification Outbox, Delivery Auditing & Test Ping
+
+### Inspect Notification Outbox
+
+```powershell
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/notifications/outbox?state=queued&limit=20"
+```
+
+### Review Delivery Audit Logs
+
+```powershell
+curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  "http://127.0.0.1:8787/api/v1/notifications/logs?limit=20"
+```
+
+### Send Manual Diagnostic Notification Ping
+
+```powershell
+curl -X POST `
+  -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
+  -H "Content-Type: application/json" `
+  --data '{"message": "Diagnostic test ping from operations runbook"}' `
+  "http://127.0.0.1:8787/api/v1/notifications/test"
+```
+
+---
+
+## Windows Desktop Release Packaging
+
+To build and package the production Windows x64 release distribution:
+
+```powershell
+.\scripts\package-desktop-windows.ps1
+```
+
+1. Compiles release binaries with `cargo build --workspace --release`.
+2. Packages `tm-trading-desktop.exe`, `tm-trading-management-api.exe`, `tm-trading-agent.exe`, and all worker processes into `dist/tm-trading-desktop-windows-x64-v<version>.zip`.
+3. Verifies the SHA-256 checksum file: `dist/tm-trading-desktop-windows-x64-v<version>.zip.sha256`.
+
+See [`docs/deployment/desktop-windows.md`](../deployment/desktop-windows.md) for full deployment details.
+
 ## Rollback
 
 This slice adds new executables only. Rollback is to stop the Agent, remove the new Agent/sample-worker/Management API/Desktop artifacts, and roll back the corresponding Git commit. It does not modify legacy services, MongoDB collections, indexes, or documents.

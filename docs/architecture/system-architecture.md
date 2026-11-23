@@ -316,6 +316,11 @@ The Agent now captures heartbeat timestamps, bounded log tails, exit codes, rest
 - [x] Implement the supervised `tm-trading-notification-worker` runtime with atomic lease-based queue claiming and heartbeats.
 - [x] Serve notification outbox, summary, log audit, and test ping endpoints via Management API and integrate the Desktop Notification Center panel.
 - [x] Add secret-redacted system diagnostics and support bundle creation endpoints at `GET /api/v1/system/diagnostics` and `POST /api/v1/system/support-bundle` for Phase 9 release hardening.
+- [x] Add Microsoft Edge WebView2 runtime detection and pre-flight verification on Windows hosts (`apps/desktop/src/webview2_check.rs`).
+- [x] Integrate System & Runtime Diagnostics panel into Desktop Control Center with bilingual EN/VI strings.
+- [x] Build configuration backup and restore tooling with SHA-256 cryptographic checksums, tamper protection, and merge/overwrite options (`/api/v1/system/backup/export`, `verify`, `restore`).
+- [x] Create automated PowerShell Windows release packaging tool (`scripts/package-desktop-windows.ps1`) producing standalone `.zip` distribution with `.sha256` checksums.
+- [x] Publish comprehensive Windows deployment guide (`docs/deployment/desktop-windows.md`) and operational runbooks for diagnostics, backups, and packaging (`docs/operations/runbooks.md`).
 - [x] Run Windows crash, restart, readiness, and graceful-shutdown drills.
 
 ## 9. Verification
