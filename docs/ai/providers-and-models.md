@@ -219,7 +219,8 @@ state.
 
 A queued job that passes its expiry becomes `EXPIRED`. A claimed job whose lease lapses
 becomes `OUTCOME_UNKNOWN`, never `FAILED`: an unobserved provider call is not evidence of
-a failed or successful run.
+a failed or successful run. Worker claims and owner-scoped API job reads trigger expiry;
+MongoDB evaluates the expiry predicates with the database clock.
 
 The Management API is the owner-scoped request source:
 
@@ -256,7 +257,7 @@ jobs remain visible instead of being reported as successful.
 
 The AI Worker executable is a supervised process. It claims one durable job at a time,
 assembles owner-scoped evidence, runs the configured route, validates the model output,
-publishes the briefing, and only then completes the job.
+and asks storage to publish the briefing and complete the job in one MongoDB transaction.
 
 | Variable | Meaning |
 |---|---|

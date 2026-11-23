@@ -5,13 +5,14 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
-use tm_trading_domain::{AiJob, AiJobId};
+use tm_trading_domain::{AiBriefing, AiJob, AiJobId, AiJobStatus};
 
-use crate::{AiJobQuery, AiJobRepository, CreateAiJobOutcome, RepositoryError};
+use crate::{AiBriefingQuery, AiJobQuery, AiJobRepository, CreateAiJobOutcome, RepositoryError};
 
 #[derive(Default)]
 pub struct InMemoryAiJobRepository {
     jobs: Mutex<HashMap<AiJobId, AiJob>>,
+    briefings: Mutex<HashMap<String, AiBriefing>>,
 }
 
 impl InMemoryAiJobRepository {
@@ -22,6 +23,47 @@ impl InMemoryAiJobRepository {
 
     fn state(&self) -> Result<std::sync::MutexGuard<'_, HashMap<AiJobId, AiJob>>, RepositoryError> {
         self.jobs.lock().map_err(|_| RepositoryError::LockPoisoned)
+    }
+
+    pub async fn get_briefing(
+        &self,
+        owner_scope: &str,
+        briefing_id: &str,
+    ) -> Result<Option<AiBriefing>, RepositoryError> {
+        let stored = self
+            .briefings
+            .lock()
+            .map_err(|_| RepositoryError::LockPoisoned)?;
+        Ok(stored
+            .get(briefing_id)
+            .filter(|briefing| briefing.owner_scope() == owner_scope)
+            .cloned())
+    }
+
+    pub async fn list_briefings(
+        &self,
+        query: &AiBriefingQuery,
+    ) -> Result<Vec<AiBriefing>, RepositoryError> {
+        let stored = self
+            .briefings
+            .lock()
+            .map_err(|_| RepositoryError::LockPoisoned)?;
+        let mut briefings = stored
+            .values()
+            .filter(|briefing| {
+                briefing.owner_scope() == query.owner_scope
+                    && query.task.is_none_or(|task| briefing.task() == task)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        briefings.sort_by(|left, right| {
+            right
+                .generated_at()
+                .cmp(&left.generated_at())
+                .then_with(|| right.id().cmp(left.id()))
+        });
+        briefings.truncate(query.limit);
+        Ok(briefings)
     }
 }
 
@@ -105,20 +147,63 @@ impl AiJobRepository for InMemoryAiJobRepository {
         Ok(Some(job.clone()))
     }
 
-    async fn complete(
+    async fn complete_with_briefing(
         &self,
         job_id: &AiJobId,
         worker_id: &str,
         fencing_token: u64,
-        briefing_id: &str,
+        briefing: &AiBriefing,
         now: DateTime<Utc>,
     ) -> Result<AiJob, RepositoryError> {
-        let mut state = self.state()?;
-        let job = state
-            .get_mut(job_id)
+        let mut jobs = self.state()?;
+        let mut briefings = self
+            .briefings
+            .lock()
+            .map_err(|_| RepositoryError::LockPoisoned)?;
+        let mut completed = jobs
+            .get(job_id)
+            .cloned()
             .ok_or(RepositoryError::AiJobNotFound)?;
-        job.complete(worker_id, fencing_token, briefing_id.to_owned(), now)?;
-        Ok(job.clone())
+        if completed.owner_scope() != briefing.owner_scope() || completed.task() != briefing.task()
+        {
+            return Err(RepositoryError::AiBriefingMismatch);
+        }
+        match completed.status() {
+            AiJobStatus::OutcomeUnknown => return Ok(completed),
+            AiJobStatus::Succeeded => {
+                return if completed.briefing_id() == Some(briefing.id()) {
+                    Ok(completed)
+                } else {
+                    Err(RepositoryError::AiBriefingConflict)
+                };
+            }
+            AiJobStatus::Claimed => {}
+            _ => {
+                return Err(RepositoryError::AiJob(
+                    tm_trading_domain::AiJobError::InvalidTransition,
+                ));
+            }
+        }
+        match completed.complete(worker_id, fencing_token, briefing.id().to_owned(), now) {
+            Ok(()) => {}
+            Err(tm_trading_domain::AiJobError::LeaseLapsed) => {
+                completed.mark_outcome_unknown("lease_lapsed".to_owned(), now)?;
+                jobs.insert(completed.id(), completed.clone());
+                return Ok(completed);
+            }
+            Err(error) => return Err(error.into()),
+        }
+        match briefings.get(briefing.id()) {
+            Some(existing) if existing != briefing => {
+                return Err(RepositoryError::AiBriefingConflict);
+            }
+            Some(_) => {}
+            None => {
+                briefings.insert(briefing.id().to_owned(), briefing.clone());
+            }
+        }
+        jobs.insert(completed.id(), completed.clone());
+        Ok(completed)
     }
 
     async fn fail(
@@ -131,11 +216,19 @@ impl AiJobRepository for InMemoryAiJobRepository {
         now: DateTime<Utc>,
     ) -> Result<AiJob, RepositoryError> {
         let mut state = self.state()?;
-        let job = state
-            .get_mut(job_id)
+        let mut job = state
+            .get(job_id)
+            .cloned()
             .ok_or(RepositoryError::AiJobNotFound)?;
-        job.fail(worker_id, fencing_token, error_code, redacted_error, now)?;
-        Ok(job.clone())
+        match job.fail(worker_id, fencing_token, error_code, redacted_error, now) {
+            Ok(()) => {}
+            Err(tm_trading_domain::AiJobError::LeaseLapsed) => {
+                job.mark_outcome_unknown("lease_lapsed".to_owned(), now)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        state.insert(job.id(), job.clone());
+        Ok(job)
     }
 
     async fn expire_due(&self, now: DateTime<Utc>) -> Result<usize, RepositoryError> {
@@ -165,7 +258,10 @@ fn expire_due_locked(jobs: &mut HashMap<AiJobId, AiJob>, now: DateTime<Utc>) -> 
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
-    use tm_trading_domain::{AiJobStatus, AiTaskKind, NewAiJob};
+    use tm_trading_domain::{
+        AiBriefing, AiBriefingReference, AiBriefingReferenceKind, AiJobStatus, AiTaskKind,
+        NewAiBriefing, NewAiJob,
+    };
 
     use super::*;
 
@@ -193,6 +289,36 @@ mod tests {
             news_item_ids: Vec::new(),
             requested_at,
             expires_at,
+        })
+        .unwrap()
+    }
+
+    fn briefing() -> AiBriefing {
+        briefing_for("local-operator", AiTaskKind::ResearchExplanation)
+    }
+
+    fn briefing_for(owner_scope: &str, task: AiTaskKind) -> AiBriefing {
+        AiBriefing::new(NewAiBriefing {
+            owner_scope: owner_scope.to_owned(),
+            task,
+            provider_id: "primary".to_owned(),
+            model_registry_id: "primary-large".to_owned(),
+            model_id: "model-a".to_owned(),
+            prompt_version: "research-explanation.v1".to_owned(),
+            facts: vec!["Research fact".to_owned()],
+            interpretations: vec!["Momentum may be strengthening.".to_owned()],
+            uncertainties: Vec::new(),
+            input_snapshot_ids: vec!["rsnap1_0123456789abcdef".to_owned()],
+            references: vec![
+                AiBriefingReference::new(
+                    AiBriefingReferenceKind::ResearchEvent,
+                    "rev1_0123456789abcdef",
+                )
+                .unwrap(),
+            ],
+            missing_inputs: Vec::new(),
+            stale_inputs: Vec::new(),
+            generated_at: at(),
         })
         .unwrap()
     }
@@ -336,31 +462,48 @@ mod tests {
             .unwrap()
             .unwrap();
 
+        let briefing = briefing();
         assert!(matches!(
             repository
-                .complete(
+                .complete_with_briefing(
                     &claimed.id(),
                     "other-worker",
                     claimed.fencing_token(),
-                    "aibr1_0123456789abcdef",
+                    &briefing,
                     at()
                 )
                 .await,
             Err(RepositoryError::AiJob(_))
         ));
+        assert!(
+            repository
+                .get(&claimed.id())
+                .await
+                .unwrap()
+                .unwrap()
+                .briefing_id()
+                .is_none()
+        );
 
         let completed = repository
-            .complete(
+            .complete_with_briefing(
                 &claimed.id(),
                 "ai-worker",
                 claimed.fencing_token(),
-                "aibr1_0123456789abcdef",
+                &briefing,
                 at() + chrono::Duration::seconds(30),
             )
             .await
             .unwrap();
         assert_eq!(completed.status(), AiJobStatus::Succeeded);
-        assert_eq!(completed.briefing_id(), Some("aibr1_0123456789abcdef"));
+        assert_eq!(completed.briefing_id(), Some(briefing.id()));
+        assert_eq!(
+            repository
+                .get_briefing("local-operator", briefing.id())
+                .await
+                .unwrap(),
+            Some(briefing)
+        );
 
         let missing = repository
             .fail(
@@ -373,6 +516,142 @@ mod tests {
             )
             .await;
         assert!(matches!(missing, Err(RepositoryError::AiJobNotFound)));
+    }
+
+    #[tokio::test]
+    async fn a_briefing_that_does_not_match_its_job_cannot_complete_it() {
+        let repository = InMemoryAiJobRepository::new();
+        repository
+            .create(job(
+                "explain-1",
+                "hash-1",
+                at() + chrono::Duration::hours(1),
+            ))
+            .await
+            .unwrap();
+        let claimed = repository
+            .claim_next("ai-worker", at(), Duration::from_secs(300))
+            .await
+            .unwrap()
+            .unwrap();
+        for mismatched in [
+            briefing_for("other-operator", AiTaskKind::ResearchExplanation),
+            briefing_for("local-operator", AiTaskKind::NewsSummary),
+        ] {
+            let result = repository
+                .complete_with_briefing(
+                    &claimed.id(),
+                    "ai-worker",
+                    claimed.fencing_token(),
+                    &mismatched,
+                    at(),
+                )
+                .await;
+
+            assert!(matches!(result, Err(RepositoryError::AiBriefingMismatch)));
+            assert!(
+                repository
+                    .get_briefing(mismatched.owner_scope(), mismatched.id())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
+
+        let stored = repository.get(&claimed.id()).await.unwrap().unwrap();
+        assert_eq!(stored.status(), AiJobStatus::Claimed);
+        assert!(stored.briefing_id().is_none());
+    }
+
+    #[tokio::test]
+    async fn replaying_a_completed_publication_is_idempotent() {
+        let repository = InMemoryAiJobRepository::new();
+        repository
+            .create(job(
+                "explain-1",
+                "hash-1",
+                at() + chrono::Duration::hours(1),
+            ))
+            .await
+            .unwrap();
+        let claimed = repository
+            .claim_next("ai-worker", at(), Duration::from_secs(300))
+            .await
+            .unwrap()
+            .unwrap();
+        let briefing = briefing();
+        let completed = repository
+            .complete_with_briefing(
+                &claimed.id(),
+                "ai-worker",
+                claimed.fencing_token(),
+                &briefing,
+                at(),
+            )
+            .await
+            .unwrap();
+
+        let replayed = repository
+            .complete_with_briefing(
+                &claimed.id(),
+                "ai-worker",
+                claimed.fencing_token(),
+                &briefing,
+                at() + chrono::Duration::seconds(1),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(replayed, completed);
+        assert_eq!(replayed.status(), AiJobStatus::Succeeded);
+        assert_eq!(
+            repository
+                .get_briefing("local-operator", briefing.id())
+                .await
+                .unwrap(),
+            Some(briefing)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_expired_completion_is_unknown_and_publishes_nothing() {
+        let repository = InMemoryAiJobRepository::new();
+        repository
+            .create(job(
+                "explain-1",
+                "hash-1",
+                at() + chrono::Duration::hours(1),
+            ))
+            .await
+            .unwrap();
+        let claimed = repository
+            .claim_next("ai-worker", at(), Duration::from_secs(60))
+            .await
+            .unwrap()
+            .unwrap();
+        let briefing = briefing();
+
+        let completed = repository
+            .complete_with_briefing(
+                &claimed.id(),
+                "ai-worker",
+                claimed.fencing_token(),
+                &briefing,
+                at() + chrono::Duration::seconds(61),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(completed.status(), AiJobStatus::OutcomeUnknown);
+        assert_eq!(completed.error_code(), Some("lease_lapsed"));
+        assert!(completed.briefing_id().is_none());
+        assert!(
+            repository
+                .get_briefing("local-operator", briefing.id())
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]

@@ -18,18 +18,25 @@ pub struct MongoAiBriefingRepository {
 
 impl MongoAiBriefingRepository {
     pub async fn new(database: &Database) -> Result<Self, RepositoryError> {
-        let collection = database.collection::<Document>("ai_briefings");
-        let index = IndexModel::builder()
-            .keys(doc! { "ownerScope": 1, "generatedAt": -1 })
-            .options(
-                IndexOptions::builder()
-                    .name("ownerScope_generatedAt".to_owned())
-                    .build(),
-            )
-            .build();
-        collection.create_indexes(vec![index]).await?;
-        Ok(Self { collection })
+        ensure_indexes(database).await?;
+        Ok(Self {
+            collection: database.collection::<Document>("ai_briefings"),
+        })
     }
+}
+
+pub(crate) async fn ensure_indexes(database: &Database) -> Result<(), RepositoryError> {
+    let collection = database.collection::<Document>("ai_briefings");
+    let index = IndexModel::builder()
+        .keys(doc! { "ownerScope": 1, "generatedAt": -1 })
+        .options(
+            IndexOptions::builder()
+                .name("ownerScope_generatedAt".to_owned())
+                .build(),
+        )
+        .build();
+    collection.create_indexes(vec![index]).await?;
+    Ok(())
 }
 
 #[async_trait]
@@ -88,7 +95,7 @@ impl AiBriefingRepository for MongoAiBriefingRepository {
     }
 }
 
-fn fields(briefing: &AiBriefing) -> Result<Document, RepositoryError> {
+pub(crate) fn fields(briefing: &AiBriefing) -> Result<Document, RepositoryError> {
     let references: Vec<Bson> = briefing
         .references()
         .iter()

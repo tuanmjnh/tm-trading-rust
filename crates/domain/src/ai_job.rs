@@ -437,6 +437,24 @@ impl AiJob {
         Ok(())
     }
 
+    /// Validates the current lease holder and fencing token without consulting client time.
+    pub fn validate_lease_holder(
+        &self,
+        worker_id: &str,
+        fencing_token: u64,
+    ) -> Result<(), AiJobError> {
+        if self.status != AiJobStatus::Claimed {
+            return Err(AiJobError::InvalidTransition);
+        }
+        if self.lease_owner.as_deref() != Some(worker_id) {
+            return Err(AiJobError::NotLeaseHolder);
+        }
+        if self.fencing_token != fencing_token {
+            return Err(AiJobError::FencingMismatch);
+        }
+        Ok(())
+    }
+
     /// Records the briefing a claimed job produced.
     pub fn complete(
         &mut self,
@@ -501,15 +519,7 @@ impl AiJob {
         fencing_token: u64,
         now: DateTime<Utc>,
     ) -> Result<(), AiJobError> {
-        if self.status != AiJobStatus::Claimed {
-            return Err(AiJobError::InvalidTransition);
-        }
-        if self.lease_owner.as_deref() != Some(worker_id) {
-            return Err(AiJobError::NotLeaseHolder);
-        }
-        if self.fencing_token != fencing_token {
-            return Err(AiJobError::FencingMismatch);
-        }
+        self.validate_lease_holder(worker_id, fencing_token)?;
         if self.lease_expires_at.is_some_and(|expires| expires <= now) {
             return Err(AiJobError::LeaseLapsed);
         }
@@ -738,6 +748,23 @@ mod tests {
                 .unwrap_err(),
             AiJobError::EmptyField("workerId")
         );
+    }
+
+    #[test]
+    fn lease_holder_validation_does_not_trust_client_time() {
+        let mut job = AiJob::new(input()).unwrap();
+        let lease = at() + chrono::Duration::minutes(5);
+        job.claim("ai-worker", at(), lease).unwrap();
+
+        assert_eq!(
+            job.validate_lease_holder("other-worker", 1).unwrap_err(),
+            AiJobError::NotLeaseHolder
+        );
+        assert_eq!(
+            job.validate_lease_holder("ai-worker", 2).unwrap_err(),
+            AiJobError::FencingMismatch
+        );
+        assert_eq!(job.validate_lease_holder("ai-worker", 1), Ok(()));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //!
 //! The worker owns no scheduling of its own. It claims one durable job at a time,
 //! assembles owner-scoped evidence, runs the configured route, validates the model
-//! output, publishes the briefing, and only then completes the job.
+//! output, and atomically publishes the briefing while completing the job.
 
 use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
@@ -19,9 +19,9 @@ use tm_trading_ai_worker::{
 };
 use tm_trading_domain::AiTaskKind;
 use tm_trading_storage::{
-    MongoAiBriefingRepository, MongoAiJobRepository, MongoAiModelRepository,
-    MongoAiProviderProfileRepository, MongoAiTaskRouteRepository, MongoConnection,
-    MongoNewsItemRepository, MongoResearchEventRepository, RepositoryError,
+    MongoAiJobRepository, MongoAiModelRepository, MongoAiProviderProfileRepository,
+    MongoAiTaskRouteRepository, MongoConnection, MongoNewsItemRepository,
+    MongoResearchEventRepository, RepositoryError,
 };
 
 const DEFAULT_DATABASE_NAME: &str = "tm-trading-rust";
@@ -84,7 +84,6 @@ async fn run() -> Result<(), RunError> {
     let database = connection.database();
 
     let jobs = Arc::new(MongoAiJobRepository::new(database).await?);
-    let briefings = Arc::new(MongoAiBriefingRepository::new(database).await?);
     let research = Arc::new(MongoResearchEventRepository::new(database).await?);
     let news = Arc::new(MongoNewsItemRepository::new(database).await?);
     let routes = Arc::new(MongoAiTaskRouteRepository::new(database).await?);
@@ -101,7 +100,6 @@ async fn run() -> Result<(), RunError> {
     let assembler = BriefingEvidenceAssembler::new(research, news);
     let processor = AiJobProcessor::new(
         Arc::clone(&jobs) as Arc<dyn tm_trading_storage::AiJobRepository>,
-        Arc::clone(&briefings) as Arc<dyn tm_trading_storage::AiBriefingRepository>,
         assembler,
         executor,
         tm_trading_ai_worker::DEFAULT_EVIDENCE_MAX_AGE,

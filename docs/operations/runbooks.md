@@ -378,7 +378,7 @@ Expected result:
 - `GET /api/v1/services` lists `ai-worker` alongside the other enabled workers;
 - `ai-worker` becomes `READY` only after the route, provider, model, and credential resolve;
 - a request from the Desktop or `POST /api/v1/ai/jobs` moves from `QUEUED` to `CLAIMED` and then to a terminal status;
-- a successful job publishes its briefing before changing to `SUCCEEDED`, so the returned briefing ID is readable;
+- a successful job atomically publishes its briefing and changes to `SUCCEEDED`, so the returned briefing ID is readable;
 - a failed request records a sanitized error code and never publishes a partial briefing;
 - a lease that lapses during execution becomes `OUTCOME_UNKNOWN`, not `SUCCEEDED` or `FAILED`.
 
@@ -480,10 +480,11 @@ curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
 - Briefing reads require the exact `trading.ai.read` capability. Job reads use the same capability; queueing a job requires `trading.ai.write`. The Agent credential is rejected with `403`, and an anonymous request is `401`.
 - Each briefing response separates facts, model interpretations, and uncertainties and includes typed evidence references, input snapshot IDs, missing/stale disclosures, provider/model/prompt provenance, producer/schema stamps, and the UTC generation time.
 - A job request must name at least one valid research-event or news identifier and at most 50 combined inputs. Only `research_explanation` can be queued today. The owner scope is never accepted from the request body.
+- Job list and detail reads trigger due-job expiry, so a disabled AI Worker does not leave queued jobs permanently visible as runnable. MongoDB evaluates expiry and terminal lease predicates with the database clock.
 - A new job returns `201`; an identical replay returns `200` with the stored job. Reusing an idempotency key with a different request returns `409`. Without an explicit key, the request fingerprint is the replay key. The job carries the server-generated correlation ID used to follow the request through execution.
 - The Desktop AI Briefing panel keeps its own loading, empty, and error state and does not blank the Dashboard when this API call fails. It selects one owner-scoped research event, queues the request without an owner field, and shows the latest job through `QUEUED`, `CLAIMED`, `SUCCEEDED`, `FAILED`, `EXPIRED`, or `OUTCOME_UNKNOWN`. A successful job exposes its briefing in the panel. Its detail Slideover shows the complete evidence and provenance and ignores a late response for a briefing that is no longer selected.
 
-Briefings are stored in `ai_briefings` with camelCase fields and the `{ ownerScope, generatedAt }` read index. Publication is insert-once: replaying an identifier preserves the first published content. Jobs are stored in `ai_jobs`; one document is both the owner-scoped request and the work item the worker claims.
+Briefings are stored in `ai_briefings` with camelCase fields and the `{ ownerScope, generatedAt }` read index. Publication is insert-once: replaying an identifier preserves the first published content. Jobs are stored in `ai_jobs`; one document is both the owner-scoped request and the work item the worker claims. The MongoDB repository publishes a briefing and completes its job in one transaction, so a successful job always has a readable briefing and a conflicting publication cannot complete the job.
 
 ## Logs and status
 

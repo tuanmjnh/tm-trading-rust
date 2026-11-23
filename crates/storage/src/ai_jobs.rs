@@ -3,7 +3,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
-use tm_trading_domain::{AiJob, AiJobId, AiTaskKind};
+use tm_trading_domain::{AiBriefing, AiJob, AiJobId, AiTaskKind};
 
 use crate::RepositoryError;
 
@@ -57,12 +57,13 @@ pub trait AiJobRepository: Send + Sync {
         lease_duration: Duration,
     ) -> Result<Option<AiJob>, RepositoryError>;
 
-    async fn complete(
+    /// Publishes a briefing and completes its job as one durable transition.
+    async fn complete_with_briefing(
         &self,
         job_id: &AiJobId,
         worker_id: &str,
         fencing_token: u64,
-        briefing_id: &str,
+        briefing: &AiBriefing,
         now: DateTime<Utc>,
     ) -> Result<AiJob, RepositoryError>;
 

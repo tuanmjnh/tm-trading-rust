@@ -1,15 +1,15 @@
 //! Claims one durable AI job, generates a briefing from owner-scoped evidence, and publishes it.
 //!
-//! A job is completed only after its briefing is stored. A lease that lapses before
-//! completion leaves the job unknown instead of reporting a success that was not observed.
+//! Briefing publication and job completion are one durable transition. A lease that
+//! lapses before completion leaves the job unknown instead of reporting an unobserved success.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use tm_trading_domain::{AiBriefing, AiJob, AiJobId, AiTaskKind};
-use tm_trading_storage::{AiBriefingRepository, AiJobRepository, RepositoryError};
+use tm_trading_domain::{AiBriefing, AiJob, AiJobId, AiJobStatus, AiTaskKind};
+use tm_trading_storage::{AiJobRepository, RepositoryError};
 
 use crate::evidence::{
     BriefingEvidenceAssembler, BriefingEvidenceRequest, EvidenceError,
@@ -54,7 +54,6 @@ pub enum AiJobOutcome {
 #[derive(Clone)]
 pub struct AiJobProcessor {
     jobs: Arc<dyn AiJobRepository>,
-    briefings: Arc<dyn AiBriefingRepository>,
     assembler: BriefingEvidenceAssembler,
     executor: AiRouteExecutor,
     evidence_max_age: Duration,
@@ -65,14 +64,12 @@ impl AiJobProcessor {
     #[must_use]
     pub fn new(
         jobs: Arc<dyn AiJobRepository>,
-        briefings: Arc<dyn AiBriefingRepository>,
         assembler: BriefingEvidenceAssembler,
         executor: AiRouteExecutor,
         evidence_max_age: Duration,
     ) -> Self {
         Self::new_with_clock(
             jobs,
-            briefings,
             assembler,
             executor,
             evidence_max_age,
@@ -82,7 +79,6 @@ impl AiJobProcessor {
 
     fn new_with_clock(
         jobs: Arc<dyn AiJobRepository>,
-        briefings: Arc<dyn AiBriefingRepository>,
         assembler: BriefingEvidenceAssembler,
         executor: AiRouteExecutor,
         evidence_max_age: Duration,
@@ -90,7 +86,6 @@ impl AiJobProcessor {
     ) -> Self {
         Self {
             jobs,
-            briefings,
             assembler,
             executor,
             evidence_max_age,
@@ -116,15 +111,11 @@ impl AiJobProcessor {
 
         let prepared = self.prepare(&job, now).await;
         let transition_at = self.clock.now();
-        if job.lease_lapsed_at(transition_at) {
-            self.jobs.expire_due(transition_at).await?;
-            return Ok(AiJobOutcome::OutcomeUnknown { job_id });
-        }
-
         let briefing = match prepared {
             Ok(briefing) => briefing,
             Err(error_code) => {
-                self.jobs
+                let failed = self
+                    .jobs
                     .fail(
                         &job_id,
                         worker_id,
@@ -134,51 +125,52 @@ impl AiJobProcessor {
                         transition_at,
                     )
                     .await?;
-                return Ok(AiJobOutcome::Failed { job_id, error_code });
+                return if failed.status() == AiJobStatus::OutcomeUnknown {
+                    Ok(AiJobOutcome::OutcomeUnknown { job_id })
+                } else {
+                    Ok(AiJobOutcome::Failed { job_id, error_code })
+                };
             }
         };
 
-        if self.briefings.upsert(&briefing).await.is_err() {
-            let failed_at = self.clock.now();
-            if job.lease_lapsed_at(failed_at) {
-                self.jobs.expire_due(failed_at).await?;
-                return Ok(AiJobOutcome::OutcomeUnknown { job_id });
+        let completed = match self
+            .jobs
+            .complete_with_briefing(&job_id, worker_id, fencing_token, &briefing, transition_at)
+            .await
+        {
+            Ok(completed) => completed,
+            Err(RepositoryError::AiBriefingConflict | RepositoryError::AiBriefingMismatch) => {
+                let failed_at = self.clock.now();
+                let failed = self
+                    .jobs
+                    .fail(
+                        &job_id,
+                        worker_id,
+                        fencing_token,
+                        "publish_failed".to_owned(),
+                        None,
+                        failed_at,
+                    )
+                    .await?;
+                return if failed.status() == AiJobStatus::OutcomeUnknown {
+                    Ok(AiJobOutcome::OutcomeUnknown { job_id })
+                } else {
+                    Ok(AiJobOutcome::Failed {
+                        job_id,
+                        error_code: "publish_failed",
+                    })
+                };
             }
-            self.jobs
-                .fail(
-                    &job_id,
-                    worker_id,
-                    fencing_token,
-                    "publish_failed".to_owned(),
-                    None,
-                    failed_at,
-                )
-                .await?;
-            return Ok(AiJobOutcome::Failed {
+            Err(error) => return Err(error),
+        };
+        match completed.status() {
+            AiJobStatus::Succeeded => Ok(AiJobOutcome::Published {
                 job_id,
-                error_code: "publish_failed",
-            });
+                briefing_id: briefing.id().to_owned(),
+            }),
+            AiJobStatus::OutcomeUnknown => Ok(AiJobOutcome::OutcomeUnknown { job_id }),
+            _ => Err(RepositoryError::ConcurrentModification),
         }
-
-        let completed_at = self.clock.now();
-        if job.lease_lapsed_at(completed_at) {
-            self.jobs.expire_due(completed_at).await?;
-            return Ok(AiJobOutcome::OutcomeUnknown { job_id });
-        }
-        let briefing_id = briefing.id().to_owned();
-        self.jobs
-            .complete(
-                &job_id,
-                worker_id,
-                fencing_token,
-                &briefing_id,
-                completed_at,
-            )
-            .await?;
-        Ok(AiJobOutcome::Published {
-            job_id,
-            briefing_id,
-        })
     }
 
     /// Runs evidence assembly, generation, and validation for a claimed job.
@@ -261,9 +253,8 @@ mod tests {
     };
     use tm_trading_storage::{
         AiBriefingQuery, AiModelRepository, AiProviderProfileRepository, AiTaskRouteRepository,
-        InMemoryAiBriefingRepository, InMemoryAiJobRepository, InMemoryAiModelRepository,
-        InMemoryAiProviderProfileRepository, InMemoryAiTaskRouteRepository,
-        InMemoryResearchEventRepository, ResearchEventRepository,
+        InMemoryAiJobRepository, InMemoryAiModelRepository, InMemoryAiProviderProfileRepository,
+        InMemoryAiTaskRouteRepository, InMemoryResearchEventRepository, ResearchEventRepository,
     };
 
     use crate::AiProviderResolver;
@@ -415,7 +406,7 @@ mod tests {
     struct Harness {
         processor: AiJobProcessor,
         jobs: Arc<InMemoryAiJobRepository>,
-        briefings: Arc<InMemoryAiBriefingRepository>,
+        briefings: Arc<InMemoryAiJobRepository>,
         provider: Arc<MockProvider>,
     }
 
@@ -457,10 +448,9 @@ mod tests {
         );
 
         let jobs = Arc::new(InMemoryAiJobRepository::new());
-        let briefings = Arc::new(InMemoryAiBriefingRepository::new());
+        let briefings = Arc::clone(&jobs);
         let processor = AiJobProcessor::new_with_clock(
             Arc::clone(&jobs) as Arc<dyn tm_trading_storage::AiJobRepository>,
-            Arc::clone(&briefings) as Arc<dyn tm_trading_storage::AiBriefingRepository>,
             assembler,
             executor,
             crate::evidence::DEFAULT_EVIDENCE_MAX_AGE,
@@ -518,7 +508,7 @@ mod tests {
 
         let stored = harness
             .briefings
-            .get("local-operator", &briefing_id)
+            .get_briefing("local-operator", &briefing_id)
             .await
             .unwrap()
             .unwrap();
@@ -567,7 +557,7 @@ mod tests {
         assert!(
             harness
                 .briefings
-                .list(&AiBriefingQuery {
+                .list_briefings(&AiBriefingQuery {
                     owner_scope: "local-operator".to_owned(),
                     task: None,
                     limit: 10,
@@ -604,7 +594,7 @@ mod tests {
         assert!(
             harness
                 .briefings
-                .list(&AiBriefingQuery {
+                .list_briefings(&AiBriefingQuery {
                     owner_scope: "local-operator".to_owned(),
                     task: None,
                     limit: 10,

@@ -267,7 +267,7 @@ The readiness probe resolves the provider and its credential but never calls the
 
 ### Claim and publish path
 
-The worker claims at most one job per tick, oldest first. A claim takes a bounded lease and increments the fencing token; completion and failure require the current lease holder and token. The worker assembles owner-scoped evidence, runs the configured route with the route's attempt, timeout, and output budgets, validates that the model returned only interpretations and uncertainties, stores the briefing, and only then completes the job. A request with no usable evidence fails before any provider call. A job whose lease lapses before completion stays `OUTCOME_UNKNOWN`; the worker never reports an unobserved run as successful.
+The worker claims at most one job per tick, oldest first. A claim takes a bounded lease and increments the fencing token; completion and failure require the current lease holder and token. The worker assembles owner-scoped evidence, runs the configured route with the route's attempt, timeout, and output budgets, validates that the model returned only interpretations and uncertainties, then atomically publishes the briefing and completes the job in one MongoDB transaction. A request with no usable evidence fails before any provider call. A job whose lease lapses before completion stays `OUTCOME_UNKNOWN`; the worker never reports an unobserved run as successful.
 
 ### Current limitations
 

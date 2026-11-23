@@ -474,6 +474,8 @@ pub enum RepositoryError {
     AiTaskRouteNotFound,
     #[error("ai briefing identifier already contains different content")]
     AiBriefingConflict,
+    #[error("ai briefing does not match its job")]
+    AiBriefingMismatch,
     #[error("ai job was not found")]
     AiJobNotFound,
     #[error(transparent)]
