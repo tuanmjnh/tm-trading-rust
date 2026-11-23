@@ -34,7 +34,9 @@ pub use backup::{
 };
 pub use error::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
 pub use market::{
-    MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
+    FundingRateDto, LiquidationZoneDto, MarketFundingDto, MarketLiquidationDto, MarketMoverDto,
+    MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto, TradingViewAlertPayload,
+    WebhookResponse,
 };
 pub use news::{
     NewsClusterDto, NewsClusterListDto, NewsClusterQueryDto, NewsDirectionDto, NewsFreshnessDto,

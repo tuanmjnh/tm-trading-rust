@@ -18,7 +18,9 @@ use utoipa::OpenApi;
 
 use crate::error::ApiErrorResponse;
 use crate::market::{
-    MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
+    FundingRateDto, LiquidationZoneDto, MarketFundingDto, MarketLiquidationDto, MarketMoverDto,
+    MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto, TradingViewAlertPayload,
+    WebhookResponse,
 };
 use crate::news::{
     NewsClusterDto, NewsClusterListDto, NewsClusterQueryDto, NewsDirectionDto, NewsFreshnessDto,
@@ -159,6 +161,12 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         MarketOverviewDto,
         MarketMoverDto,
         MarketPulseDto,
+        FundingRateDto,
+        MarketFundingDto,
+        LiquidationZoneDto,
+        MarketLiquidationDto,
+        TradingViewAlertPayload,
+        WebhookResponse,
         ResearchEventDto,
         ResearchEventListDto,
         ResearchEventQueryDto,

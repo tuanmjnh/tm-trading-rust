@@ -62,3 +62,70 @@ pub struct MarketPulseDto {
     pub stale_after_seconds: i64,
     pub movers: Vec<MarketMoverDto>,
 }
+
+/// Funding rate record for one symbol.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct FundingRateDto {
+    pub symbol: String,
+    pub rate: f64,
+    pub pct: f64,
+    pub next_funding_time: i64,
+    pub price: f64,
+    pub oi_contracts: Option<f64>,
+    pub oi_notional_usd: Option<f64>,
+    pub score: f64,
+}
+
+/// Market funding rates response including snapshot and extreme funding rates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MarketFundingDto {
+    pub generated_at: DateTime<Utc>,
+    pub threshold: f64,
+    pub snapshot: Vec<FundingRateDto>,
+    pub extremes: Vec<FundingRateDto>,
+}
+
+/// One liquidation price zone.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct LiquidationZoneDto {
+    pub lev: f64,
+    pub w: f64,
+    pub side: String,
+    pub price: f64,
+    pub pct: f64,
+    pub usd: f64,
+}
+
+/// Estimated liquidation zones for a symbol.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MarketLiquidationDto {
+    pub generated_at: DateTime<Utc>,
+    pub symbol: String,
+    pub mark_price: f64,
+    pub open_interest_usd: f64,
+    pub zones: Vec<LiquidationZoneDto>,
+}
+
+/// Inbound TradingView webhook payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct TradingViewAlertPayload {
+    pub v: u32,
+    pub action: String,
+    pub side: String,
+    pub price: f64,
+    pub sl: f64,
+    pub tps: Vec<f64>,
+    pub ts: String,
+    pub symbol: String,
+    pub timeframe: Option<String>,
+    pub strategy: Option<String>,
+}
+
+/// Webhook intake acknowledgement response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WebhookResponse {
+    pub ok: bool,
+    pub deduplicated: bool,
+    pub notify_id: Option<String>,
+    pub error: Option<String>,
+}

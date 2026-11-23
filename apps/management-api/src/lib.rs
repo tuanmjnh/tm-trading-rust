@@ -12,6 +12,7 @@ mod research;
 mod routes;
 mod state;
 mod system;
+mod webhook;
 
 use axum::Router;
 use axum::routing::{get, post};
@@ -93,6 +94,20 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/market/overview", get(market::market_overview))
         .route("/api/v1/market/pulse", get(market::market_pulse))
+        .route("/api/v1/market/funding", get(market::market_funding))
+        .route(
+            "/api/v1/market/liquidation",
+            get(market::market_liquidation),
+        )
+        .route(
+            "/api/v1/webhooks/tradingview",
+            post(webhook::handle_tradingview_webhook),
+        )
+        .route("/tm-alert", post(webhook::handle_tradingview_webhook))
+        .route(
+            "/tm-alert/{token}",
+            post(webhook::handle_tradingview_webhook_with_token),
+        )
         .route(
             "/api/v1/research/events",
             get(research::list_research_events),

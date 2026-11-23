@@ -3,10 +3,17 @@ use axum::extract::{Query, State};
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
 use tm_trading_contracts::{
-    MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
+    FundingRateDto, LiquidationZoneDto, MarketFundingDto, MarketLiquidationDto, MarketMoverDto,
+    MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,
 };
-use tm_trading_domain::{Candle, normalize_symbols};
-use tm_trading_market_providers::timeframe_millis;
+use tm_trading_domain::{
+    Candle, DEFAULT_FUNDING_ALERT_RATE, DEFAULT_LEVERAGE_BANDS, DEFAULT_MMR, FundingRateRecord,
+    NotificationChannel, NotificationPriority, build_funding_alert, estimate_liquidation_zones,
+    evaluate_funding, normalize_symbols,
+};
+use tm_trading_market_providers::{
+    BINANCE_FUTURES_BASE_URL, fetch_open_interest, fetch_premium_index, timeframe_millis,
+};
 
 use crate::auth::CAPABILITY_MARKET_READ;
 use crate::error::ApiError;
@@ -325,6 +332,133 @@ fn percent_change(from: f64, to: f64) -> Option<f64> {
 
 fn millis(value: i64) -> Option<DateTime<Utc>> {
     Utc.timestamp_millis_opt(value).single()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FundingQuery {
+    pub snapshot_n: Option<usize>,
+    pub max_extremes: Option<usize>,
+    pub threshold: Option<f64>,
+}
+
+pub async fn market_funding(
+    State(state): State<AppState>,
+    auth: crate::auth::AuthContext,
+    Query(query): Query<FundingQuery>,
+) -> Result<Json<MarketFundingDto>, ApiError> {
+    auth.require_capability(CAPABILITY_MARKET_READ)?;
+
+    let snapshot_n = query.snapshot_n.unwrap_or(15);
+    let max_extremes = query.max_extremes.unwrap_or(10);
+    let threshold = query.threshold.unwrap_or(DEFAULT_FUNDING_ALERT_RATE);
+
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let base_url = std::env::var("BINANCE_FUTURES_BASE_URL")
+        .unwrap_or_else(|_| BINANCE_FUTURES_BASE_URL.to_owned());
+
+    let raw_records = fetch_premium_index(&http, &base_url)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let (snapshot_records, extreme_records) =
+        evaluate_funding(&raw_records, snapshot_n, max_extremes, threshold);
+
+    let now = Utc::now();
+    for extreme in &extreme_records {
+        if let Ok(alert_item) = build_funding_alert(
+            extreme,
+            NotificationChannel::Telegram,
+            NotificationPriority::Important,
+            now,
+        ) {
+            let _ = state.notification_outbox.enqueue(alert_item).await;
+        }
+    }
+
+    let to_dto = |r: FundingRateRecord| FundingRateDto {
+        symbol: r.symbol,
+        rate: r.rate,
+        pct: r.pct,
+        next_funding_time: r.next_funding_time,
+        price: r.price,
+        oi_contracts: r.oi_contracts,
+        oi_notional_usd: r.oi_notional_usd,
+        score: r.score,
+    };
+
+    Ok(Json(MarketFundingDto {
+        generated_at: now,
+        threshold,
+        snapshot: snapshot_records.into_iter().map(to_dto).collect(),
+        extremes: extreme_records.into_iter().map(to_dto).collect(),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LiquidationQuery {
+    pub symbol: Option<String>,
+}
+
+pub async fn market_liquidation(
+    State(_state): State<AppState>,
+    auth: crate::auth::AuthContext,
+    Query(query): Query<LiquidationQuery>,
+) -> Result<Json<MarketLiquidationDto>, ApiError> {
+    auth.require_capability(CAPABILITY_MARKET_READ)?;
+
+    let symbol = query
+        .symbol
+        .unwrap_or_else(|| "BTCUSDT".to_owned())
+        .trim()
+        .to_ascii_uppercase();
+
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let base_url = std::env::var("BINANCE_FUTURES_BASE_URL")
+        .unwrap_or_else(|_| BINANCE_FUTURES_BASE_URL.to_owned());
+
+    let raw_records = fetch_premium_index(&http, &base_url)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let target_record = raw_records.into_iter().find(|r| r.symbol == symbol);
+    let mark_price = target_record.map(|r| r.price).unwrap_or(65_000.0);
+
+    let oi_contracts = fetch_open_interest(&http, &base_url, &symbol)
+        .await
+        .unwrap_or(None)
+        .unwrap_or(50_000.0);
+    let oi_usd = oi_contracts * mark_price;
+
+    let zones = estimate_liquidation_zones(mark_price, oi_usd, DEFAULT_LEVERAGE_BANDS, DEFAULT_MMR);
+    let now = Utc::now();
+
+    let zone_dtos = zones
+        .into_iter()
+        .map(|z| LiquidationZoneDto {
+            lev: z.lev,
+            w: z.w,
+            side: z.side.as_str().to_owned(),
+            price: (z.price * 100.0).round() / 100.0,
+            pct: (z.pct * 100.0).round() / 100.0,
+            usd: z.usd,
+        })
+        .collect();
+
+    Ok(Json(MarketLiquidationDto {
+        generated_at: now,
+        symbol,
+        mark_price,
+        open_interest_usd: oi_usd,
+        zones: zone_dtos,
+    }))
 }
 
 #[cfg(test)]
