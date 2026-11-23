@@ -8,9 +8,9 @@ use tm_trading_contracts::ServiceSnapshot;
 use tm_trading_domain::{
     AiBriefingError, AiJobError, AiModelError, AiProviderProfile, AiProviderProfileError,
     AiTaskRouteError, Candle, CandleError, NewNewsSource, NewsCluster, NewsClusterError, NewsItem,
-    NewsItemError, NewsLevel, NewsSource, NewsSourceError, Operation, OperationError, OperationId,
-    ProviderInstance, ProviderInstanceError, ResearchEvent, ResearchEventError, Watchlist,
-    WatchlistError,
+    NewsItemError, NewsLevel, NewsSource, NewsSourceError, NotificationError, Operation,
+    OperationError, OperationId, ProviderInstance, ProviderInstanceError, ResearchEvent,
+    ResearchEventError, Watchlist, WatchlistError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -476,6 +476,12 @@ pub enum RepositoryError {
     AiBriefingConflict,
     #[error("ai briefing does not match its job")]
     AiBriefingMismatch,
+    #[error("notification outbox item was not found")]
+    NotificationOutboxNotFound,
+    #[error("notification log was not found")]
+    NotificationLogNotFound,
+    #[error(transparent)]
+    Notification(#[from] NotificationError),
     #[error("ai job was not found")]
     AiJobNotFound,
     #[error(transparent)]

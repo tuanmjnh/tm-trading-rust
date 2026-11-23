@@ -20,6 +20,7 @@ mod mongo_candles;
 mod mongo_news_clusters;
 mod mongo_news_items;
 mod mongo_news_sources;
+mod mongo_notifications;
 mod mongo_operations;
 mod mongo_providers;
 mod mongo_research_events;
@@ -28,6 +29,8 @@ mod mongo_watchlists;
 mod news_clusters_memory;
 mod news_items_memory;
 mod news_sources_memory;
+mod notifications;
+mod notifications_memory;
 mod providers_memory;
 mod repository;
 mod research_events_memory;
@@ -54,6 +57,7 @@ pub use mongo_candles::MongoCandleRepository;
 pub use mongo_news_clusters::MongoNewsClusterRepository;
 pub use mongo_news_items::MongoNewsItemRepository;
 pub use mongo_news_sources::MongoNewsSourceRepository;
+pub use mongo_notifications::{MongoNotificationLogRepository, MongoNotificationOutboxRepository};
 pub use mongo_operations::MongoOperationRepository;
 pub use mongo_providers::{MongoProviderInstanceRepository, PROVIDER_INSTANCE_SCHEMA_VERSION};
 pub use mongo_research_events::MongoResearchEventRepository;
@@ -62,6 +66,14 @@ pub use mongo_watchlists::MongoWatchlistRepository;
 pub use news_clusters_memory::InMemoryNewsClusterRepository;
 pub use news_items_memory::InMemoryNewsItemRepository;
 pub use news_sources_memory::InMemoryNewsSourceRepository;
+pub use notifications::{
+    DEFAULT_NOTIFICATION_QUERY_LIMIT, EnqueueNotificationOutcome, NotificationLogQuery,
+    NotificationLogRepository, NotificationOutboxQuery, NotificationOutboxRepository,
+    RecordNotificationLogOutcome,
+};
+pub use notifications_memory::{
+    InMemoryNotificationLogRepository, InMemoryNotificationOutboxRepository,
+};
 pub use providers_memory::InMemoryProviderInstanceRepository;
 pub use repository::{
     AiProviderProfileRepository, CandleRepository, CandleUpsertOutcome, CreateOperationOutcome,
