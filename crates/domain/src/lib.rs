@@ -12,6 +12,7 @@ mod news_cluster;
 mod news_item;
 mod notification;
 mod operation;
+mod portfolio;
 mod provider;
 mod research;
 mod watchlist;
@@ -78,6 +79,7 @@ pub use operation::{
     NewOperation, OPERATION_SCHEMA_VERSION, Operation, OperationAction, OperationError,
     OperationId, OperationStatus, PersistedOperation,
 };
+pub use portfolio::{PortfolioSummary, Position, PositionStatus, calculate_portfolio_summary};
 pub use provider::{
     MAX_PROVIDER_DISPLAY_NAME_CHARS, MAX_PROVIDER_TIMEOUT_MS, MIN_PROVIDER_TIMEOUT_MS,
     NewProviderInstance, ProviderHealthState, ProviderInstance, ProviderInstanceError,

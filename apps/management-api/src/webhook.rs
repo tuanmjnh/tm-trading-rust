@@ -10,9 +10,7 @@ use axum::http::{HeaderMap, StatusCode};
 use chrono::Utc;
 use serde::Deserialize;
 use tm_trading_contracts::{TradingViewAlertPayload, WebhookResponse};
-use tm_trading_domain::{
-    NotificationChannel, NotificationOutboxItem, NotificationPriority,
-};
+use tm_trading_domain::{NotificationChannel, NotificationOutboxItem, NotificationPriority};
 use tm_trading_storage::EnqueueNotificationOutcome;
 
 use crate::error::ApiError;
@@ -128,7 +126,14 @@ pub async fn handle_tradingview_webhook_with_token(
     headers: HeaderMap,
     Json(payload): Json<TradingViewAlertPayload>,
 ) -> Result<(StatusCode, Json<WebhookResponse>), ApiError> {
-    process_webhook(state, Some(&token), query.token.as_deref(), headers, payload).await
+    process_webhook(
+        state,
+        Some(&token),
+        query.token.as_deref(),
+        headers,
+        payload,
+    )
+    .await
 }
 
 async fn process_webhook(
@@ -219,7 +224,10 @@ async fn process_webhook(
         payload.price,
         payload.sl,
         tps_str,
-        payload.strategy.as_deref().unwrap_or("TradingView PineScript"),
+        payload
+            .strategy
+            .as_deref()
+            .unwrap_or("TradingView PineScript"),
         payload.ts
     ));
 
