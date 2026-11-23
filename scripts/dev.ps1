@@ -42,6 +42,7 @@ $env:RUST_LOG = "info,tm_trading_desktop=info"
 
 # 1. Check & Start Management API if requested
 $apiProcess = $null
+$agentProcess = $null
 if ($WithBackend) {
     $portOpen = $false
     try {
@@ -82,6 +83,22 @@ if ($WithBackend) {
             Write-Host "[WARN] API did not answer on 8787 yet. Desktop UI will retry automatically." -ForegroundColor DarkYellow
         }
     }
+
+    # Start Host Agent with workers enabled so Services table shows live worker instances
+    Write-Host "[...] Starting Host Agent with live worker fleet..." -ForegroundColor Yellow
+    $env:TM_TRADING_MARKET_WORKER_ENABLED = "1"
+    $env:TM_TRADING_RESEARCH_WORKER_ENABLED = "1"
+    $env:TM_TRADING_NEWS_WORKER_ENABLED = "1"
+    $env:TM_TRADING_AI_WORKER_ENABLED = "1"
+    $env:TM_TRADING_NOTIFICATION_WORKER_ENABLED = "1"
+
+    $agentPsi = New-Object System.Diagnostics.ProcessStartInfo
+    $agentPsi.FileName = "cargo"
+    $agentPsi.Arguments = "run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start sample-worker"
+    $agentPsi.WorkingDirectory = $RepoRoot
+    $agentPsi.UseShellExecute = $true
+    $agentProcess = [System.Diagnostics.Process]::Start($agentPsi)
+    Write-Host "[OK] Host Agent started!" -ForegroundColor Green
 }
 
 # 2. Check if dx (Dioxus CLI) or cargo-watch is available
@@ -142,6 +159,10 @@ try {
         cargo run -p tm-trading-desktop
     }
 } finally {
+    if ($agentProcess -and -not $agentProcess.HasExited) {
+        Write-Host "[CLEANUP] Stopping background Host Agent process..." -ForegroundColor DarkGray
+        Stop-Process -Id $agentProcess.Id -Force -ErrorAction SilentlyContinue
+    }
     if ($apiProcess -and -not $apiProcess.HasExited) {
         Write-Host "[CLEANUP] Stopping background Management API process..." -ForegroundColor DarkGray
         Stop-Process -Id $apiProcess.Id -Force -ErrorAction SilentlyContinue
