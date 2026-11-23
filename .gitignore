@@ -1,6 +1,7 @@
 # Rust build output
 /target/
 **/target/
+/dist/
 
 # Local application state
 /data/
