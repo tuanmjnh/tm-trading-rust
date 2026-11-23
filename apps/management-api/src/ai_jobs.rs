@@ -1,13 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
 use tm_trading_contracts::{AiJobDto, AiJobListDto, AiJobStatusDto, AiJobTaskDto, NewAiJobDto};
 use tm_trading_domain::{
-    AiBriefingReference, AiBriefingReferenceKind, AiJob, AiJobId, AiTaskKind, NewAiJob,
-    ai_job_request_hash,
+    AiBriefingReference, AiBriefingReferenceKind, AiJob, AiJobId, AiTaskKind, MAX_AI_JOB_INPUTS,
+    NewAiJob, ai_job_request_hash,
 };
 use tm_trading_storage::{AiJobQuery, CreateAiJobOutcome, DEFAULT_AI_JOB_LIMIT};
 
@@ -29,6 +30,11 @@ pub async fn list_ai_jobs(
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Json<AiJobListDto>, ApiError> {
     auth.require_capability(CAPABILITY_AI_READ)?;
+    state
+        .ai_jobs
+        .expire_due(Utc::now())
+        .await
+        .map_err(ApiError::from)?;
     let limit = match query.get("limit") {
         Some(value) => value.parse::<usize>().map_err(|_| {
             ApiError::BadRequest("limit must be an integer between 1 and 200".to_owned())
@@ -43,11 +49,13 @@ pub async fn list_ai_jobs(
     let task = query
         .get("task")
         .map(|value| {
-            AiTaskKind::parse(value)
-                .filter(|task| task.as_str() == value.as_str())
-                .ok_or_else(|| {
-                    ApiError::UnprocessableEntity("task is not a supported AI task".to_owned())
-                })
+            if value == "research_explanation" {
+                Ok(AiTaskKind::ResearchExplanation)
+            } else {
+                Err(ApiError::UnprocessableEntity(
+                    "task is not a supported AI job task".to_owned(),
+                ))
+            }
         })
         .transpose()?;
     let jobs = state
@@ -59,7 +67,7 @@ pub async fn list_ai_jobs(
         })
         .await
         .map_err(ApiError::from)?;
-    let jobs = jobs.iter().map(to_dto).collect::<Vec<_>>();
+    let jobs = jobs.iter().map(to_dto).collect::<Result<Vec<_>, _>>()?;
     Ok(Json(AiJobListDto {
         generated_at: Utc::now(),
         count: jobs.len(),
@@ -71,14 +79,20 @@ pub async fn list_ai_jobs(
 pub async fn create_ai_job(
     State(state): State<AppState>,
     auth: crate::auth::AuthContext,
-    Json(body): Json<NewAiJobDto>,
+    body: Result<Json<NewAiJobDto>, JsonRejection>,
 ) -> Result<(StatusCode, Json<AiJobDto>), ApiError> {
     auth.require_capability(CAPABILITY_AI_WRITE)?;
-    let task = to_domain_task(body.task)?;
-    if task != AiTaskKind::ResearchExplanation {
-        return Err(ApiError::UnprocessableEntity(
-            "only the research_explanation task can be queued".to_owned(),
-        ));
+    let Json(body) = body.map_err(ApiError::from)?;
+    let task = to_domain_task(body.task);
+    if body
+        .research_event_ids
+        .len()
+        .saturating_add(body.news_item_ids.len())
+        > MAX_AI_JOB_INPUTS
+    {
+        return Err(ApiError::UnprocessableEntity(format!(
+            "an AI job may contain at most {MAX_AI_JOB_INPUTS} combined inputs"
+        )));
     }
     let research_event_ids = validate_ids(
         &body.research_event_ids,
@@ -126,8 +140,8 @@ pub async fn create_ai_job(
 
     let outcome = state.ai_jobs.create(job).await.map_err(ApiError::from)?;
     match outcome {
-        CreateAiJobOutcome::Created(job) => Ok((StatusCode::CREATED, Json(to_dto(&job)))),
-        CreateAiJobOutcome::Existing(job) => Ok((StatusCode::OK, Json(to_dto(&job)))),
+        CreateAiJobOutcome::Created(job) => Ok((StatusCode::CREATED, Json(to_dto(&job)?))),
+        CreateAiJobOutcome::Existing(job) => Ok((StatusCode::OK, Json(to_dto(&job)?))),
     }
 }
 
@@ -138,6 +152,11 @@ pub async fn get_ai_job(
     Path(job_id): Path<String>,
 ) -> Result<Json<AiJobDto>, ApiError> {
     auth.require_capability(CAPABILITY_AI_READ)?;
+    state
+        .ai_jobs
+        .expire_due(Utc::now())
+        .await
+        .map_err(ApiError::from)?;
     let Some(job_id) = AiJobId::parse(&job_id) else {
         return Err(ApiError::NotFound("AI job was not found".to_owned()));
     };
@@ -148,11 +167,12 @@ pub async fn get_ai_job(
         .map_err(ApiError::from)?
         .filter(|job| job.owner_scope() == auth.subject())
         .ok_or_else(|| ApiError::NotFound("AI job was not found".to_owned()))?;
-    Ok(Json(to_dto(&job)))
+    Ok(Json(to_dto(&job)?))
 }
 
 fn validate_ids(values: &[String], kind: AiBriefingReferenceKind) -> Result<Vec<String>, ApiError> {
     let mut unique = Vec::with_capacity(values.len());
+    let mut seen = HashSet::with_capacity(values.len());
     for value in values {
         let reference = AiBriefingReference::new(kind, value.trim()).map_err(|_| {
             ApiError::UnprocessableEntity(format!(
@@ -160,35 +180,34 @@ fn validate_ids(values: &[String], kind: AiBriefingReferenceKind) -> Result<Vec<
                 kind.as_str()
             ))
         })?;
-        if !unique.iter().any(|existing| existing == reference.value()) {
-            unique.push(reference.value().to_owned());
+        let value = reference.value().to_owned();
+        if seen.insert(value.clone()) {
+            unique.push(value);
         }
     }
     Ok(unique)
 }
 
-fn to_domain_task(task: AiJobTaskDto) -> Result<AiTaskKind, ApiError> {
+fn to_domain_task(task: AiJobTaskDto) -> AiTaskKind {
     match task {
-        AiJobTaskDto::NewsClassification => Ok(AiTaskKind::NewsClassification),
-        AiJobTaskDto::NewsSummary => Ok(AiTaskKind::NewsSummary),
-        AiJobTaskDto::MarketBriefing => Ok(AiTaskKind::MarketBriefing),
-        AiJobTaskDto::ResearchExplanation => Ok(AiTaskKind::ResearchExplanation),
-        AiJobTaskDto::DailyDigest => Ok(AiTaskKind::DailyDigest),
+        AiJobTaskDto::ResearchExplanation => AiTaskKind::ResearchExplanation,
     }
 }
 
-fn to_dto(job: &AiJob) -> AiJobDto {
-    AiJobDto {
+fn to_dto(job: &AiJob) -> Result<AiJobDto, ApiError> {
+    let task = match job.task() {
+        AiTaskKind::ResearchExplanation => AiJobTaskDto::ResearchExplanation,
+        _ => {
+            return Err(ApiError::Internal(
+                "stored AI job task is not supported by the public contract".to_owned(),
+            ));
+        }
+    };
+    Ok(AiJobDto {
         id: job.id().to_string(),
         owner_scope: job.owner_scope().to_owned(),
         correlation_id: job.correlation_id().to_string(),
-        task: match job.task() {
-            AiTaskKind::NewsClassification => AiJobTaskDto::NewsClassification,
-            AiTaskKind::NewsSummary => AiJobTaskDto::NewsSummary,
-            AiTaskKind::MarketBriefing => AiJobTaskDto::MarketBriefing,
-            AiTaskKind::ResearchExplanation => AiJobTaskDto::ResearchExplanation,
-            AiTaskKind::DailyDigest => AiJobTaskDto::DailyDigest,
-        },
+        task,
         status: match job.status() {
             tm_trading_domain::AiJobStatus::Queued => AiJobStatusDto::Queued,
             tm_trading_domain::AiJobStatus::Claimed => AiJobStatusDto::Claimed,
@@ -205,5 +224,5 @@ fn to_dto(job: &AiJob) -> AiJobDto {
         finished_at: job.finished_at(),
         briefing_id: job.briefing_id().map(str::to_owned),
         error_code: job.error_code().map(str::to_owned),
-    }
+    })
 }

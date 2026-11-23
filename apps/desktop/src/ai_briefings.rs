@@ -508,6 +508,7 @@ mod tests {
     use super::*;
     use crate::i18n::Locale;
     use chrono::TimeZone;
+    use tm_trading_contracts::AiJobTaskDto;
 
     fn at() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 11, 21, 8, 0, 0).unwrap()
@@ -597,7 +598,7 @@ mod tests {
             id: id.to_owned(),
             owner_scope: "local-operator".to_owned(),
             correlation_id: "correlation-1".to_owned(),
-            task: AiBriefingTaskDto::ResearchExplanation,
+            task: AiJobTaskDto::ResearchExplanation,
             status,
             attempt: 0,
             research_event_ids: vec!["rev1_0123456789abcdef".to_owned()],

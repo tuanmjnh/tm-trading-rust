@@ -5,14 +5,16 @@ use serde_json::json;
 use tower::ServiceExt;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use tm_trading_domain::{
-    AiBriefing, AiBriefingReference, AiBriefingReferenceKind, AiTaskKind, Candle, NewAiBriefing,
-    NewCandle, NewNewsItem, NewNewsSource, NewResearchEvent, NewsItem, NewsLevel, ResearchEvent,
-    ResearchQuality,
+    AiBriefing, AiBriefingReference, AiBriefingReferenceKind, AiJob, AiTaskKind, Candle,
+    NewAiBriefing, NewAiJob, NewCandle, NewNewsItem, NewNewsSource, NewResearchEvent, NewsItem,
+    NewsLevel, ResearchEvent, ResearchQuality,
 };
-use tm_trading_management_api::{AppState, AuthConfig, router};
+use tm_trading_management_api::{AppState, AuthConfig, Repositories, router};
+use tm_trading_storage::{AiJobRepository, InMemoryAiJobRepository};
 
 const USER_TOKEN: &str = "user-token";
 const AGENT_TOKEN: &str = "agent-token";
@@ -41,6 +43,19 @@ fn request(
     }
     builder
         .body(body.map_or_else(Body::empty, |value| Body::from(value.to_string())))
+        .expect("request is valid")
+}
+
+fn raw_request(method: &str, path: &str, token: Option<&str>, body: &str) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(token) = token {
+        builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    builder
+        .body(Body::from(body.to_owned()))
         .expect("request is valid")
 }
 
@@ -2002,6 +2017,139 @@ async fn ai_briefings_are_owner_scoped_and_carry_evidence_provenance() {
 }
 
 #[tokio::test]
+async fn ai_job_reads_expire_due_jobs_without_worker_activity() {
+    let mut repositories = Repositories::in_memory();
+    let jobs = Arc::new(InMemoryAiJobRepository::new());
+    repositories.ai_jobs = Arc::clone(&jobs) as Arc<dyn AiJobRepository>;
+    let now = Utc::now();
+    let job = AiJob::new(NewAiJob {
+        owner_scope: "test-operator".to_owned(),
+        idempotency_key: "expired-job".to_owned(),
+        request_hash: "expired-job-hash".to_owned(),
+        correlation_id: uuid::Uuid::new_v4(),
+        task: AiTaskKind::ResearchExplanation,
+        research_event_ids: vec!["rev1_0123456789abcdef".to_owned()],
+        news_item_ids: Vec::new(),
+        requested_at: now - Duration::hours(2),
+        expires_at: now - Duration::hours(1),
+    })
+    .unwrap();
+    jobs.create(job).await.unwrap();
+    let app = router(AppState::with_repositories(
+        AuthConfig {
+            user_token: USER_TOKEN.to_owned(),
+            agent_token: AGENT_TOKEN.to_owned(),
+            user_subject: "test-operator".to_owned(),
+            agent_id: "local-agent".to_owned(),
+        },
+        repositories,
+    ));
+
+    let listed = app
+        .oneshot(request("GET", "/api/v1/ai/jobs", Some(USER_TOKEN), None))
+        .await
+        .expect("response");
+
+    assert_eq!(listed.status(), StatusCode::OK);
+    assert_eq!(json_body(listed).await["jobs"][0]["status"], "EXPIRED");
+}
+
+#[tokio::test]
+async fn ai_job_request_errors_use_the_typed_api_contract() {
+    let app = router(state());
+
+    let malformed = app
+        .clone()
+        .oneshot(raw_request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(USER_TOKEN),
+            "{not-json",
+        ))
+        .await
+        .expect("response");
+    assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(json_body(malformed).await["error"]["code"], "bad_request");
+
+    let unsupported_task = app
+        .clone()
+        .oneshot(raw_request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(USER_TOKEN),
+            r#"{"task":"market_briefing","research_event_ids":["rev1_0123456789abcdef"],"news_item_ids":[]}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(unsupported_task.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        json_body(unsupported_task).await["error"]["code"],
+        "unprocessable_entity"
+    );
+
+    let owner_scope = app
+        .oneshot(raw_request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(USER_TOKEN),
+            r#"{"task":"research_explanation","research_event_ids":["rev1_0123456789abcdef"],"news_item_ids":[],"owner_scope":"other-operator"}"#,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(owner_scope.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        json_body(owner_scope).await["error"]["code"],
+        "unprocessable_entity"
+    );
+}
+
+#[tokio::test]
+async fn ai_job_input_limit_counts_raw_combined_inputs() {
+    let app = router(state());
+    let research_ids = (0..25)
+        .map(|index| format!("rev1_{index:016x}"))
+        .collect::<Vec<_>>();
+    let news_ids = (0..25)
+        .map(|index| format!("news_{index:040x}"))
+        .collect::<Vec<_>>();
+
+    let at_limit = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(USER_TOKEN),
+            Some(json!({
+                "task": "research_explanation",
+                "research_event_ids": research_ids,
+                "news_item_ids": news_ids
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(at_limit.status(), StatusCode::CREATED);
+
+    let over_limit = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/ai/jobs",
+            Some(USER_TOKEN),
+            Some(json!({
+                "task": "research_explanation",
+                "research_event_ids": (0..26)
+                    .map(|index| format!("rev1_{index:016x}"))
+                    .collect::<Vec<_>>(),
+                "news_item_ids": (0..25)
+                    .map(|index| format!("news_{index:040x}"))
+                    .collect::<Vec<_>>()
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(over_limit.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn ai_jobs_are_owner_scoped_idempotent_and_bounded() {
     let state = state();
     let app = router(state.clone());
@@ -2116,11 +2264,13 @@ async fn ai_jobs_are_owner_scoped_idempotent_and_bounded() {
     let too_many_inputs = (0..51)
         .map(|index| format!("rev1_{index:016x}"))
         .collect::<Vec<_>>();
+    let too_many_duplicates = vec!["rev1_0123456789abcdef".to_owned(); 51];
     for body in [
         json!({"task": "market_briefing", "research_event_ids": ["rev1_0123456789abcdef"]}),
         json!({"task": "research_explanation", "research_event_ids": [], "news_item_ids": []}),
         json!({"task": "research_explanation", "research_event_ids": ["not-an-id"]}),
         json!({"task": "research_explanation", "research_event_ids": too_many_inputs}),
+        json!({"task": "research_explanation", "research_event_ids": too_many_duplicates}),
     ] {
         let invalid = app
             .clone()

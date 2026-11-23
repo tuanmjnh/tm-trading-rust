@@ -1,4 +1,5 @@
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use tm_trading_contracts::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
@@ -58,6 +59,26 @@ impl IntoResponse for ApiError {
             },
         };
         (status, Json(body)).into_response()
+    }
+}
+
+impl From<JsonRejection> for ApiError {
+    fn from(rejection: JsonRejection) -> Self {
+        match rejection {
+            JsonRejection::JsonSyntaxError(_) => {
+                Self::BadRequest("request body is not valid JSON".to_owned())
+            }
+            JsonRejection::JsonDataError(_) => {
+                Self::UnprocessableEntity("request body does not match the API contract".to_owned())
+            }
+            JsonRejection::MissingJsonContentType(_) => Self::BadRequest(
+                "request body must use the application/json content type".to_owned(),
+            ),
+            JsonRejection::BytesRejection(_) => {
+                Self::BadRequest("request body could not be read".to_owned())
+            }
+            _ => Self::BadRequest("request body could not be read".to_owned()),
+        }
     }
 }
 
@@ -134,6 +155,9 @@ impl From<RepositoryError> for ApiError {
             RepositoryError::AiBriefingConflict => Self::Conflict(
                 "ai briefing identifier already contains different content".to_owned(),
             ),
+            RepositoryError::AiBriefingMismatch => {
+                Self::Internal("ai briefing does not match its job".to_owned())
+            }
             RepositoryError::AiTaskRoute(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::AiBriefing(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::AiJobNotFound => Self::NotFound("ai job was not found".to_owned()),

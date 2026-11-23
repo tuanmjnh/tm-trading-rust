@@ -167,11 +167,12 @@ cargo test -p tm-trading-storage --test mongo_services
 cargo test -p tm-trading-storage --test mongo_candles
 cargo test -p tm-trading-storage --test mongo_watchlists
 cargo test -p tm-trading-storage --test mongo_ai_briefings
+cargo test -p tm-trading-storage --test mongo_ai_jobs -- --ignored
 ```
 
 The URI must be TLS-enabled and validate against the local trust store or the referenced CA file. Any `mongod` started with `--tlsMode requireTLS --tlsCertificateKeyFile <server.pem> --tlsCAFile <ca.pem> --tlsAllowConnectionsWithoutCertificates` works; the certificate must carry `localhost` as a subject alternative name.
 
-Without `TM_TRADING_TEST_MONGODB_URI` those tests return immediately and print `skipped`, so a green run is not evidence that a store works. The live run above is the evidence.
+Without `TM_TRADING_TEST_MONGODB_URI` the ordinary live-store tests return immediately and print `skipped`, so a green run is not evidence that a store works. The AI job transaction suite is explicitly ignored by default and fails immediately when selected without the URI. The live runs above are the evidence.
 
 ## Snapshot projection behaviour
 
@@ -357,7 +358,10 @@ With `TM_TRADING_NEWS_SOURCE_OF_TRUTH` unset or `0`, the worker exits with code 
 
 The AI Worker is opt-in and runs under the Agent. It requires MongoDB, an enabled
 `research_explanation` route, its enabled provider and model, and the provider credential
-named by the profile. The credential namespace is forwarded to this worker only.
+named by the profile. The credential namespace is forwarded to this worker only. AI job
+completion requires MongoDB to run as a replica set (including a single-node replica set)
+or a sharded cluster reached through `mongos`; a standalone `mongod` cannot execute the
+briefing/job transaction.
 
 ```powershell
 cargo build -p tm-trading-agent -p tm-trading-ai-worker
@@ -480,6 +484,7 @@ curl -H "Authorization: Bearer $env:TM_TRADING_LOCAL_API_TOKEN" `
 - Briefing reads require the exact `trading.ai.read` capability. Job reads use the same capability; queueing a job requires `trading.ai.write`. The Agent credential is rejected with `403`, and an anonymous request is `401`.
 - Each briefing response separates facts, model interpretations, and uncertainties and includes typed evidence references, input snapshot IDs, missing/stale disclosures, provider/model/prompt provenance, producer/schema stamps, and the UTC generation time.
 - A job request must name at least one valid research-event or news identifier and at most 50 combined inputs. Only `research_explanation` can be queued today. The owner scope is never accepted from the request body.
+- The AI job request schema is closed: malformed JSON returns `400`; a syntactically valid but contract-invalid body, including one with any unknown field such as `owner_scope`, returns `422`.
 - Job list and detail reads trigger due-job expiry, so a disabled AI Worker does not leave queued jobs permanently visible as runnable. MongoDB evaluates expiry and terminal lease predicates with the database clock.
 - A new job returns `201`; an identical replay returns `200` with the stored job. Reusing an idempotency key with a different request returns `409`. Without an explicit key, the request fingerprint is the replay key. The job carries the server-generated correlation ID used to follow the request through execution.
 - The Desktop AI Briefing panel keeps its own loading, empty, and error state and does not blank the Dashboard when this API call fails. It selects one owner-scoped research event, queues the request without an owner field, and shows the latest job through `QUEUED`, `CLAIMED`, `SUCCEEDED`, `FAILED`, `EXPIRED`, or `OUTCOME_UNKNOWN`. A successful job exposes its briefing in the panel. Its detail Slideover shows the complete evidence and provenance and ignores a late response for a briefing that is no longer selected.

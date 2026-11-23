@@ -950,11 +950,11 @@ pub fn list_ai_jobs() {}
     responses(
         (status = 200, description = "The queued job was already stored", body = AiJobDto),
         (status = 201, description = "AI job queued", body = AiJobDto),
-        (status = 400, description = "Malformed request body", body = ApiErrorResponse),
+        (status = 400, description = "Malformed JSON request body", body = ApiErrorResponse),
         (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
         (status = 403, description = "Missing required capability", body = ApiErrorResponse),
         (status = 409, description = "The idempotency key was reused with a different request", body = ApiErrorResponse),
-        (status = 422, description = "The task or the requested inputs are invalid", body = ApiErrorResponse),
+        (status = 422, description = "The request body is invalid under the API contract (including unknown fields), or the task or requested inputs are invalid", body = ApiErrorResponse),
         (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
     )
 )]

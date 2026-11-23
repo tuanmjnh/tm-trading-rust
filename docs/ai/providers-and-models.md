@@ -233,7 +233,10 @@ The Management API is the owner-scoped request source:
 A request names one AI task and the exact research-event or news identifiers to use as
 evidence. Only `research_explanation` can be queued today. The request must contain at
 least one valid input and at most 50 combined inputs. The owner scope always comes from
-the authenticated subject; it is never accepted from the request body.
+the authenticated subject; it is never accepted from the request body. The request schema
+is closed: malformed JSON is rejected with `400`; a syntactically valid but
+contract-invalid body, including one with any unknown field such as `owner_scope`, is
+rejected with `422`.
 
 Without an explicit idempotency key, the request fingerprint is the replay key, so an
 identical request returns the stored job. A client-supplied key is limited to 200
@@ -258,6 +261,9 @@ jobs remain visible instead of being reported as successful.
 The AI Worker executable is a supervised process. It claims one durable job at a time,
 assembles owner-scoped evidence, runs the configured route, validates the model output,
 and asks storage to publish the briefing and complete the job in one MongoDB transaction.
+This path requires MongoDB to run as a replica set (including a single-node replica set)
+or a sharded cluster reached through `mongos`; a standalone `mongod` cannot complete an
+AI job.
 
 | Variable | Meaning |
 |---|---|

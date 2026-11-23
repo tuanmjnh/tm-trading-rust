@@ -16,7 +16,7 @@ use dioxus::prelude::*;
 use futures_util::StreamExt;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
-    AiBriefingQueryDto, AiBriefingTaskDto, AiJobQueryDto, MarketMoverDto, MarketOverviewDto,
+    AiBriefingQueryDto, AiJobQueryDto, AiJobTaskDto, MarketMoverDto, MarketOverviewDto,
     MarketPulseDto, MarketStateDto, MarketSymbolDto, NewAiJobDto, NewsQueryDto, OperationActionDto,
     OperationResponse, OperationStatusDto, ResearchEventQueryDto, ServiceSnapshot, WatchlistDto,
 };
@@ -251,7 +251,7 @@ fn App() -> Element {
                                     break;
                                 };
                                 let request = NewAiJobDto {
-                                    task: AiBriefingTaskDto::ResearchExplanation,
+                                    task: AiJobTaskDto::ResearchExplanation,
                                     research_event_ids: vec![research_event_id],
                                     news_item_ids: Vec::new(),
                                     idempotency_key: None,
@@ -398,7 +398,7 @@ fn App() -> Element {
                     }
                 } else {
                     let ai_job_query = AiJobQueryDto {
-                        task: Some(AiBriefingTaskDto::ResearchExplanation),
+                        task: Some(AiJobTaskDto::ResearchExplanation),
                         limit: Some(20),
                     };
                     match client.list_ai_jobs(&ai_job_query).await {

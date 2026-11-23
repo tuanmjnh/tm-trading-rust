@@ -2,10 +2,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::ai_briefing::AiBriefingTaskDto;
-
 /// Task a queued AI job will run.
-pub type AiJobTaskDto = AiBriefingTaskDto;
+///
+/// The queue currently exposes only the research-explanation task. Other AI task
+/// kinds remain domain concepts for their dedicated providers and briefings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AiJobTaskDto {
+    ResearchExplanation,
+}
 
 /// Durable state of one queued AI job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -47,6 +52,7 @@ pub struct AiJobListDto {
 
 /// Request to queue one evidence-bound briefing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct NewAiJobDto {
     pub task: AiJobTaskDto,
     pub research_event_ids: Vec<String>,
