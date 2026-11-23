@@ -58,33 +58,50 @@ The desktop application performs pre-flight verification at startup and displays
 
 ## 3. Running Desktop UI in Development
 
-For local development and testing, you can launch the desktop GUI directly using `cargo run`:
+You can run the entire system in a single command, or manually in separate terminals.
+
+### 3.1. Unified 1-Click Dev Runner (`scripts/dev.ps1`)
+The fastest way to develop: it automatically launches the `tm-trading-management-api` backend in the background if not already active, sets up local tokens, and opens the Desktop UI:
 
 ```powershell
-# 1. Start the backend Management API (Optional but recommended for live data)
+# Default: Starts backend API (if needed) and opens Desktop UI
+.\scripts\dev.ps1
+
+# With live Auto-Reload watching on UI file changes:
+.\scripts\dev.ps1 -Watch
+
+# Choose initial language:
+.\scripts\dev.ps1 -Locale en
+```
+
+### 3.2. Manual Multi-Terminal Runner
+If you prefer running components in isolated terminals:
+
+```powershell
+# Terminal 1: Start backend Management API
 cargo run -p tm-trading-management-api
 
-# 2. In another terminal, run the Desktop UI
+# Terminal 2: Run the Desktop UI
 cargo run -p tm-trading-desktop
 ```
 
-### Configurable Environment Variables
-
-| Variable | Description | Default | Example |
-| :--- | :--- | :--- | :--- |
-| `TM_TRADING_API_URL` | Loopback Management API endpoint | `http://127.0.0.1:8787` | `http://127.0.0.1:8787` |
-| `TM_TRADING_LOCAL_API_TOKEN` | Bearer token for privileged control commands | *(empty)* | `secret-token-xyz` |
-| `TM_TRADING_LOCALE` | Initial UI language (`en` or `vi`) | `en` | `vi` |
-| `TM_TRADING_DESKTOP_DATA_DIR` | Custom WebView2 profile cache directory | `<target_dir>/data/desktop` | `C:\Users\AppData\Local\tm-trading` |
-| `RUST_LOG` | Tracing log level filter | `info` | `debug,tm_trading_desktop=trace` |
-
-### Running with Hot Reload (Optional with Dioxus CLI)
-
-If you have `dioxus-cli` installed (`cargo install dioxus-cli`):
+### 3.3. Native Dioxus Hot Reload (`dx serve`)
+For sub-second hot reload of RSX templates and CSS styling without re-compiling binary code:
 ```powershell
+# Install official dioxus-cli (once)
+cargo install dioxus-cli --locked
+
+# Launch hot-reload dev server
 cd apps/desktop
 dx serve --platform desktop
 ```
+The configuration file `apps/desktop/Dioxus.toml` is pre-configured for desktop hot reloading.
+
+### 3.4. Architecture Note: Why API and UI are decoupled
+The **Management API (`apps/management-api`)** and **Desktop UI (`apps/desktop`)** are intentionally separated into distinct crates:
+1. **Safety & Separation of Privilege**: The desktop GUI runs as an unprivileged client view without direct database write handles or broker socket handles.
+2. **Headless & Microservice Operation**: The Management API and Agent can run headlessly on a local daemon or server, while multiple desktop client instances or CLI tools can attach via loopback bearer authentication.
+3. **Packaging Independence**: The desktop GUI binary (`tm-trading-desktop.exe`) can be rebuilt or updated independently without restarting long-running worker processes or disrupting background research ingest.
 
 ---
 

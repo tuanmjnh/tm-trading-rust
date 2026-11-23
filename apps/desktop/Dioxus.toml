@@ -1,0 +1,11 @@
+[application]
+name = "tm-trading-desktop"
+default_platform = "desktop"
+asset_dir = "assets"
+
+[desktop]
+hot_reload = true
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "assets"]

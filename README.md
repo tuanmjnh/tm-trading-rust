@@ -53,17 +53,46 @@ The CI workflow also runs a RustSec dependency audit and a repository secret sca
 
 ### Running the Desktop UI in Development
 
-The Desktop Control Center is a native GUI application built with **Dioxus Desktop** and **WebView2**.
+You can run the entire system (Backend API + Desktop UI) in a **single command**, or run them separately:
 
-To run it locally in development mode:
+#### Option A: 1-Click Unified Runner (Recommended)
+Automatically checks and spins up the backend Management API on `127.0.0.1:8787`, sets up tokens, and launches the Desktop UI:
 
 ```powershell
-# 1. (Optional) Run the Management API backend on loopback (port 8787)
+# Windows (PowerShell) - Single command to start both API & UI:
+.\scripts\dev.ps1
+
+# With Auto-Reload / File Watcher enabled:
+.\scripts\dev.ps1 -Watch
+
+# Switch language to English:
+.\scripts\dev.ps1 -Locale en
+```
+
+On Linux / macOS:
+```bash
+./scripts/dev.sh
+```
+
+#### Option B: Manual Multi-Terminal Runner
+If you prefer running components in isolated terminals:
+
+```powershell
+# Terminal 1: Run the Management API backend on loopback (port 8787)
 cargo run -p tm-trading-management-api
 
-# 2. In another terminal, launch the Desktop UI
+# Terminal 2: Launch the Desktop UI
 cargo run -p tm-trading-desktop
 ```
+
+#### Option C: Native Dioxus Hot-Reload (`dx serve`)
+To enable instant template and CSS hot-reloading without re-compilation, install the official Dioxus CLI:
+```powershell
+cargo install dioxus-cli --locked
+cd apps/desktop
+dx serve --platform desktop
+```
+*(The configuration file `apps/desktop/Dioxus.toml` is pre-configured for desktop hot-reloading).*
 
 #### Environment Variables for Desktop Development:
 - `TM_TRADING_API_URL`: Backend API URL (default: `http://127.0.0.1:8787`).
