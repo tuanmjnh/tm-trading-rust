@@ -87,17 +87,22 @@ jobs:
           cat "$RUNNER_TEMP/mongo-certs/server-cert.pem" \
             "$RUNNER_TEMP/mongo-certs/server-key.pem" \
             > "$RUNNER_TEMP/mongo-certs/server.pem"
-          chmod 644 "$RUNNER_TEMP/mongo-certs/server.pem"
+          chmod 600 "$RUNNER_TEMP/mongo-certs/server.pem"
 
           docker run --detach --name tm-trading-mongodb \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
             --publish 27017:27017 \
             --volume "$RUNNER_TEMP/mongo-certs:/mongo-certs:ro" \
             mongo:8.0@sha256:479e85ced54ffb8a40dade1dcde2da2a9ae858515b9415e9cc54bfb8f0575d01 \
-            mongod --replSet rs0 --bind_ip_all \
-            --tlsMode requireTLS \
-            --tlsCertificateKeyFile /mongo-certs/server.pem \
-            --tlsCAFile /mongo-certs/ca.pem \
-            --tlsAllowConnectionsWithoutCertificates
+            bash -c '
+              mkdir -p /tmp/dbpath
+              exec mongod --dbpath /tmp/dbpath --replSet rs0 --bind_ip_all \
+                --tlsMode requireTLS \
+                --tlsCertificateKeyFile /mongo-certs/server.pem \
+                --tlsCAFile /mongo-certs/ca.pem \
+                --tlsAllowConnectionsWithoutCertificates
+            '
 
           for attempt in {1..60}; do
             if docker exec tm-trading-mongodb mongosh --quiet \
