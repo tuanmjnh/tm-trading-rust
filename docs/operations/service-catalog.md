@@ -1,6 +1,6 @@
 # Service Catalog
 
-> Status: Phase 2 sample-worker runtime implemented and hardened on 2026-11-18; Phase 5 market-worker runtime implemented on 2026-11-20; Phase 6 research-worker runtime implemented on 2026-11-20; Phase 7 news-worker runtime implemented on 2026-11-20; Phase 7 ai-worker runtime implemented on 2026-11-22<br>
+> Status: Phase 2 sample-worker runtime implemented and hardened on 2026-11-18; Phase 5 market-worker runtime implemented on 2026-11-20; Phase 6 research-worker runtime implemented on 2026-11-20; Phase 7 news-worker runtime implemented on 2026-11-20; Phase 7 ai-worker runtime implemented on 2026-11-22; Phase 8 notification-worker runtime implemented on 2026-11-23; Phase 9 desktop release hardening completed on 2026-11-23<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## `sample-worker`
@@ -274,3 +274,45 @@ The worker claims at most one job per tick, oldest first. A claim takes a bounde
 
 - Only the `research_explanation` task is executed; the other routes have no job producer.
 - Unix runtime shutdown and descendant-containment drills remain unverified.
+
+## `notification-worker`
+
+| Field | Value |
+|---|---|
+| Service definition ID | `notification-worker` |
+| Executable | `tm-trading-notification-worker.exe` on Windows; `tm-trading-notification-worker` on other platforms |
+| Process owner | The single Host Agent for the host |
+| Purpose | Claims queued outbox notifications with atomic fencing leases, delivers them via channels (Telegram), calculates pure exponential backoff with jitter, and records immutable delivery audit logs |
+| IPC schema | `worker.v2` |
+| Control channel | One JSON object per line over the worker stdin/stdout pipes |
+| Shutdown | The Agent sends an explicit `shutdown` command; the worker releases pending claims, stops queue draining, reports `stopped`, and exits |
+
+The worker is opt-in and supervised by the Host Agent. It runs continuously to drain the notification outbox queue.
+
+### Configuration
+
+| Variable | Meaning |
+|---|---|
+| `TM_DATABASE_URI` | TLS MongoDB connection URI |
+| `TM_DATABASE_NAME` | Database name, default `tm-trading-rust` |
+| `TM_TELEGRAM_BOT_TOKEN` | Telegram Bot token for sending messages; strictly secret-redacted in all logs and diagnostics |
+| `TM_TRADING_NOTIFICATIONS_POLL_MS` | Delay between outbox queue polling passes, default `2000` |
+| `TM_TRADING_NOTIFICATIONS_LEASE_MS` | Duration of the distributed lease claimed on an outbox item, default `30000` |
+| `TM_TRADING_NOTIFICATIONS_MAX_ATTEMPTS` | Maximum retry attempts before marking an item dead-letter, default `5` |
+
+### Readiness evidence
+
+| Check | Required | Meaning |
+|---|---:|---|
+| `process-alive` | Yes | The Agent still owns a live child process |
+| `capability-verified` | Yes | Notification repository and channel transport client initialized |
+| `recent-heartbeat` | Yes | A heartbeat was observed within 30 seconds |
+| `dependencies-reachable` | Yes | MongoDB outbox and audit log collections are accessible |
+| `recent-success` | No | A notification was delivered or processed within the last hour; stale evidence degrades readiness |
+
+### Claim, Deliver, and Audit Path
+
+1. **Atomic Claim**: The worker polls for items in `QUEUED` state whose `next_attempt_at <= now` and takes an atomic lease with a fencing token.
+2. **Channel Delivery**: If Telegram is configured and requested, the worker delivers the message via `TelegramClient` with timeout handling and error classification (200 OK, 429 Rate Limited with Retry-After backoff, 400 Bad Request terminal failure).
+3. **Audit Log & State Transition**: On success, the item is updated to `ACCEPTED` and an append-only `NotificationLogItem` is recorded with delivery timestamp and provider message ID. On transient failure, `attempts` is incremented and exponential backoff is scheduled; if the attempt limit is exceeded, the item transitions to `FAILED` (dead letter).
+

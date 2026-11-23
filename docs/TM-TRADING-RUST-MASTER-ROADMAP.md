@@ -1765,31 +1765,42 @@ Every report must use:
 
 ## Phase 8 — Telegram and notification center
 
+**Status: COMPLETED (2026-11-23)**
+
 **Tasks**
 
-- Port notification rules/outbox.
-- Build Telegram client and Notification Worker.
-- Add secure token storage, destination configuration and test message.
-- Add retries, dedupe, dead-letter and delivery history.
+- [x] Port notification rules/outbox.
+- [x] Build Telegram client and Notification Worker.
+- [x] Add secure token storage, destination configuration and test message.
+- [x] Add retries, dedupe, dead-letter and delivery history.
 
 **Deliverables**
 
-- End-to-end notification test reaches configured Telegram chat.
-- No secrets appear in logs or UI responses.
+- [x] End-to-end notification test reaches configured Telegram chat.
+- [x] No secrets appear in logs or UI responses.
+- [x] Management API endpoints for notification outbox, summary, delivery logs, and test ping.
+- [x] Desktop Notification Center panel with delivery metrics and manual ping.
 
 ## Phase 9 — Local Desktop release hardening
 
+**Status: COMPLETED (2026-11-23)**
+
 **Tasks**
 
-- Installer, autostart option and update/rollback.
-- WebView2 checks.
-- Windows Agent process/service mode decision.
-- Backup/restore and support bundle.
-- Resource limits, health and recovery drills.
+- [x] Installer, autostart option and update/rollback.
+- [x] WebView2 checks and pre-flight verification on Windows hosts.
+- [x] Windows Agent process/service mode decision.
+- [x] Backup/restore with SHA-256 cryptographic checksums and support bundle.
+- [x] Resource limits, health and recovery drills.
+- [x] Universal multi-platform build scripts for Windows, Linux, and macOS.
 
 **Deliverables**
 
-- Desktop release candidate with stable local services.
+- [x] Desktop release candidate with stable local services (`dist/tm-trading-*-v0.1.0.*`).
+- [x] System Diagnostics and secret-redacted Support Bundle generation (`/api/v1/system/support-bundle`).
+- [x] Cryptographic backup/restore endpoints (`/api/v1/system/backup/export`, `/verify`, `/restore`).
+- [x] Universal packaging scripts: `scripts/package.ps1` (Windows/PowerShell) and `scripts/package.sh` (Linux/macOS).
+- [x] Deployment guides: `docs/deployment/desktop-windows.md` and `docs/deployment/cross-platform-build.md`.
 
 ## Phase 10 — Cloud Agent and remote Management API
 

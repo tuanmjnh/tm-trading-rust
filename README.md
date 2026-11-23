@@ -69,13 +69,16 @@ No command is considered passed unless it was executed and its result observed. 
 
 - [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](docs/TM-TRADING-RUST-MASTER-ROADMAP.md) — product and architecture authority
 - [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md) — current implemented architecture and phase status
+- [`docs/deployment/cross-platform-build.md`](docs/deployment/cross-platform-build.md) — multi-platform compilation guide (Windows, Linux, macOS)
+- [`docs/deployment/desktop-windows.md`](docs/deployment/desktop-windows.md) — Windows Desktop release deployment and packaging guide
+- [`docs/operations/service-catalog.md`](docs/operations/service-catalog.md) — registered worker definitions and readiness probes
+- [`docs/operations/runbooks.md`](docs/operations/runbooks.md) — operational runbooks (diagnostics, support bundles, backup/restore, shutdown)
+- [`docs/ai/providers-and-models.md`](docs/ai/providers-and-models.md) — AI provider profiles, adapter protocols, and models
 - [`docs/migration/source-inventory.md`](docs/migration/source-inventory.md) — audited legacy source inventory
 - [`docs/migration/module-mapping.md`](docs/migration/module-mapping.md) — source-to-target mapping
 - [`docs/migration/data-contract-map.md`](docs/migration/data-contract-map.md) — MongoDB and event contract map
 - [`docs/migration/tm-hub-integration-map.md`](docs/migration/tm-hub-integration-map.md) — TM Hub integration contract
 - [`docs/api/openapi.yaml`](docs/api/openapi.yaml) — generated API contract snapshot
-- [`docs/operations/service-catalog.md`](docs/operations/service-catalog.md) — registered worker definitions and readiness probes
-- [`docs/operations/runbooks.md`](docs/operations/runbooks.md) — Agent, crash/restart, and graceful-shutdown procedures
 
 ## Development rules
 
