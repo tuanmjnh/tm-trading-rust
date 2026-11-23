@@ -258,12 +258,13 @@ The worker is opt-in. It is registered only when `TM_TRADING_AI_WORKER_ENABLED=1
 | Check | Required | Meaning |
 |---|---:|---|
 | `process-alive` | Yes | The Agent still owns a live child process |
-| `capability-verified` | Yes | The `research_explanation` route, its provider, and its model are enabled, the credential resolves, and MongoDB supports transactions |
+| `capability-verified` | Yes | MongoDB supports transactions, the briefing sink accepted a write probe, and the `research_explanation` route produced one bounded, schema-valid model response |
 | `recent-heartbeat` | Yes | A heartbeat was observed within 30 seconds |
 | `dependencies-reachable` | Yes | MongoDB and the job, briefing, evidence, and route stores were reachable |
+| `sink-writable` | Yes | The briefing sink accepted the publication-shaped upsert probe |
 | `recent-success` | No | A briefing was published within the last hour; a stale one degrades the service |
 
-The readiness probe resolves the provider and its credential but never calls the provider, so readiness never costs a billable request. The worker is idle between queued jobs, so a missing briefing is not a failure. A job-level failure or lease lapse does not revoke verified capability. A dependency or storage failure makes the worker not ready, and capability is restored only after a successful revalidation.
+The readiness probe first verifies MongoDB transaction support and performs a publication-shaped briefing-sink upsert inside a transaction that is deliberately aborted, leaving no probe document behind. It then makes one bounded billable route execution within the configured attempt, timeout, and output budgets and validates the response against the briefing schema, including the aggregate model-output content limit. MongoDB connection and repository/index initialization, the 15-second transaction/sink stage, and the route chain of up to 75 seconds share one 110-second worker startup deadline below the Agent's 120-second deadline; the route stage receives only the time remaining in that deadline. Later revalidations have a 90-second budget. The probe runs in a cancellable task, so a slow database or provider cannot block heartbeat or shutdown handling. A failed probe is retried at most once per minute after the failed attempt completes, with only one probe in flight. The worker is idle between queued jobs, so a missing briefing is not a failure. Evidence-only job failures and a lease lapse by itself do not revoke verified capability; provider, route, model-output, or final-briefing-schema failures do until a successful probe restores them, even if the lease expires before the observed failure can be persisted. A dependency or storage failure, including a failed briefing publication, makes the worker not ready and also requires successful revalidation. The aggregate route-probe timeout is treated conservatively as a dependency failure. Shutdown aborting an active job or readiness probe reports `drained: false`.
 
 ### Claim and publish path
 

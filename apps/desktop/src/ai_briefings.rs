@@ -476,6 +476,7 @@ fn job_error_label(error_code: &str, strings: &UiStrings) -> &'static str {
         }
         "provider_failed" => strings.ai_briefing_job_error_provider_failed,
         "route_unavailable" => strings.ai_briefing_job_error_route_unavailable,
+        "dependency_unavailable" => strings.ai_briefing_job_error_dependency_unavailable,
         "publish_failed" => strings.ai_briefing_job_error_publish_failed,
         "lease_lapsed" => strings.ai_briefing_job_error_lease_lapsed,
         _ => strings.ai_briefing_job_error_unknown,
@@ -662,6 +663,18 @@ mod tests {
         assert_ne!(
             job_error_label("provider_failed", &english),
             job_error_label("provider_failed", &vietnamese)
+        );
+        assert_ne!(
+            job_error_label("dependency_unavailable", &english),
+            job_error_label("dependency_unavailable", &vietnamese)
+        );
+        assert_ne!(
+            job_error_label("dependency_unavailable", &english),
+            english.ai_briefing_job_error_unknown
+        );
+        assert_ne!(
+            job_error_label("dependency_unavailable", &vietnamese),
+            vietnamese.ai_briefing_job_error_unknown
         );
     }
 

@@ -8,7 +8,8 @@ use mongodb::options::{IndexOptions, ReturnDocument, WriteConcern};
 use mongodb::{ClientSession, Collection, Database, IndexModel};
 
 use tm_trading_domain::{
-    AiBriefing, AiJob, AiJobError, AiJobId, AiJobStatus, AiTaskKind, PersistedAiJob,
+    AiBriefing, AiBriefingReference, AiBriefingReferenceKind, AiJob, AiJobError, AiJobId,
+    AiJobStatus, AiTaskKind, NewAiBriefing, PersistedAiJob,
 };
 
 use crate::bson_support::{from_timestamp, number_as_i64, timestamp};
@@ -51,6 +52,56 @@ impl MongoAiJobRepository {
             collection,
             briefings: database.collection::<Document>("ai_briefings"),
         })
+    }
+
+    /// Verifies that the briefing sink accepts the same upsert used for publication.
+    ///
+    /// The probe runs inside a transaction and is deliberately aborted, so it leaves no
+    /// briefing document behind while still checking write authorization and validation.
+    pub async fn probe_briefing_sink(&self) -> Result<(), RepositoryError> {
+        let briefing = AiBriefing::new(NewAiBriefing {
+            owner_scope: format!("__ai_worker_probe_{}", uuid::Uuid::new_v4()),
+            task: AiTaskKind::ResearchExplanation,
+            provider_id: "readiness-probe".to_owned(),
+            model_registry_id: "readiness-probe".to_owned(),
+            model_id: "readiness-probe".to_owned(),
+            prompt_version: "readiness-probe.v1".to_owned(),
+            facts: vec!["MongoDB briefing sink write probe".to_owned()],
+            interpretations: Vec::new(),
+            uncertainties: Vec::new(),
+            input_snapshot_ids: vec!["rsnap1_0123456789abcdef".to_owned()],
+            references: vec![AiBriefingReference::new(
+                AiBriefingReferenceKind::ResearchEvent,
+                "rev1_0123456789abcdef",
+            )?],
+            missing_inputs: Vec::new(),
+            stale_inputs: Vec::new(),
+            generated_at: Utc::now(),
+        })?;
+        let expected = crate::mongo_ai_briefings::fields(&briefing)?;
+        let mut update = Document::new();
+        update.insert("$setOnInsert", expected);
+        let mut session = self.briefings.client().start_session().await?;
+        session
+            .start_transaction()
+            .write_concern(WriteConcern::majority())
+            .await?;
+        let result = self
+            .briefings
+            .update_one(doc! { "_id": briefing.id() }, update)
+            .upsert(true)
+            .session(&mut session)
+            .await;
+        match result {
+            Ok(_) => {
+                session.abort_transaction().await?;
+                Ok(())
+            }
+            Err(error) => {
+                let _ = session.abort_transaction().await;
+                Err(error.into())
+            }
+        }
     }
 
     async fn complete_with_briefing_transaction(

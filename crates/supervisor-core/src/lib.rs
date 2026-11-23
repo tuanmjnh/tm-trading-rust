@@ -704,6 +704,11 @@ pub fn ai_worker_definition() -> WorkerDefinition {
                 required: true,
                 max_age: None,
             },
+            ReadinessRule {
+                id: "sink-writable",
+                required: true,
+                max_age: None,
+            },
             // The AI worker is idle between queued jobs, so a missing briefing is not a
             // failure. A stale one only degrades the service.
             ReadinessRule {
@@ -881,6 +886,11 @@ mod tests {
             ai.readiness_rules
                 .iter()
                 .any(|rule| rule.id == "recent-success" && !rule.required)
+        );
+        assert!(
+            ai.readiness_rules
+                .iter()
+                .any(|rule| rule.id == "sink-writable" && rule.required)
         );
     }
 

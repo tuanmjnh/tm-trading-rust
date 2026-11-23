@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use tm_trading_domain::{AiBriefing, AiJob, AiJobId, AiJobStatus, AiTaskKind};
+use tm_trading_domain::{AiBriefing, AiBriefingError, AiJob, AiJobId, AiJobStatus, AiTaskKind};
 use tm_trading_storage::{AiJobRepository, RepositoryError};
 
 use crate::evidence::{
@@ -33,6 +33,41 @@ impl AiJobClock for SystemAiJobClock {
     }
 }
 
+/// Sanitized failure classification for one AI job.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiJobFailure {
+    UnsupportedTask,
+    InvalidRequest,
+    NoUsableEvidence,
+    EvidenceTooLarge,
+    EvidenceUnavailable,
+    InvalidModelOutput,
+    ProviderFailed,
+    RouteUnavailable,
+    DependencyUnavailable,
+    InvalidBriefing,
+    PublishFailed,
+}
+
+impl AiJobFailure {
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::UnsupportedTask => "unsupported_task",
+            Self::InvalidRequest => "invalid_request",
+            Self::NoUsableEvidence => "no_usable_evidence",
+            Self::EvidenceTooLarge => "evidence_too_large",
+            Self::EvidenceUnavailable => "evidence_unavailable",
+            Self::InvalidModelOutput => "invalid_model_output",
+            Self::ProviderFailed => "provider_failed",
+            Self::RouteUnavailable => "route_unavailable",
+            Self::DependencyUnavailable => "dependency_unavailable",
+            Self::InvalidBriefing => "invalid_briefing",
+            Self::PublishFailed => "publish_failed",
+        }
+    }
+}
+
 /// Result of one claim attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AiJobOutcome {
@@ -44,10 +79,14 @@ pub enum AiJobOutcome {
     },
     Failed {
         job_id: AiJobId,
-        error_code: &'static str,
+        failure: AiJobFailure,
     },
-    /// The lease expired before the result could be observed.
-    OutcomeUnknown { job_id: AiJobId },
+    /// The lease expired before the result could be durably recorded.
+    OutcomeUnknown {
+        job_id: AiJobId,
+        /// A failure observed even when lease expiry prevented it from being persisted.
+        observed_failure: Option<AiJobFailure>,
+    },
 }
 
 /// Claims and processes durable AI jobs against one provider route.
@@ -113,22 +152,25 @@ impl AiJobProcessor {
         let transition_at = self.clock.now();
         let briefing = match prepared {
             Ok(briefing) => briefing,
-            Err(error_code) => {
+            Err(failure) => {
                 let failed = self
                     .jobs
                     .fail(
                         &job_id,
                         worker_id,
                         fencing_token,
-                        error_code.to_owned(),
+                        failure.code().to_owned(),
                         None,
                         transition_at,
                     )
                     .await?;
                 return if failed.status() == AiJobStatus::OutcomeUnknown {
-                    Ok(AiJobOutcome::OutcomeUnknown { job_id })
+                    Ok(AiJobOutcome::OutcomeUnknown {
+                        job_id,
+                        observed_failure: Some(failure),
+                    })
                 } else {
-                    Ok(AiJobOutcome::Failed { job_id, error_code })
+                    Ok(AiJobOutcome::Failed { job_id, failure })
                 };
             }
         };
@@ -153,11 +195,14 @@ impl AiJobProcessor {
                     )
                     .await?;
                 return if failed.status() == AiJobStatus::OutcomeUnknown {
-                    Ok(AiJobOutcome::OutcomeUnknown { job_id })
+                    Ok(AiJobOutcome::OutcomeUnknown {
+                        job_id,
+                        observed_failure: Some(AiJobFailure::PublishFailed),
+                    })
                 } else {
                     Ok(AiJobOutcome::Failed {
                         job_id,
-                        error_code: "publish_failed",
+                        failure: AiJobFailure::PublishFailed,
                     })
                 };
             }
@@ -168,15 +213,18 @@ impl AiJobProcessor {
                 job_id,
                 briefing_id: briefing.id().to_owned(),
             }),
-            AiJobStatus::OutcomeUnknown => Ok(AiJobOutcome::OutcomeUnknown { job_id }),
+            AiJobStatus::OutcomeUnknown => Ok(AiJobOutcome::OutcomeUnknown {
+                job_id,
+                observed_failure: None,
+            }),
             _ => Err(RepositoryError::ConcurrentModification),
         }
     }
 
     /// Runs evidence assembly, generation, and validation for a claimed job.
-    async fn prepare(&self, job: &AiJob, now: DateTime<Utc>) -> Result<AiBriefing, &'static str> {
+    async fn prepare(&self, job: &AiJob, now: DateTime<Utc>) -> Result<AiBriefing, AiJobFailure> {
         if job.task() != AiTaskKind::ResearchExplanation {
-            return Err("unsupported_task");
+            return Err(AiJobFailure::UnsupportedTask);
         }
         let evidence = self
             .assembler
@@ -208,29 +256,40 @@ impl AiJobProcessor {
             &output,
             self.clock.now(),
         )
-        .map_err(|_| "invalid_briefing")
+        .map_err(briefing_code)
     }
 }
 
-fn evidence_code(error: EvidenceError) -> &'static str {
+fn evidence_code(error: EvidenceError) -> AiJobFailure {
     match error {
-        EvidenceError::NoUsableEvidence => "no_usable_evidence",
-        EvidenceError::EmptyOwnerScope | EvidenceError::InvalidInputId(_) => "invalid_request",
+        EvidenceError::NoUsableEvidence => AiJobFailure::NoUsableEvidence,
+        EvidenceError::EmptyOwnerScope | EvidenceError::InvalidInputId(_) => {
+            AiJobFailure::InvalidRequest
+        }
         EvidenceError::TooManyInputs
         | EvidenceError::PromptTooLong
-        | EvidenceError::FactTooLong(_) => "evidence_too_large",
+        | EvidenceError::FactTooLong(_) => AiJobFailure::EvidenceTooLarge,
         EvidenceError::InvalidModelOutput
         | EvidenceError::UnknownModelField(_)
-        | EvidenceError::EmptyModelOutput => "invalid_model_output",
-        _ => "evidence_unavailable",
+        | EvidenceError::EmptyModelOutput => AiJobFailure::InvalidModelOutput,
+        EvidenceError::Repository(_) => AiJobFailure::DependencyUnavailable,
+        EvidenceError::Briefing(AiBriefingError::ContentTooLong) => AiJobFailure::EvidenceTooLarge,
+        EvidenceError::Briefing(_) => AiJobFailure::EvidenceUnavailable,
     }
 }
 
-fn route_code(error: AiRouteError) -> &'static str {
+fn route_code(error: AiRouteError) -> AiJobFailure {
     match error {
-        AiRouteError::Provider(_) => "provider_failed",
-        AiRouteError::Repository(_) => "evidence_unavailable",
-        _ => "route_unavailable",
+        AiRouteError::Provider(_) => AiJobFailure::ProviderFailed,
+        AiRouteError::Repository(_) => AiJobFailure::DependencyUnavailable,
+        _ => AiJobFailure::RouteUnavailable,
+    }
+}
+
+fn briefing_code(error: AiBriefingError) -> AiJobFailure {
+    match error {
+        AiBriefingError::ContentTooLong => AiJobFailure::EvidenceTooLarge,
+        _ => AiJobFailure::InvalidBriefing,
     }
 }
 
@@ -254,7 +313,8 @@ mod tests {
     use tm_trading_storage::{
         AiBriefingQuery, AiModelRepository, AiProviderProfileRepository, AiTaskRouteRepository,
         InMemoryAiJobRepository, InMemoryAiModelRepository, InMemoryAiProviderProfileRepository,
-        InMemoryAiTaskRouteRepository, InMemoryResearchEventRepository, ResearchEventRepository,
+        InMemoryAiTaskRouteRepository, InMemoryResearchEventRepository, RepositoryError,
+        ResearchEventRepository,
     };
 
     use crate::AiProviderResolver;
@@ -549,7 +609,13 @@ mod tests {
             .process_next("ai-worker", at(), Duration::from_secs(60))
             .await
             .unwrap();
-        assert_eq!(outcome, AiJobOutcome::OutcomeUnknown { job_id });
+        assert_eq!(
+            outcome,
+            AiJobOutcome::OutcomeUnknown {
+                job_id,
+                observed_failure: None,
+            }
+        );
 
         let job = harness.jobs.get(&job_id).await.unwrap().unwrap();
         assert_eq!(job.status(), tm_trading_domain::AiJobStatus::OutcomeUnknown);
@@ -566,6 +632,35 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn an_invalid_model_output_remains_observed_when_the_lease_lapses() {
+        let event = research_event("local-operator");
+        let harness = harness_with_delay(
+            r#"{"interpretations":["invented"],"facts":["not allowed"]}"#,
+            "local-operator",
+            Some(Duration::from_secs(61)),
+        )
+        .await;
+        let job_id = enqueue(&harness, event.id(), "local-operator").await;
+
+        let outcome = harness
+            .processor
+            .process_next("ai-worker", at(), Duration::from_secs(60))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome,
+            AiJobOutcome::OutcomeUnknown {
+                job_id,
+                observed_failure: Some(AiJobFailure::InvalidModelOutput),
+            }
+        );
+        let job = harness.jobs.get(&job_id).await.unwrap().unwrap();
+        assert_eq!(job.status(), tm_trading_domain::AiJobStatus::OutcomeUnknown);
+        assert_eq!(job.error_code(), Some("lease_lapsed"));
     }
 
     #[tokio::test]
@@ -587,7 +682,7 @@ mod tests {
             outcome,
             AiJobOutcome::Failed {
                 job_id,
-                error_code: "no_usable_evidence"
+                failure: AiJobFailure::NoUsableEvidence,
             }
         );
         assert_eq!(*harness.provider.calls.lock().unwrap(), 0);
@@ -627,11 +722,35 @@ mod tests {
             outcome,
             AiJobOutcome::Failed {
                 job_id,
-                error_code: "invalid_model_output"
+                failure: AiJobFailure::InvalidModelOutput,
             }
         );
         let job = harness.jobs.get(&job_id).await.unwrap().unwrap();
         assert_eq!(job.status(), tm_trading_domain::AiJobStatus::Failed);
         assert_eq!(job.error_code(), Some("invalid_model_output"));
+    }
+
+    #[test]
+    fn final_content_overflow_is_distinguished_from_an_invalid_briefing_schema() {
+        assert_eq!(
+            briefing_code(AiBriefingError::ContentTooLong),
+            AiJobFailure::EvidenceTooLarge
+        );
+        assert_eq!(
+            briefing_code(AiBriefingError::NoEvidence),
+            AiJobFailure::InvalidBriefing
+        );
+    }
+
+    #[test]
+    fn repository_failures_are_reported_as_dependency_failures() {
+        assert_eq!(
+            evidence_code(EvidenceError::Repository(RepositoryError::LockPoisoned)),
+            AiJobFailure::DependencyUnavailable
+        );
+        assert_eq!(
+            route_code(AiRouteError::Repository(RepositoryError::LockPoisoned)),
+            AiJobFailure::DependencyUnavailable
+        );
     }
 }

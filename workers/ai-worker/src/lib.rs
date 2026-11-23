@@ -19,12 +19,14 @@ use tm_trading_storage::{
 mod evidence;
 mod job;
 
+use evidence::capability_test_request;
+
 pub use evidence::{
     BriefingEvidence, BriefingEvidenceAssembler, BriefingEvidenceRequest, DEFAULT_EVIDENCE_MAX_AGE,
     EvidenceError, ModelBriefing, RESEARCH_EXPLANATION_PROMPT_VERSION, build_briefing,
     parse_model_output, research_explanation_request,
 };
-pub use job::{AiJobOutcome, AiJobProcessor, BRIEFING_MAX_OUTPUT_TOKENS};
+pub use job::{AiJobFailure, AiJobOutcome, AiJobProcessor, BRIEFING_MAX_OUTPUT_TOKENS};
 
 /// Resolves one configured provider/model pair to a callable provider.
 ///
@@ -296,6 +298,29 @@ impl AiRouteExecutor {
     }
 }
 
+/// Failure while verifying that the configured provider can produce the expected schema.
+#[derive(Debug, Error)]
+pub enum AiCapabilityProbeError {
+    #[error(transparent)]
+    Route(#[from] AiRouteError),
+    #[error("ai provider response did not match the expected schema")]
+    InvalidResponse,
+    #[error("ai capability probe timed out")]
+    Timeout,
+}
+
+/// Runs one bounded generation and validates its response against the briefing schema.
+pub async fn probe_research_explanation_capability(
+    executor: &AiRouteExecutor,
+) -> Result<(), AiCapabilityProbeError> {
+    let execution = executor
+        .execute(AiTaskKind::ResearchExplanation, &capability_test_request())
+        .await?;
+    parse_model_output(&execution.response.content)
+        .map_err(|_| AiCapabilityProbeError::InvalidResponse)?;
+    Ok(())
+}
+
 fn effective_output_budget(
     route_limit: Option<u32>,
     model_limit: Option<u32>,
@@ -370,6 +395,7 @@ mod tests {
     use chrono::{DateTime, TimeZone, Utc};
 
     use super::*;
+    use crate::evidence::CAPABILITY_TEST_MAX_OUTPUT_TOKENS;
     use tm_trading_ai_providers::AiProviderHealth;
     use tm_trading_domain::{AiTaskRoute, NewAiModel, NewAiProviderProfile, NewAiTaskRoute};
     use tm_trading_storage::{
@@ -537,6 +563,20 @@ mod tests {
         .unwrap()
     }
 
+    fn research_route(primary: &str, fallbacks: &[&str], max_attempts: u8) -> AiTaskRoute {
+        AiTaskRoute::new(NewAiTaskRoute {
+            task: AiTaskKind::ResearchExplanation,
+            primary: primary.to_owned(),
+            fallbacks: fallbacks.iter().map(|value| (*value).to_owned()).collect(),
+            timeout_ms: 5_000,
+            max_attempts,
+            concurrency: 2,
+            max_output_tokens: None,
+            created_at: at(),
+        })
+        .unwrap()
+    }
+
     fn request(max_output_tokens: u32, json_mode: bool) -> AiGenerationRequest {
         AiGenerationRequest {
             system_prompt: "Return evidence-bound JSON.".to_owned(),
@@ -573,6 +613,90 @@ mod tests {
             model_store.upsert(model).await.unwrap();
         }
         AiRouteExecutor::new(routes, provider_store, model_store, resolver)
+    }
+
+    #[tokio::test]
+    async fn a_readiness_probe_accepts_a_schema_valid_provider_response() {
+        let primary = MockProvider::new(
+            vec![MockOutcome::Response(response(
+                "primary-model",
+                r#"{"interpretations":["ready"],"uncertainties":["none"]}"#,
+            ))],
+            Duration::ZERO,
+        );
+        let resolver = MockResolver::new(HashMap::from([(
+            "model-a".to_owned(),
+            primary.clone() as Arc<dyn AiProvider>,
+        )]));
+        let executor = build_executor(
+            research_route("primary:model-a", &[], 1),
+            vec![provider("primary")],
+            vec![model("model-a", "primary", None)],
+            resolver,
+        )
+        .await;
+
+        assert!(
+            probe_research_explanation_capability(&executor)
+                .await
+                .is_ok()
+        );
+        assert_eq!(primary.requests().len(), 1);
+        let request = &primary.requests()[0];
+        assert!(request.json_mode);
+        assert_eq!(request.max_output_tokens, CAPABILITY_TEST_MAX_OUTPUT_TOKENS);
+    }
+
+    #[tokio::test]
+    async fn a_readiness_probe_rejects_an_invalid_provider_response() {
+        let primary = MockProvider::new(
+            vec![MockOutcome::Response(response("primary-model", "not json"))],
+            Duration::ZERO,
+        );
+        let resolver = MockResolver::new(HashMap::from([(
+            "model-a".to_owned(),
+            primary.clone() as Arc<dyn AiProvider>,
+        )]));
+        let executor = build_executor(
+            research_route("primary:model-a", &[], 1),
+            vec![provider("primary")],
+            vec![model("model-a", "primary", None)],
+            resolver,
+        )
+        .await;
+
+        assert!(matches!(
+            probe_research_explanation_capability(&executor).await,
+            Err(AiCapabilityProbeError::InvalidResponse)
+        ));
+        assert_eq!(primary.requests().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_readiness_probe_rejects_an_unusable_provider() {
+        let primary = MockProvider::new(
+            vec![MockOutcome::Error(AiProviderError::HttpStatus(401))],
+            Duration::ZERO,
+        );
+        let resolver = MockResolver::new(HashMap::from([(
+            "model-a".to_owned(),
+            primary.clone() as Arc<dyn AiProvider>,
+        )]));
+        let executor = build_executor(
+            research_route("primary:model-a", &[], 1),
+            vec![provider("primary")],
+            vec![model("model-a", "primary", None)],
+            resolver,
+        )
+        .await;
+
+        assert!(matches!(
+            probe_research_explanation_capability(&executor).await,
+            Err(AiCapabilityProbeError::Route(AiRouteError::Provider(
+                AiProviderError::HttpStatus(401)
+            )))
+        ));
+        assert_eq!(primary.requests().len(), 1);
     }
 
     #[tokio::test]

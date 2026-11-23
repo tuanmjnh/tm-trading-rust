@@ -14,7 +14,8 @@ use thiserror::Error;
 use tm_trading_ai_providers::{AiGenerationRequest, MAX_GENERATION_PROMPT_BYTES};
 use tm_trading_domain::{
     AiBriefing, AiBriefingError, AiBriefingReference, AiBriefingReferenceKind, AiTaskKind,
-    MAX_AI_BRIEFING_LIST_ITEMS, MAX_AI_BRIEFING_TEXT_CHARS, NewAiBriefing, NewsItem, ResearchEvent,
+    MAX_AI_BRIEFING_CONTENT_CHARS, MAX_AI_BRIEFING_LIST_ITEMS, MAX_AI_BRIEFING_TEXT_CHARS,
+    NewAiBriefing, NewsItem, ResearchEvent,
 };
 use tm_trading_storage::{NewsItemRepository, RepositoryError, ResearchEventRepository};
 
@@ -25,6 +26,9 @@ pub const RESEARCH_EXPLANATION_PROMPT_VERSION: &str = "research-explanation.v1";
 
 /// Evidence older than this is used but disclosed as stale.
 pub const DEFAULT_EVIDENCE_MAX_AGE: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Output budget for the bounded worker-readiness generation probe.
+pub(super) const CAPABILITY_TEST_MAX_OUTPUT_TOKENS: u32 = 64;
 
 const SYSTEM_PROMPT: &str = "You explain supplied market research and news evidence. \
 Use only the evidence in the user message. Never invent prices, facts, sources, or identifiers. \
@@ -175,6 +179,18 @@ pub struct ModelBriefing {
     pub uncertainties: Vec<String>,
 }
 
+/// Builds one bounded request that verifies the provider and expected response schema.
+pub(super) fn capability_test_request() -> AiGenerationRequest {
+    AiGenerationRequest {
+        system_prompt: SYSTEM_PROMPT.to_owned(),
+        user_prompt: "Readiness test only. Return one short interpretation and one short \
+                      uncertainty, and make no market claim."
+            .to_owned(),
+        max_output_tokens: CAPABILITY_TEST_MAX_OUTPUT_TOKENS,
+        json_mode: true,
+    }
+}
+
 /// Builds the bounded `research_explanation` request from assembled evidence.
 pub fn research_explanation_request(
     evidence: &BriefingEvidence,
@@ -228,6 +244,14 @@ pub fn parse_model_output(content: &str) -> Result<ModelBriefing, EvidenceError>
     }
     let interpretations = model_text_list(&object, "interpretations")?;
     let uncertainties = model_text_list(&object, "uncertainties")?;
+    let content_chars = interpretations
+        .iter()
+        .chain(&uncertainties)
+        .map(|value| value.chars().count())
+        .sum::<usize>();
+    if content_chars > MAX_AI_BRIEFING_CONTENT_CHARS {
+        return Err(EvidenceError::InvalidModelOutput);
+    }
     if interpretations.is_empty() && uncertainties.is_empty() {
         return Err(EvidenceError::EmptyModelOutput);
     }
@@ -698,6 +722,20 @@ mod tests {
         ));
         assert!(matches!(
             parse_model_output("not json"),
+            Err(EvidenceError::InvalidModelOutput)
+        ));
+    }
+
+    #[test]
+    fn rejects_model_output_that_exceeds_the_final_content_budget() {
+        let content = serde_json::json!({
+            "interpretations": vec!["x".repeat(MAX_AI_BRIEFING_TEXT_CHARS); 6],
+            "uncertainties": [],
+        })
+        .to_string();
+
+        assert!(matches!(
+            parse_model_output(&content),
             Err(EvidenceError::InvalidModelOutput)
         ));
     }

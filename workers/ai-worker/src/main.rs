@@ -14,23 +14,33 @@ use chrono::Utc;
 use thiserror::Error;
 use tm_trading_agent_protocol::{SupervisorCommand, WORKER_CONFIGURATION_EXIT_CODE, WorkerMessage};
 use tm_trading_ai_worker::{
-    AiJobOutcome, AiJobProcessor, AiProviderResolver, AiRouteExecutor, BriefingEvidenceAssembler,
-    EnvironmentAiProviderResolver,
+    AiCapabilityProbeError, AiJobFailure, AiJobOutcome, AiJobProcessor, AiProviderResolver,
+    AiRouteError, AiRouteExecutor, BriefingEvidenceAssembler, EnvironmentAiProviderResolver,
+    probe_research_explanation_capability,
 };
-use tm_trading_domain::AiTaskKind;
 use tm_trading_storage::{
     MongoAiJobRepository, MongoAiModelRepository, MongoAiProviderProfileRepository,
     MongoAiTaskRouteRepository, MongoConnection, MongoNewsItemRepository,
     MongoResearchEventRepository, RepositoryError,
 };
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 
 const DEFAULT_DATABASE_NAME: &str = "tm-trading-rust";
 /// Idle delay between two claim attempts.
 const DEFAULT_CLAIM_INTERVAL: Duration = Duration::from_secs(5);
 /// Delay between two heartbeats.
 const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+/// Minimum delay between failed billable readiness probes.
+const DEFAULT_CAPABILITY_REVALIDATION_INTERVAL: Duration = Duration::from_secs(60);
+/// Complete worker startup budget, including MongoDB setup and the first readiness probe.
+const WORKER_STARTUP_BUDGET: Duration = Duration::from_secs(110);
+/// Complete budget for a later readiness revalidation.
+const READINESS_PROBE_BUDGET: Duration = Duration::from_secs(90);
+/// Maximum time allowed for the MongoDB transaction and briefing-sink checks.
+const READINESS_STORAGE_TIMEOUT: Duration = Duration::from_secs(15);
+/// Maximum time allowed for the complete route fallback chain.
+const READINESS_ROUTE_TIMEOUT: Duration = Duration::from_secs(75);
 /// Lease taken on a claimed job. It is longer than the longest route attempt chain.
 const DEFAULT_LEASE: Duration = Duration::from_secs(300);
 
@@ -53,6 +63,8 @@ async fn main() -> ExitCode {
 enum RunError {
     #[error("{0}")]
     Configuration(String),
+    #[error("AI worker startup budget exceeded")]
+    StartupTimeout,
     #[error("ai worker I/O failed: {0}")]
     Io(#[from] io::Error),
     #[error(transparent)]
@@ -60,6 +72,7 @@ enum RunError {
 }
 
 async fn run() -> Result<(), RunError> {
+    let startup_deadline = tokio::time::Instant::now() + WORKER_STARTUP_BUDGET;
     let uri = std::env::var("TM_DATABASE_URI").map_err(|_| {
         RunError::Configuration("TM_DATABASE_URI must be set for the AI worker".to_owned())
     })?;
@@ -80,17 +93,21 @@ async fn run() -> Result<(), RunError> {
     let instance_id = std::env::var("TM_SERVICE_INSTANCE_ID")
         .unwrap_or_else(|_| format!("ai-worker@local-agent:{pid}"));
 
-    let connection = MongoConnection::connect(&uri, &database_name)
-        .await
-        .map_err(classify_repository_error)?;
-    let database = connection.database();
+    let (connection, jobs, research, news, routes, providers, models) =
+        run_with_startup_deadline(startup_deadline, async {
+            let connection = Arc::new(MongoConnection::connect(&uri, &database_name).await?);
+            let database = connection.database();
 
-    let jobs = Arc::new(MongoAiJobRepository::new(database).await?);
-    let research = Arc::new(MongoResearchEventRepository::new(database).await?);
-    let news = Arc::new(MongoNewsItemRepository::new(database).await?);
-    let routes = Arc::new(MongoAiTaskRouteRepository::new(database).await?);
-    let providers = Arc::new(MongoAiProviderProfileRepository::new(database).await?);
-    let models = Arc::new(MongoAiModelRepository::new(database).await?);
+            let jobs = Arc::new(MongoAiJobRepository::new(database).await?);
+            let research = Arc::new(MongoResearchEventRepository::new(database).await?);
+            let news = Arc::new(MongoNewsItemRepository::new(database).await?);
+            let routes = Arc::new(MongoAiTaskRouteRepository::new(database).await?);
+            let providers = Arc::new(MongoAiProviderProfileRepository::new(database).await?);
+            let models = Arc::new(MongoAiModelRepository::new(database).await?);
+
+            Ok::<_, RepositoryError>((connection, jobs, research, news, routes, providers, models))
+        })
+        .await?;
 
     let resolver = Arc::new(EnvironmentAiProviderResolver);
     let executor = AiRouteExecutor::new(
@@ -103,19 +120,10 @@ async fn run() -> Result<(), RunError> {
     let processor = AiJobProcessor::new(
         Arc::clone(&jobs) as Arc<dyn tm_trading_storage::AiJobRepository>,
         assembler,
-        executor,
+        executor.clone(),
         tm_trading_ai_worker::DEFAULT_EVIDENCE_MAX_AGE,
     );
     let (job_result_tx, mut job_result_rx) = mpsc::unbounded_channel();
-
-    let probe = probe_capability(
-        &connection,
-        routes.as_ref(),
-        providers.as_ref(),
-        models.as_ref(),
-        resolver.as_ref(),
-    )
-    .await;
 
     let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
     thread::spawn(move || read_commands(command_tx));
@@ -125,18 +133,15 @@ async fn run() -> Result<(), RunError> {
     let mut worker = Worker::new(&instance_id);
 
     send(&mut output, &worker.hello(pid))?;
-    match probe {
-        Ok(()) => {
-            worker.record_capability(true);
-            send(&mut output, &worker.ready())?;
-            send(&mut output, &worker.heartbeat())?;
-        }
-        Err(error) => {
-            worker.record_probe_failure(&error);
-            eprintln!("[ai-worker] readiness probe failed: {error}");
-            send(&mut output, &worker.heartbeat())?;
-        }
-    }
+    send(&mut output, &worker.heartbeat())?;
+
+    let mut probes = JoinSet::new();
+    probes.spawn(probe_capability(
+        Arc::clone(&connection),
+        Arc::clone(&jobs),
+        executor.clone(),
+        startup_deadline,
+    ));
 
     let mut heartbeat = tokio::time::interval_at(
         tokio::time::Instant::now() + heartbeat_interval,
@@ -146,6 +151,11 @@ async fn run() -> Result<(), RunError> {
     let mut claim =
         tokio::time::interval_at(tokio::time::Instant::now() + claim_interval, claim_interval);
     claim.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut capability_retry = tokio::time::interval_at(
+        tokio::time::Instant::now() + DEFAULT_CAPABILITY_REVALIDATION_INTERVAL,
+        DEFAULT_CAPABILITY_REVALIDATION_INTERVAL,
+    );
+    capability_retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut active_job: Option<JoinHandle<()>> = None;
 
     loop {
@@ -164,14 +174,18 @@ async fn run() -> Result<(), RunError> {
                             &worker.published(&job_id.to_string(), &briefing_id),
                         )?;
                     }
-                    Ok(AiJobOutcome::Failed { job_id, error_code }) => {
-                        worker.record_job_failure();
+                    Ok(AiJobOutcome::Failed { job_id, failure }) => {
+                        worker.record_job_failure(failure);
                         send(
                             &mut output,
-                            &worker.failed(&job_id.to_string(), error_code),
+                            &worker.failed(&job_id.to_string(), failure.code()),
                         )?;
                     }
-                    Ok(AiJobOutcome::OutcomeUnknown { job_id }) => {
+                    Ok(AiJobOutcome::OutcomeUnknown {
+                        job_id,
+                        observed_failure,
+                    }) => {
+                        worker.record_unknown_outcome(observed_failure);
                         send(&mut output, &worker.unknown(&job_id.to_string()))?;
                     }
                     Err(error) => {
@@ -180,11 +194,37 @@ async fn run() -> Result<(), RunError> {
                     }
                 }
             }
+            Some(result) = probes.join_next() => {
+                match result {
+                    Ok(Ok(())) => {
+                        worker.record_capability(true);
+                        send(&mut output, &worker.ready())?;
+                    }
+                    Ok(Err(error)) => {
+                        schedule_capability_retry(
+                            &mut capability_retry,
+                            tokio::time::Instant::now(),
+                        );
+                        worker.record_probe_failure(&error);
+                        eprintln!("[ai-worker] readiness probe failed: {error}");
+                        send(&mut output, &worker.heartbeat())?;
+                    }
+                    Err(error) => {
+                        schedule_capability_retry(
+                            &mut capability_retry,
+                            tokio::time::Instant::now(),
+                        );
+                        worker.record_dependency_failure();
+                        eprintln!("[ai-worker] readiness probe task failed: {error}");
+                        send(&mut output, &worker.heartbeat())?;
+                    }
+                }
+            }
             command = command_rx.recv() => {
                 match command {
                     Some(SupervisorCommand::Shutdown { reason, .. }) => {
                         send(&mut output, &worker.stopping(&reason))?;
-                        let drained = stop_active_job(&mut active_job).await;
+                        let drained = stop_active_work(&mut active_job, &mut probes).await;
                         send(&mut output, &worker.stopped(&reason, drained))?;
                         return Ok(());
                     }
@@ -200,9 +240,25 @@ async fn run() -> Result<(), RunError> {
                                 error: "supervisor control channel closed".to_owned(),
                             },
                         )?;
-                        stop_active_job(&mut active_job).await;
+                        let drained = stop_active_work(&mut active_job, &mut probes).await;
+                        if !drained {
+                            eprintln!("[ai-worker] shutdown ended with an unobserved outcome");
+                        }
                         return Ok(());
                     }
+                }
+            }
+            _ = capability_retry.tick() => {
+                if active_job.is_none()
+                    && !worker.capability_verified()
+                    && probes.is_empty()
+                {
+                    probes.spawn(probe_capability(
+                        Arc::clone(&connection),
+                        Arc::clone(&jobs),
+                        executor.clone(),
+                        tokio::time::Instant::now() + READINESS_PROBE_BUDGET,
+                    ));
                 }
             }
             _ = claim.tick() => {
@@ -210,25 +266,7 @@ async fn run() -> Result<(), RunError> {
                     continue;
                 }
                 if !worker.capability_verified() {
-                    match probe_capability(
-                        &connection,
-                        routes.as_ref(),
-                        providers.as_ref(),
-                        models.as_ref(),
-                        resolver.as_ref(),
-                    )
-                    .await
-                    {
-                        Ok(()) => {
-                            worker.record_capability(true);
-                            send(&mut output, &worker.ready())?;
-                        }
-                        Err(error) => {
-                            worker.record_probe_failure(&error);
-                            eprintln!("[ai-worker] readiness probe failed: {error}");
-                            continue;
-                        }
-                    }
+                    continue;
                 }
                 active_job = Some(spawn_job(
                     processor.clone(),
@@ -244,6 +282,31 @@ async fn run() -> Result<(), RunError> {
     }
 }
 
+async fn run_with_startup_deadline<T>(
+    deadline: tokio::time::Instant,
+    operation: impl std::future::Future<Output = Result<T, RepositoryError>>,
+) -> Result<T, RunError> {
+    match tokio::time::timeout_at(deadline, operation).await {
+        Ok(result) => result.map_err(classify_repository_error),
+        Err(_) => Err(RunError::StartupTimeout),
+    }
+}
+
+fn stage_deadline(
+    overall_deadline: tokio::time::Instant,
+    stage_started_at: tokio::time::Instant,
+    budget: Duration,
+) -> tokio::time::Instant {
+    std::cmp::min(overall_deadline, stage_started_at + budget)
+}
+
+fn schedule_capability_retry(
+    retry: &mut tokio::time::Interval,
+    completed_at: tokio::time::Instant,
+) {
+    retry.reset_at(completed_at + DEFAULT_CAPABILITY_REVALIDATION_INTERVAL);
+}
+
 #[derive(Debug, Error)]
 enum CapabilityProbeError {
     #[error("dependency probe failed: {0}")]
@@ -252,82 +315,83 @@ enum CapabilityProbeError {
     Capability(String),
 }
 
-/// Verifies that the configured route can run before the worker reports readiness.
+/// Verifies that the configured route can produce a schema-valid response.
 ///
-/// The probe resolves the provider and its credential but never calls the provider,
-/// so readiness never costs a billable request.
+/// This is one bounded billable route execution. It runs in a cancellable task so
+/// heartbeat and shutdown handling remain responsive while MongoDB or the provider is slow.
 async fn probe_capability(
+    connection: Arc<MongoConnection>,
+    jobs: Arc<MongoAiJobRepository>,
+    executor: AiRouteExecutor,
+    deadline: tokio::time::Instant,
+) -> Result<(), CapabilityProbeError> {
+    let storage_deadline = stage_deadline(
+        deadline,
+        tokio::time::Instant::now(),
+        READINESS_STORAGE_TIMEOUT,
+    );
+    tokio::time::timeout_at(
+        storage_deadline,
+        probe_storage_capabilities(connection.as_ref(), jobs.as_ref()),
+    )
+    .await
+    .map_err(|_| {
+        CapabilityProbeError::Dependency("MongoDB readiness probe timed out".to_owned())
+    })??;
+
+    let route_deadline = stage_deadline(
+        deadline,
+        tokio::time::Instant::now(),
+        READINESS_ROUTE_TIMEOUT,
+    );
+    run_bounded_probe(
+        route_deadline,
+        probe_research_explanation_capability(&executor),
+    )
+    .await
+    .map_err(classify_capability_probe_error)
+}
+
+async fn probe_storage_capabilities(
     connection: &MongoConnection,
-    routes: &dyn tm_trading_storage::AiTaskRouteRepository,
-    providers: &dyn tm_trading_storage::AiProviderProfileRepository,
-    models: &dyn tm_trading_storage::AiModelRepository,
-    resolver: &dyn AiProviderResolver,
+    jobs: &MongoAiJobRepository,
 ) -> Result<(), CapabilityProbeError> {
     let transactions_supported = connection
         .transactions_supported()
         .await
         .map_err(|error| CapabilityProbeError::Dependency(error.to_string()))?;
     ensure_transaction_support(transactions_supported)?;
+    jobs.probe_briefing_sink()
+        .await
+        .map_err(|error| CapabilityProbeError::Dependency(error.to_string()))
+}
 
-    let route = routes
-        .get(AiTaskKind::ResearchExplanation.as_str())
-        .await
-        .map_err(|error| CapabilityProbeError::Dependency(error.to_string()))?
-        .ok_or_else(|| {
-            CapabilityProbeError::Capability(
-                "no research_explanation route is configured".to_owned(),
-            )
-        })?;
-    if !route.enabled() {
-        return Err(CapabilityProbeError::Capability(
-            "the research_explanation route is disabled".to_owned(),
-        ));
+async fn run_bounded_probe(
+    deadline: tokio::time::Instant,
+    probe: impl std::future::Future<Output = Result<(), AiCapabilityProbeError>>,
+) -> Result<(), AiCapabilityProbeError> {
+    match tokio::time::timeout_at(deadline, probe).await {
+        Ok(result) => result,
+        Err(_) => Err(AiCapabilityProbeError::Timeout),
     }
-    let reference = tm_trading_domain::AiTaskModelRef::parse(route.primary())
-        .map_err(|error| CapabilityProbeError::Capability(error.to_string()))?;
-    let profile = providers
-        .get(reference.provider_id())
-        .await
-        .map_err(|error| CapabilityProbeError::Dependency(error.to_string()))?
-        .ok_or_else(|| {
-            CapabilityProbeError::Capability(format!(
-                "provider '{}' is not registered",
-                reference.provider_id()
-            ))
-        })?;
-    if !profile.enabled() {
-        return Err(CapabilityProbeError::Capability(format!(
-            "provider '{}' is disabled",
-            profile.id()
-        )));
+}
+
+fn classify_capability_probe_error(error: AiCapabilityProbeError) -> CapabilityProbeError {
+    match error {
+        AiCapabilityProbeError::Route(AiRouteError::Repository(error)) => {
+            CapabilityProbeError::Dependency(error.to_string())
+        }
+        AiCapabilityProbeError::Route(AiRouteError::Provider(error)) => {
+            CapabilityProbeError::Capability(error.code().to_owned())
+        }
+        AiCapabilityProbeError::Route(error) => CapabilityProbeError::Capability(error.to_string()),
+        AiCapabilityProbeError::InvalidResponse => {
+            CapabilityProbeError::Capability("invalid_model_output".to_owned())
+        }
+        AiCapabilityProbeError::Timeout => {
+            CapabilityProbeError::Dependency("route readiness probe timed out".to_owned())
+        }
     }
-    let model = models
-        .get(reference.model_registry_id())
-        .await
-        .map_err(|error| CapabilityProbeError::Dependency(error.to_string()))?
-        .ok_or_else(|| {
-            CapabilityProbeError::Capability(format!(
-                "model '{}' is not registered",
-                reference.model_registry_id()
-            ))
-        })?;
-    if !model.enabled() {
-        return Err(CapabilityProbeError::Capability(format!(
-            "model '{}' is disabled",
-            model.id()
-        )));
-    }
-    if !model.supports_json_mode() {
-        return Err(CapabilityProbeError::Capability(format!(
-            "model '{}' does not support JSON mode",
-            model.id()
-        )));
-    }
-    let timeout = Duration::from_millis(route.timeout_ms().min(profile.timeout_ms()));
-    resolver
-        .resolve(&profile, &model, timeout)
-        .map(|_| ())
-        .map_err(|error| CapabilityProbeError::Capability(error.code().to_owned()))
 }
 
 fn ensure_transaction_support(supported: bool) -> Result<(), CapabilityProbeError> {
@@ -363,6 +427,27 @@ async fn stop_active_job(active_job: &mut Option<JoinHandle<()>>) -> bool {
     handle.abort();
     let _ = handle.await;
     false
+}
+
+/// Cancels any in-flight readiness probe before the worker exits.
+async fn stop_active_probe(probes: &mut JoinSet<Result<(), CapabilityProbeError>>) -> bool {
+    let mut drained = true;
+    probes.abort_all();
+    while let Some(result) = probes.join_next().await {
+        if result.is_err() {
+            drained = false;
+        }
+    }
+    drained
+}
+
+async fn stop_active_work(
+    active_job: &mut Option<JoinHandle<()>>,
+    probes: &mut JoinSet<Result<(), CapabilityProbeError>>,
+) -> bool {
+    let job_drained = stop_active_job(active_job).await;
+    let probe_drained = stop_active_probe(probes).await;
+    job_drained && probe_drained
 }
 
 fn enabled(name: &str) -> bool {
@@ -469,8 +554,12 @@ impl Worker {
         if matches!(error, CapabilityProbeError::Dependency(_)) {
             self.record_dependency_failure();
         } else {
-            self.evidence.capability_verified = Some(false);
+            self.record_capability_failure();
         }
+    }
+
+    fn record_capability_failure(&mut self) {
+        self.evidence.capability_verified = Some(false);
     }
 
     fn record_dependency_failure(&mut self) {
@@ -487,8 +576,24 @@ impl Worker {
         self.evidence.last_job_validated = Some(true);
     }
 
-    fn record_job_failure(&mut self) {
+    fn record_job_failure(&mut self, failure: AiJobFailure) {
         self.evidence.last_job_validated = Some(false);
+        match failure {
+            AiJobFailure::ProviderFailed
+            | AiJobFailure::RouteUnavailable
+            | AiJobFailure::InvalidModelOutput
+            | AiJobFailure::InvalidBriefing => self.record_capability_failure(),
+            AiJobFailure::DependencyUnavailable | AiJobFailure::PublishFailed => {
+                self.record_dependency_failure();
+            }
+            _ => {}
+        }
+    }
+
+    fn record_unknown_outcome(&mut self, observed_failure: Option<AiJobFailure>) {
+        if let Some(failure) = observed_failure {
+            self.record_job_failure(failure);
+        }
     }
 
     fn hello(&self, pid: u32) -> WorkerMessage {
@@ -583,11 +688,91 @@ mod tests {
     use super::*;
 
     #[test]
+    fn complete_startup_path_uses_one_agent_safe_deadline() {
+        const AGENT_STARTUP_DEADLINE: Duration = Duration::from_secs(120);
+        let started = tokio::time::Instant::now();
+        let startup_deadline = started + WORKER_STARTUP_BUDGET;
+        let setup_finished = started + Duration::from_secs(31);
+
+        let storage_deadline =
+            stage_deadline(startup_deadline, setup_finished, READINESS_STORAGE_TIMEOUT);
+        let route_deadline =
+            stage_deadline(startup_deadline, storage_deadline, READINESS_ROUTE_TIMEOUT);
+
+        assert_eq!(route_deadline, startup_deadline);
+        assert!(WORKER_STARTUP_BUDGET < AGENT_STARTUP_DEADLINE);
+    }
+
+    #[tokio::test]
+    async fn connection_and_repository_initialization_are_bounded() {
+        let result = run_with_startup_deadline(
+            tokio::time::Instant::now() + Duration::from_millis(1),
+            std::future::pending::<Result<(), RepositoryError>>(),
+        )
+        .await;
+
+        assert!(matches!(result, Err(RunError::StartupTimeout)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_probe_is_retried_only_after_the_cooldown_from_completion() {
+        let started = tokio::time::Instant::now();
+        let mut retry = tokio::time::interval_at(
+            started + DEFAULT_CAPABILITY_REVALIDATION_INTERVAL,
+            DEFAULT_CAPABILITY_REVALIDATION_INTERVAL,
+        );
+        retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let completed_at = started + Duration::from_secs(45);
+
+        schedule_capability_retry(&mut retry, completed_at);
+
+        assert_eq!(
+            retry.tick().await,
+            completed_at + DEFAULT_CAPABILITY_REVALIDATION_INTERVAL
+        );
+    }
+
+    #[tokio::test]
+    async fn a_readiness_probe_that_does_not_finish_times_out() {
+        let result = run_bounded_probe(
+            tokio::time::Instant::now() + Duration::from_millis(1),
+            std::future::pending::<Result<(), AiCapabilityProbeError>>(),
+        )
+        .await;
+
+        assert!(matches!(result, Err(AiCapabilityProbeError::Timeout)));
+    }
+
+    #[test]
     fn a_standalone_mongodb_topology_blocks_readiness() {
         let error = ensure_transaction_support(false).unwrap_err();
 
         assert!(matches!(error, CapabilityProbeError::Dependency(_)));
         assert!(ensure_transaction_support(true).is_ok());
+    }
+
+    #[test]
+    fn capability_probe_errors_distinguish_dependencies_from_capability_failures() {
+        assert!(matches!(
+            classify_capability_probe_error(AiCapabilityProbeError::Route(
+                AiRouteError::Repository(RepositoryError::LockPoisoned)
+            )),
+            CapabilityProbeError::Dependency(_)
+        ));
+        assert!(matches!(
+            classify_capability_probe_error(AiCapabilityProbeError::Route(
+                AiRouteError::Provider(tm_trading_ai_providers::AiProviderError::HttpStatus(401))
+            )),
+            CapabilityProbeError::Capability(code) if code == "auth_failed"
+        ));
+        assert!(matches!(
+            classify_capability_probe_error(AiCapabilityProbeError::InvalidResponse),
+            CapabilityProbeError::Capability(code) if code == "invalid_model_output"
+        ));
+        assert!(matches!(
+            classify_capability_probe_error(AiCapabilityProbeError::Timeout),
+            CapabilityProbeError::Dependency(_)
+        ));
     }
 
     #[test]
@@ -612,15 +797,76 @@ mod tests {
     }
 
     #[test]
-    fn a_job_failure_does_not_invalidate_capability_readiness() {
+    fn an_unknown_job_with_an_observed_capability_failure_invalidates_readiness() {
         let mut worker = Worker::new("ai-worker-test");
         worker.record_capability(true);
 
-        worker.record_job_failure();
+        worker.record_unknown_outcome(Some(AiJobFailure::InvalidModelOutput));
+
+        assert_eq!(worker.evidence.capability_verified, Some(false));
+        assert_eq!(worker.evidence.last_job_validated, Some(false));
+    }
+
+    #[test]
+    fn an_evidence_job_failure_does_not_invalidate_capability_readiness() {
+        let mut worker = Worker::new("ai-worker-test");
+        worker.record_capability(true);
+
+        worker.record_job_failure(AiJobFailure::NoUsableEvidence);
 
         assert_eq!(worker.evidence.capability_verified, Some(true));
         assert_eq!(worker.evidence.dependencies_reachable, Some(true));
         assert_eq!(worker.evidence.last_job_validated, Some(false));
+    }
+
+    #[test]
+    fn provider_route_and_model_output_job_failures_invalidate_capability_readiness() {
+        for failure in [
+            AiJobFailure::ProviderFailed,
+            AiJobFailure::RouteUnavailable,
+            AiJobFailure::InvalidModelOutput,
+        ] {
+            let mut worker = Worker::new("ai-worker-test");
+            worker.record_capability(true);
+
+            worker.record_job_failure(failure);
+
+            assert_eq!(worker.evidence.capability_verified, Some(false));
+            assert_eq!(worker.evidence.dependencies_reachable, Some(true));
+            assert_eq!(worker.evidence.last_job_validated, Some(false));
+        }
+    }
+
+    #[test]
+    fn final_schema_and_publication_failures_invalidate_readiness() {
+        let mut worker = Worker::new("ai-worker-test");
+        worker.record_capability(true);
+
+        worker.record_job_failure(AiJobFailure::InvalidBriefing);
+
+        assert_eq!(worker.evidence.capability_verified, Some(false));
+        assert_eq!(worker.evidence.dependencies_reachable, Some(true));
+
+        let mut worker = Worker::new("ai-worker-test");
+        worker.record_capability(true);
+
+        worker.record_job_failure(AiJobFailure::PublishFailed);
+
+        assert_eq!(worker.evidence.capability_verified, Some(false));
+        assert_eq!(worker.evidence.dependencies_reachable, Some(false));
+        assert_eq!(worker.evidence.sink_writable, Some(false));
+    }
+
+    #[test]
+    fn a_dependency_job_failure_marks_the_worker_not_ready() {
+        let mut worker = Worker::new("ai-worker-test");
+        worker.record_capability(true);
+
+        worker.record_job_failure(AiJobFailure::DependencyUnavailable);
+
+        assert_eq!(worker.evidence.capability_verified, Some(false));
+        assert_eq!(worker.evidence.dependencies_reachable, Some(false));
+        assert_eq!(worker.evidence.sink_writable, Some(false));
     }
 
     #[test]
@@ -648,5 +894,23 @@ mod tests {
         assert!(!stop_active_job(&mut active).await);
         assert!(active.is_none());
         assert!(stop_active_job(&mut None).await);
+    }
+
+    #[tokio::test]
+    async fn an_in_flight_probe_is_cancelled_and_reported_as_not_drained() {
+        let mut probes = tokio::task::JoinSet::new();
+        probes.spawn(std::future::pending::<Result<(), CapabilityProbeError>>());
+
+        let drained = stop_active_work(&mut None, &mut probes).await;
+        let WorkerMessage::Stopped {
+            drained: reported_drained,
+            ..
+        } = Worker::new("ai-worker-test").stopped("test", drained)
+        else {
+            panic!("expected a stopped message");
+        };
+
+        assert!(!reported_drained);
+        assert!(probes.is_empty());
     }
 }

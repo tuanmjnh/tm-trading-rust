@@ -80,6 +80,23 @@ fn new_briefing() -> AiBriefing {
 
 #[tokio::test]
 #[ignore = "requires TM_TRADING_TEST_MONGODB_URI"]
+async fn the_briefing_sink_probe_does_not_persist_a_probe_document() {
+    let (connection, jobs, _briefings) = harness().await;
+
+    jobs.probe_briefing_sink().await.unwrap();
+    let count = connection
+        .database()
+        .collection::<Document>("ai_briefings")
+        .count_documents(doc! {})
+        .await
+        .unwrap();
+    connection.database().drop().await.unwrap();
+
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires TM_TRADING_TEST_MONGODB_URI"]
 async fn a_successful_completion_publishes_the_briefing_and_job_together() {
     let (connection, jobs, briefings) = harness().await;
     jobs.create(new_job("success")).await.unwrap();

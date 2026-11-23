@@ -380,11 +380,16 @@ briefing, job, logs, or Desktop state.
 Expected result:
 
 - `GET /api/v1/services` lists `ai-worker` alongside the other enabled workers;
-- `ai-worker` becomes `READY` only after transaction-capable MongoDB and the route, provider, model, and credential resolve;
+- `ai-worker` becomes `READY` only after transaction-capable MongoDB, an aborted publication-shaped briefing-sink write probe, and one bounded, billable, schema-valid route execution;
+- MongoDB connection and repository/index initialization, the 15-second readiness transaction/sink stage, and the route chain of up to 75 seconds share one 110-second worker startup deadline below the Agent's 120-second deadline; the route stage receives only the time remaining in that deadline, and later revalidations have a 90-second budget;
 - a request from the Desktop or `POST /api/v1/ai/jobs` moves from `QUEUED` to `CLAIMED` and then to a terminal status;
 - a successful job atomically publishes its briefing and changes to `SUCCEEDED`, so the returned briefing ID is readable;
 - a failed request records a sanitized error code and never publishes a partial briefing;
-- a lease that lapses during execution becomes `OUTCOME_UNKNOWN`, not `SUCCEEDED` or `FAILED`.
+- provider, route, model-output, and final-schema failures revoke capability, while evidence-only failures do not;
+- an already observed capability or storage failure still revokes readiness if the lease expires before the failure can be persisted;
+- a dependency or briefing-publication failure makes the worker not ready until successful revalidation;
+- a lease that lapses during execution becomes `OUTCOME_UNKNOWN`, not `SUCCEEDED` or `FAILED`;
+- shutdown aborting an active job or readiness probe reports `drained: false`.
 
 With `TM_TRADING_AI_WORKER_ENABLED` unset or `0`, the worker exits with code `78` before opening MongoDB. The Agent does not register the worker unless that flag is enabled.
 

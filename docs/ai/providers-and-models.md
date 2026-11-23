@@ -1,6 +1,6 @@
 # AI Providers and Models
 
-> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, evidence-bound briefing contract/API/UI, the durable `ai_jobs` request queue, the supervised AI Worker, and the Desktop research-event request action are implemented (2026-11-22).
+> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, evidence-bound briefing contract/API/UI, the durable `ai_jobs` request queue, the supervised AI Worker, and the Desktop research-event request action are implemented (2026-11-23).
 
 ## 1. Scope
 
@@ -278,20 +278,36 @@ namespace to that worker alone. The worker is not given a shell command or an ar
 executable.
 
 Before reporting readiness the worker verifies that MongoDB supports transactions and
-that the `research_explanation` route, its provider profile, and its model are enabled
-and that the provider credential resolves. The probe never calls the provider, so
-readiness never costs a billable request.
+accepts the briefing-sink upsert used for publication. The sink probe runs inside a
+transaction that is deliberately aborted, so it verifies write authorization and schema
+acceptance without leaving a briefing document behind. The worker then runs one bounded
+route execution through the configured `research_explanation` route within its attempt,
+timeout, and output budgets and validates the response against the briefing schema,
+including the aggregate model-output content limit. This readiness probe is billable.
+MongoDB connection and repository/index initialization, the 15-second transaction/sink
+stage, and the route fallback chain of up to 75 seconds share one 110-second worker startup
+deadline below the Agent's 120-second deadline; the route stage receives only the time
+remaining in that deadline. Later revalidations have a 90-second budget. The probe runs in a
+cancellable task, so a slow database or provider cannot block heartbeat or shutdown
+handling. Failed probes are retried at most once per minute after the failed attempt
+completes, with only one probe in flight.
 
-A job-level failure or lease lapse does not revoke verified capability. A dependency or
-storage failure makes the worker not ready, and capability is restored only after a
-successful revalidation. The in-flight job runs in a cancellable task so heartbeat and
-shutdown commands remain responsive; shutdown aborts an active job and leaves its lease
-to expire as an unknown outcome.
+Evidence-only job failures and a lease lapse by itself do not revoke verified capability.
+Provider, route, model-output, or final-briefing-schema failures revoke it until a
+successful probe restores it, even when the lease expires before that observed failure can
+be persisted on the job. A dependency or storage failure, including a failed briefing
+publication, also makes the worker not ready and requires successful revalidation. The
+aggregate route-probe timeout is treated conservatively as a dependency failure because a
+repository read or provider call may have consumed the budget. The in-flight job runs in a
+cancellable task so heartbeat and shutdown commands remain responsive; shutdown aborts an
+active job or readiness probe, reports `drained: false`, and leaves an active job lease to
+expire as an unknown outcome.
 
 A job failure is recorded on the job with a sanitized code (`no_usable_evidence`,
-`invalid_request`, `evidence_too_large`, `invalid_model_output`, `provider_failed`,
-`route_unavailable`, `publish_failed`, or `unsupported_task`). The raw provider response
-is never stored.
+`invalid_request`, `evidence_too_large`, `evidence_unavailable`, `invalid_model_output`,
+`invalid_briefing`, `provider_failed`, `route_unavailable`, `dependency_unavailable`,
+`publish_failed`, or `unsupported_task`). A lapsed lease records `lease_lapsed` and remains
+`OUTCOME_UNKNOWN`. The raw provider response is never stored.
 
 ## 12. Pending
 
