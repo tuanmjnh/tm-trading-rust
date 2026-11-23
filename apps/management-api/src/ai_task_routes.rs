@@ -147,7 +147,7 @@ async fn validate_models(state: &AppState, route: &AiTaskRoute) -> Result<(), Ap
     Ok(())
 }
 
-fn to_dto(route: &AiTaskRoute) -> AiTaskRouteDto {
+pub(crate) fn to_dto(route: &AiTaskRoute) -> AiTaskRouteDto {
     AiTaskRouteDto {
         task: route.task().as_str().to_owned(),
         primary: route.primary().to_owned(),

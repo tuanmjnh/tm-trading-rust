@@ -5,13 +5,14 @@ use thiserror::Error;
 use tm_trading_contracts::{
     AiBriefingDto, AiBriefingListDto, AiBriefingQueryDto, AiJobDto, AiJobListDto, AiJobQueryDto,
     AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto, AiTaskRouteListDto,
-    CreateOperationRequest, CreateProviderInstanceRequest, CreateWatchlistRequest, HealthResponse,
-    MarketOverviewDto, MarketPulseDto, NewAiJobDto, NewsClusterListDto, NewsClusterQueryDto,
-    NewsItemDto, NewsListDto, NewsQueryDto, NewsSourceListDto, NotificationLogListDto,
-    NotificationLogQueryDto, NotificationOutboxListDto, NotificationOutboxQueryDto,
-    NotificationOutboxSummaryDto, NotificationSummaryQueryDto, OperationActionDto,
-    OperationResponse, ProviderDefinitionDto, ProviderInstanceDto, ReplaceWatchlistSymbolsRequest,
-    ResearchEventDto, ResearchEventListDto, ResearchEventQueryDto, SendTestNotificationRequest,
+    BackupArchiveDto, CreateOperationRequest, CreateProviderInstanceRequest,
+    CreateWatchlistRequest, HealthResponse, MarketOverviewDto, MarketPulseDto, NewAiJobDto,
+    NewsClusterListDto, NewsClusterQueryDto, NewsItemDto, NewsListDto, NewsQueryDto,
+    NewsSourceListDto, NotificationLogListDto, NotificationLogQueryDto, NotificationOutboxListDto,
+    NotificationOutboxQueryDto, NotificationOutboxSummaryDto, NotificationSummaryQueryDto,
+    OperationActionDto, OperationResponse, ProviderDefinitionDto, ProviderInstanceDto,
+    ReplaceWatchlistSymbolsRequest, ResearchEventDto, ResearchEventListDto, ResearchEventQueryDto,
+    RestoreBackupRequestDto, RestoreBackupResultDto, SendTestNotificationRequest,
     SendTestNotificationResponse, ServiceSnapshot, SupportBundleDto, SystemDiagnosticsDto,
     UpdateProviderInstanceRequest, WatchlistDto,
 };
@@ -90,6 +91,59 @@ impl ManagementApiClient {
             .http
             .post(format!("{}{path}", self.base_url))
             .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn export_backup(&self) -> Result<BackupArchiveDto, ApiClientError> {
+        let path = "/api/v1/system/backup/export";
+        let response = self
+            .http
+            .post(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn verify_backup(
+        &self,
+        archive: &BackupArchiveDto,
+    ) -> Result<RestoreBackupResultDto, ApiClientError> {
+        let path = "/api/v1/system/backup/verify";
+        let response = self
+            .http
+            .post(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .json(archive)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn restore_backup(
+        &self,
+        request: &RestoreBackupRequestDto,
+    ) -> Result<RestoreBackupResultDto, ApiClientError> {
+        let path = "/api/v1/system/backup/restore";
+        let response = self
+            .http
+            .post(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .json(request)
             .send()
             .await
             .map_err(|error| ApiClientError::Request {

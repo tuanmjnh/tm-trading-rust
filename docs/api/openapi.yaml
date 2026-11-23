@@ -2260,6 +2260,114 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/system/backup/export:
+    post:
+      tags:
+      - System
+      operationId: export_backup
+      responses:
+        '200':
+          description: Secret-redacted system configuration backup archive with SHA-256 checksum
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupArchiveDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/system/backup/restore:
+    post:
+      tags:
+      - System
+      operationId: restore_backup
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreBackupRequestDto'
+        required: true
+      responses:
+        '200':
+          description: Configuration restore report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreBackupResultDto'
+        '400':
+          description: Invalid payload or checksum mismatch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/system/backup/verify:
+    post:
+      tags:
+      - System
+      operationId: verify_backup
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupArchiveDto'
+        required: true
+      responses:
+        '200':
+          description: Integrity and checksum verification report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreBackupResultDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/system/diagnostics:
     get:
       tags:
@@ -3082,6 +3190,47 @@ components:
           type: string
         service_version:
           type: string
+    BackupArchiveDto:
+      type: object
+      description: Standalone, portable backup archive with metadata and SHA-256 integrity checksum.
+      required:
+      - version
+      - exported_at
+      - environment
+      - sha256_checksum
+      - payload
+      properties:
+        environment:
+          type: string
+        exported_at:
+          type: string
+          format: date-time
+        payload:
+          $ref: '#/components/schemas/BackupPayloadDto'
+        sha256_checksum:
+          type: string
+        version:
+          $ref: '#/components/schemas/ApiVersionInfo'
+    BackupPayloadDto:
+      type: object
+      description: Payload containing the backed-up configurations and user data.
+      required:
+      - watchlists
+      - ai_provider_profiles
+      - ai_task_routes
+      properties:
+        ai_provider_profiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiProviderProfileDto'
+        ai_task_routes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiTaskRouteDto'
+        watchlists:
+          type: array
+          items:
+            $ref: '#/components/schemas/WatchlistDto'
     ClaimCommandRequest:
       type: object
       description: Request to claim the next command addressed to an Agent.
@@ -4513,6 +4662,44 @@ components:
       - COMPLETE
       - PARTIAL
       - UNKNOWN
+    RestoreBackupRequestDto:
+      type: object
+      description: Request to restore configurations from a backup archive.
+      required:
+      - archive
+      properties:
+        archive:
+          $ref: '#/components/schemas/BackupArchiveDto'
+        overwrite_existing:
+          type: boolean
+          description: Whether to replace existing configurations entirely or merge. Default false (merge/upsert).
+    RestoreBackupResultDto:
+      type: object
+      description: Result report after executing or simulating a restore operation.
+      required:
+      - restored_at
+      - checksum_verified
+      - watchlists_restored
+      - ai_provider_profiles_restored
+      - ai_task_routes_restored
+      - message
+      properties:
+        ai_provider_profiles_restored:
+          type: integer
+          minimum: 0
+        ai_task_routes_restored:
+          type: integer
+          minimum: 0
+        checksum_verified:
+          type: boolean
+        message:
+          type: string
+        restored_at:
+          type: string
+          format: date-time
+        watchlists_restored:
+          type: integer
+          minimum: 0
     SendTestNotificationRequest:
       type: object
       description: Request to send a test notification.

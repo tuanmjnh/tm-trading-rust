@@ -41,6 +41,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/system/support-bundle",
             post(system::create_support_bundle),
         )
+        .route("/api/v1/system/backup/export", post(system::export_backup))
+        .route("/api/v1/system/backup/verify", post(system::verify_backup))
+        .route(
+            "/api/v1/system/backup/restore",
+            post(system::restore_backup),
+        )
         .route("/api/v1/openapi.json", get(openapi_document))
         .route("/api/v1/services", get(routes::list_services))
         .route(

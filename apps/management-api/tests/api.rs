@@ -2775,3 +2775,147 @@ async fn system_support_bundle_creation_and_redaction() {
             .contains("redacted")
     );
 }
+
+#[tokio::test]
+async fn system_backup_export_and_integrity_verification() {
+    let state = state();
+    // Seed a watchlist for the test user
+    state
+        .watchlists
+        .create(
+            "test-operator",
+            "Tech Stocks",
+            &["AAPL".to_owned(), "MSFT".to_owned()],
+            Utc::now(),
+        )
+        .await
+        .expect("created watchlist");
+
+    let app = router(state);
+
+    // 1. Export backup archive
+    let export_res = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/system/backup/export",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(export_res.status(), StatusCode::OK);
+
+    let archive: tm_trading_contracts::BackupArchiveDto =
+        serde_json::from_value(json_body(export_res).await).expect("valid archive");
+    assert!(archive.verify_integrity());
+    assert_eq!(archive.payload.watchlists.len(), 1);
+    assert_eq!(archive.payload.watchlists[0].name, "Tech Stocks");
+
+    // 2. Verify valid archive
+    let verify_res = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/system/backup/verify",
+            Some(USER_TOKEN),
+            Some(serde_json::to_value(&archive).unwrap()),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(verify_res.status(), StatusCode::OK);
+    let verify_json = json_body(verify_res).await;
+    assert_eq!(verify_json["checksum_verified"], true);
+
+    // 3. Verify tampered archive fails checksum
+    let mut tampered = archive;
+    tampered.sha256_checksum =
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_owned();
+    let tampered_res = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/system/backup/verify",
+            Some(USER_TOKEN),
+            Some(serde_json::to_value(&tampered).unwrap()),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(tampered_res.status(), StatusCode::OK);
+    let tampered_json = json_body(tampered_res).await;
+    assert_eq!(tampered_json["checksum_verified"], false);
+}
+
+#[tokio::test]
+async fn system_backup_restore_and_tamper_protection() {
+    let state = state();
+    let app = router(state.clone());
+
+    // Construct a backup archive with new watchlists
+    let new_watchlist = tm_trading_contracts::WatchlistDto {
+        id: "wl_restored_1".to_owned(),
+        name: "Restored Crypto".to_owned(),
+        symbols: vec!["BTCUSDT".to_owned(), "ETHUSDT".to_owned()],
+        is_default: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    let payload = tm_trading_contracts::BackupPayloadDto {
+        watchlists: vec![new_watchlist],
+        ai_provider_profiles: Vec::new(),
+        ai_task_routes: Vec::new(),
+    };
+    let archive = tm_trading_contracts::BackupArchiveDto::new(
+        tm_trading_contracts::ApiVersionInfo::current(),
+        "test-env".to_owned(),
+        payload,
+    )
+    .expect("archive created");
+
+    // 1. Attempt restore with tampered checksum -> Rejected with 400
+    let mut tampered_archive = archive.clone();
+    tampered_archive.sha256_checksum =
+        "0000000000000000000000000000000000000000000000000000000000000000".to_owned();
+    let tampered_req = tm_trading_contracts::RestoreBackupRequestDto {
+        archive: tampered_archive,
+        overwrite_existing: true,
+    };
+    let tampered_res = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/system/backup/restore",
+            Some(USER_TOKEN),
+            Some(serde_json::to_value(&tampered_req).unwrap()),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(tampered_res.status(), StatusCode::BAD_REQUEST);
+
+    // 2. Valid restore succeeds
+    let valid_req = tm_trading_contracts::RestoreBackupRequestDto {
+        archive,
+        overwrite_existing: true,
+    };
+    let valid_res = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/system/backup/restore",
+            Some(USER_TOKEN),
+            Some(serde_json::to_value(&valid_req).unwrap()),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(valid_res.status(), StatusCode::OK);
+    let valid_json = json_body(valid_res).await;
+    assert_eq!(valid_json["checksum_verified"], true);
+    assert_eq!(valid_json["watchlists_restored"], 1);
+
+    // 3. Verify watchlist is now present in the storage
+    let stored = state
+        .watchlists
+        .list("test-operator")
+        .await
+        .expect("list watchlists");
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].name(), "Restored Crypto");
+}

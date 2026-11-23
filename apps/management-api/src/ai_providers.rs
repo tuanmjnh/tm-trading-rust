@@ -133,7 +133,7 @@ pub async fn delete_ai_provider_profile(
     Ok(Json(()))
 }
 
-fn to_dto(profile: &AiProviderProfile) -> AiProviderProfileDto {
+pub(crate) fn to_dto(profile: &AiProviderProfile) -> AiProviderProfileDto {
     AiProviderProfileDto {
         id: profile.id().to_owned(),
         kind: profile.kind().as_str().to_owned(),

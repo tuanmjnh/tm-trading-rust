@@ -3,6 +3,7 @@ mod ai_job;
 mod ai_model;
 mod ai_provider;
 mod ai_task;
+mod backup;
 mod error;
 mod market;
 mod news;
@@ -28,6 +29,9 @@ pub use ai_provider::{
     UpdateAiProviderProfileDto,
 };
 pub use ai_task::{AiTaskRouteDto, AiTaskRouteListDto, NewAiTaskRouteDto, UpdateAiTaskRouteDto};
+pub use backup::{
+    BackupArchiveDto, BackupPayloadDto, RestoreBackupRequestDto, RestoreBackupResultDto,
+};
 pub use error::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
 pub use market::{
     MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto,

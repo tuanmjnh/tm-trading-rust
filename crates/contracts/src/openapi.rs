@@ -11,6 +11,9 @@ use crate::ai_provider::{
     UpdateAiProviderProfileDto,
 };
 use crate::ai_task::{AiTaskRouteDto, AiTaskRouteListDto, NewAiTaskRouteDto, UpdateAiTaskRouteDto};
+use crate::backup::{
+    BackupArchiveDto, BackupPayloadDto, RestoreBackupRequestDto, RestoreBackupResultDto,
+};
 use utoipa::OpenApi;
 
 use crate::error::ApiErrorResponse;
@@ -113,7 +116,10 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         list_notification_outbox,
         summary_notification_outbox,
         list_notification_logs,
-        send_test_notification
+        send_test_notification,
+        export_backup,
+        verify_backup,
+        restore_backup
     ),
     components(schemas(
         ApiVersionInfo,
@@ -123,6 +129,10 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         NotificationDiagnosticsDto,
         SystemDiagnosticsDto,
         SupportBundleDto,
+        BackupPayloadDto,
+        BackupArchiveDto,
+        RestoreBackupRequestDto,
+        RestoreBackupResultDto,
         ApiErrorResponse,
         CreateOperationRequest,
         OperationResponse,
@@ -268,6 +278,48 @@ pub fn system_diagnostics() {}
     )
 )]
 pub fn create_support_bundle() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/system/backup/export",
+    tag = "System",
+    responses(
+        (status = 200, description = "Secret-redacted system configuration backup archive with SHA-256 checksum", body = BackupArchiveDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn export_backup() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/system/backup/verify",
+    tag = "System",
+    request_body = BackupArchiveDto,
+    responses(
+        (status = 200, description = "Integrity and checksum verification report", body = RestoreBackupResultDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn verify_backup() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/system/backup/restore",
+    tag = "System",
+    request_body = RestoreBackupRequestDto,
+    responses(
+        (status = 200, description = "Configuration restore report", body = RestoreBackupResultDto),
+        (status = 400, description = "Invalid payload or checksum mismatch", body = ApiErrorResponse),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn restore_backup() {}
 
 #[utoipa::path(
     get,
