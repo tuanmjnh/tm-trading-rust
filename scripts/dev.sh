@@ -46,6 +46,26 @@ else
     done
 fi
 
+export TM_TRADING_MARKET_WORKER_ENABLED="1"
+export TM_TRADING_RESEARCH_WORKER_ENABLED="1"
+export TM_TRADING_RESEARCH_METHODS="vsa,price-action,trend,wonderwhales,sweep"
+export TM_TRADING_NEWS_WORKER_ENABLED="1"
+export TM_TRADING_AI_WORKER_ENABLED="1"
+export TM_TRADING_NOTIFICATION_WORKER_ENABLED="1"
+
+cargo run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start sample-worker &
+AGENT_PID=$!
+cleanup() {
+    if [ -n "$API_PID" ] && kill -0 "$API_PID" 2>/dev/null; then
+        echo "[CLEANUP] Stopping background Management API ($API_PID)..."
+        kill "$API_PID" 2>/dev/null || true
+    fi
+    if [ -n "$AGENT_PID" ] && kill -0 "$AGENT_PID" 2>/dev/null; then
+        echo "[CLEANUP] Stopping background Host Agent ($AGENT_PID)..."
+        kill "$AGENT_PID" 2>/dev/null || true
+    fi
+}
+
 # 2. Run Desktop UI
 if command -v dx >/dev/null 2>&1; then
     echo "[DX] Using Dioxus CLI with native Hot-Reload!"

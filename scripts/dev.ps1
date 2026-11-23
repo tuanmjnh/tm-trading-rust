@@ -88,6 +88,7 @@ if ($WithBackend) {
     Write-Host "[...] Starting Host Agent with live worker fleet..." -ForegroundColor Yellow
     $env:TM_TRADING_MARKET_WORKER_ENABLED = "1"
     $env:TM_TRADING_RESEARCH_WORKER_ENABLED = "1"
+    $env:TM_TRADING_RESEARCH_METHODS = "vsa,price-action,trend,wonderwhales,sweep"
     $env:TM_TRADING_NEWS_WORKER_ENABLED = "1"
     $env:TM_TRADING_AI_WORKER_ENABLED = "1"
     $env:TM_TRADING_NOTIFICATION_WORKER_ENABLED = "1"

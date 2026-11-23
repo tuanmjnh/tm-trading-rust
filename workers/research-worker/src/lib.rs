@@ -14,7 +14,11 @@ use tm_trading_domain::{
 };
 use tm_trading_market_providers::timeframe_millis;
 use tm_trading_research_engine::Bar;
-use tm_trading_research_engine::methods::{VSA_ID, VsaEventKind, VsaParams, analyze_vsa};
+use tm_trading_research_engine::methods::{
+    PRICE_ACTION_ID, PriceActionParams, SWEEP_ID, SweepParams, TREND_ID, TrendParams, VSA_ID,
+    VsaEventKind, VsaParams, WONDERWHALES_ID, WonderWhalesParams, analyze_price_action,
+    analyze_sweep, analyze_trend, analyze_vsa, analyze_wonderwhales,
+};
 use tm_trading_storage::{CandleRepository, RepositoryError, ResearchEventRepository};
 
 /// Version of the VSA observation contract produced by this worker.
@@ -68,6 +72,8 @@ pub struct ResearchWorkerConfig {
     /// The default is `false` so a Rust worker cannot dual-write with the legacy
     /// producer during cutover.
     pub source_of_truth: bool,
+    /// Active research methods to execute during scan (defaults to ["vsa"]).
+    pub methods: Vec<String>,
 }
 
 impl ResearchWorkerConfig {
@@ -114,6 +120,8 @@ impl ResearchWorkerConfig {
             MAX_CYCLE_TIMEOUT,
         )?;
         let source_of_truth = parse_bool("TM_TRADING_RESEARCH_SOURCE_OF_TRUTH", false)?;
+        let methods =
+            parse_methods(&std::env::var("TM_TRADING_RESEARCH_METHODS").unwrap_or_default());
 
         Ok(Self {
             owner_scope,
@@ -124,7 +132,26 @@ impl ResearchWorkerConfig {
             heartbeat_interval,
             cycle_timeout,
             source_of_truth,
+            methods,
         })
+    }
+}
+
+fn parse_methods(value: &str) -> Vec<String> {
+    let mut methods = Vec::new();
+    for method in value.split(',') {
+        let method = method.trim().to_ascii_lowercase();
+        if method.is_empty() {
+            continue;
+        }
+        if !methods.contains(&method) {
+            methods.push(method);
+        }
+    }
+    if methods.is_empty() {
+        vec![VSA_ID.to_owned()]
+    } else {
+        methods
     }
 }
 
@@ -569,79 +596,287 @@ pub async fn scan_research_events(
                 volume: candle.volume(),
             })
             .collect();
-        let analysis = analyze_vsa(&bars, &VsaParams::default());
-        let snapshot_id = input_snapshot_id(
-            symbol,
-            &config.timeframe,
-            VSA_ID,
-            METHOD_VERSION,
-            candles.first().expect("window is not empty").open_time(),
-            latest.open_time(),
-            candles.len(),
-        );
+        for method_name in &config.methods {
+            match method_name.as_str() {
+                VSA_ID => {
+                    let analysis = analyze_vsa(&bars, &VsaParams::default());
+                    let snapshot_id = input_snapshot_id(
+                        symbol,
+                        &config.timeframe,
+                        VSA_ID,
+                        METHOD_VERSION,
+                        candles.first().expect("window is not empty").open_time(),
+                        latest.open_time(),
+                        candles.len(),
+                    );
 
-        for event in &analysis.events {
-            let candle = &candles[event.bar];
-            let observed_at = timestamp_for(symbol, candle.close_time())?;
-            let source_id = candle.source();
-            let mut evidence = BTreeMap::from([
-                ("open".to_owned(), candle.open()),
-                ("high".to_owned(), candle.high()),
-                ("low".to_owned(), candle.low()),
-                ("close".to_owned(), candle.close()),
-                ("volume".to_owned(), candle.volume()),
-                (
-                    "volume_ratio".to_owned(),
-                    analysis.series.volume_ratio[event.bar],
-                ),
-                ("score".to_owned(), event.kind.score()),
-            ]);
-            if let Some(atr) = analysis.series.atr[event.bar] {
-                evidence.insert("atr".to_owned(), atr);
-            }
-            if let Some(average) = analysis.series.volume_average[event.bar] {
-                evidence.insert("volume_average".to_owned(), average);
-            }
+                    for event in &analysis.events {
+                        let candle = &candles[event.bar];
+                        let observed_at = timestamp_for(symbol, candle.close_time())?;
+                        let source_id = candle.source();
+                        let mut evidence = BTreeMap::from([
+                            ("open".to_owned(), candle.open()),
+                            ("high".to_owned(), candle.high()),
+                            ("low".to_owned(), candle.low()),
+                            ("close".to_owned(), candle.close()),
+                            ("volume".to_owned(), candle.volume()),
+                            (
+                                "volume_ratio".to_owned(),
+                                analysis.series.volume_ratio[event.bar],
+                            ),
+                            ("score".to_owned(), event.kind.score()),
+                        ]);
+                        if let Some(atr) = analysis.series.atr[event.bar] {
+                            evidence.insert("atr".to_owned(), atr);
+                        }
+                        if let Some(average) = analysis.series.volume_average[event.bar] {
+                            evidence.insert("volume_average".to_owned(), average);
+                        }
 
-            let mut quality_reasons = Vec::new();
-            if analysis.series.atr[event.bar].is_none() {
-                quality_reasons.push("atr_unavailable".to_owned());
-            }
-            if analysis.series.volume_average[event.bar].is_none() {
-                quality_reasons.push("volume_average_unavailable".to_owned());
-            }
-            let quality_state = if quality_reasons.is_empty() {
-                ResearchQuality::Complete
-            } else {
-                ResearchQuality::Partial
-            };
+                        let mut quality_reasons = Vec::new();
+                        if analysis.series.atr[event.bar].is_none() {
+                            quality_reasons.push("atr_unavailable".to_owned());
+                        }
+                        if analysis.series.volume_average[event.bar].is_none() {
+                            quality_reasons.push("volume_average_unavailable".to_owned());
+                        }
+                        let quality_state = if quality_reasons.is_empty() {
+                            ResearchQuality::Complete
+                        } else {
+                            ResearchQuality::Partial
+                        };
 
-            events.push(ResearchEvent::new(NewResearchEvent {
-                owner_scope: config.owner_scope.clone(),
-                symbol: symbol.clone(),
-                timeframe: config.timeframe.clone(),
-                method: VSA_ID.to_owned(),
-                method_version: METHOD_VERSION.to_owned(),
-                event_type: event.kind.label().to_owned(),
-                direction: direction(event.kind),
-                score: event.kind.score(),
-                observed_at,
-                detected_at: observed_at,
-                ingested_at: now,
-                source_id: source_id.to_owned(),
-                provider_method: provider_method(source_id),
-                input_snapshot_id: snapshot_id.clone(),
-                quality_state,
-                quality_reasons,
-                evidence,
-                context: BTreeMap::from([
-                    ("event".to_owned(), event.kind.label().to_owned()),
-                    (
-                        "volume_bucket".to_owned(),
-                        analysis.series.bucket[event.bar].label().to_owned(),
-                    ),
-                ]),
-            })?);
+                        events.push(ResearchEvent::new(NewResearchEvent {
+                            owner_scope: config.owner_scope.clone(),
+                            symbol: symbol.clone(),
+                            timeframe: config.timeframe.clone(),
+                            method: VSA_ID.to_owned(),
+                            method_version: METHOD_VERSION.to_owned(),
+                            event_type: event.kind.label().to_owned(),
+                            direction: direction(event.kind),
+                            score: event.kind.score(),
+                            observed_at,
+                            detected_at: observed_at,
+                            ingested_at: now,
+                            source_id: source_id.to_owned(),
+                            provider_method: provider_method(source_id),
+                            input_snapshot_id: snapshot_id.clone(),
+                            quality_state,
+                            quality_reasons,
+                            evidence,
+                            context: BTreeMap::from([
+                                ("event".to_owned(), event.kind.label().to_owned()),
+                                (
+                                    "volume_bucket".to_owned(),
+                                    analysis.series.bucket[event.bar].label().to_owned(),
+                                ),
+                            ]),
+                        })?);
+                    }
+                }
+                PRICE_ACTION_ID => {
+                    let analysis = analyze_price_action(&bars, &PriceActionParams::default());
+                    let snapshot_id = input_snapshot_id(
+                        symbol,
+                        &config.timeframe,
+                        PRICE_ACTION_ID,
+                        METHOD_VERSION,
+                        candles.first().expect("window is not empty").open_time(),
+                        latest.open_time(),
+                        candles.len(),
+                    );
+
+                    for event in &analysis.events {
+                        let candle = &candles[event.bar_index];
+                        let observed_at = timestamp_for(symbol, candle.close_time())?;
+                        let source_id = candle.source();
+                        let evidence = BTreeMap::from([
+                            ("open".to_owned(), candle.open()),
+                            ("high".to_owned(), candle.high()),
+                            ("low".to_owned(), candle.low()),
+                            ("close".to_owned(), candle.close()),
+                            ("volume".to_owned(), candle.volume()),
+                            ("score".to_owned(), event.score),
+                        ]);
+
+                        events.push(ResearchEvent::new(NewResearchEvent {
+                            owner_scope: config.owner_scope.clone(),
+                            symbol: symbol.clone(),
+                            timeframe: config.timeframe.clone(),
+                            method: PRICE_ACTION_ID.to_owned(),
+                            method_version: METHOD_VERSION.to_owned(),
+                            event_type: event.kind.as_str().to_owned(),
+                            direction: score_direction(event.score),
+                            score: event.score,
+                            observed_at,
+                            detected_at: observed_at,
+                            ingested_at: now,
+                            source_id: source_id.to_owned(),
+                            provider_method: provider_method(source_id),
+                            input_snapshot_id: snapshot_id.clone(),
+                            quality_state: ResearchQuality::Complete,
+                            quality_reasons: Vec::new(),
+                            evidence,
+                            context: BTreeMap::from([(
+                                "event".to_owned(),
+                                event.kind.as_str().to_owned(),
+                            )]),
+                        })?);
+                    }
+                }
+                TREND_ID => {
+                    let analysis = analyze_trend(&bars, &TrendParams::default());
+                    let snapshot_id = input_snapshot_id(
+                        symbol,
+                        &config.timeframe,
+                        TREND_ID,
+                        METHOD_VERSION,
+                        candles.first().expect("window is not empty").open_time(),
+                        latest.open_time(),
+                        candles.len(),
+                    );
+
+                    for event in &analysis.events {
+                        let candle = &candles[event.bar_index];
+                        let observed_at = timestamp_for(symbol, candle.close_time())?;
+                        let source_id = candle.source();
+                        let evidence = BTreeMap::from([
+                            ("open".to_owned(), candle.open()),
+                            ("high".to_owned(), candle.high()),
+                            ("low".to_owned(), candle.low()),
+                            ("close".to_owned(), candle.close()),
+                            ("volume".to_owned(), candle.volume()),
+                            ("score".to_owned(), event.score),
+                        ]);
+
+                        events.push(ResearchEvent::new(NewResearchEvent {
+                            owner_scope: config.owner_scope.clone(),
+                            symbol: symbol.clone(),
+                            timeframe: config.timeframe.clone(),
+                            method: TREND_ID.to_owned(),
+                            method_version: METHOD_VERSION.to_owned(),
+                            event_type: event.kind.as_str().to_owned(),
+                            direction: score_direction(event.score),
+                            score: event.score,
+                            observed_at,
+                            detected_at: observed_at,
+                            ingested_at: now,
+                            source_id: source_id.to_owned(),
+                            provider_method: provider_method(source_id),
+                            input_snapshot_id: snapshot_id.clone(),
+                            quality_state: ResearchQuality::Complete,
+                            quality_reasons: Vec::new(),
+                            evidence,
+                            context: BTreeMap::from([(
+                                "event".to_owned(),
+                                event.kind.as_str().to_owned(),
+                            )]),
+                        })?);
+                    }
+                }
+                WONDERWHALES_ID => {
+                    let analysis = analyze_wonderwhales(&bars, &WonderWhalesParams::default());
+                    let snapshot_id = input_snapshot_id(
+                        symbol,
+                        &config.timeframe,
+                        WONDERWHALES_ID,
+                        METHOD_VERSION,
+                        candles.first().expect("window is not empty").open_time(),
+                        latest.open_time(),
+                        candles.len(),
+                    );
+
+                    for event in &analysis.events {
+                        let candle = &candles[event.bar_index];
+                        let observed_at = timestamp_for(symbol, candle.close_time())?;
+                        let source_id = candle.source();
+                        let evidence = BTreeMap::from([
+                            ("open".to_owned(), candle.open()),
+                            ("high".to_owned(), candle.high()),
+                            ("low".to_owned(), candle.low()),
+                            ("close".to_owned(), candle.close()),
+                            ("volume".to_owned(), candle.volume()),
+                            ("score".to_owned(), event.score),
+                        ]);
+
+                        events.push(ResearchEvent::new(NewResearchEvent {
+                            owner_scope: config.owner_scope.clone(),
+                            symbol: symbol.clone(),
+                            timeframe: config.timeframe.clone(),
+                            method: WONDERWHALES_ID.to_owned(),
+                            method_version: METHOD_VERSION.to_owned(),
+                            event_type: event.kind.as_str().to_owned(),
+                            direction: score_direction(event.score),
+                            score: event.score,
+                            observed_at,
+                            detected_at: observed_at,
+                            ingested_at: now,
+                            source_id: source_id.to_owned(),
+                            provider_method: provider_method(source_id),
+                            input_snapshot_id: snapshot_id.clone(),
+                            quality_state: ResearchQuality::Complete,
+                            quality_reasons: Vec::new(),
+                            evidence,
+                            context: BTreeMap::from([(
+                                "event".to_owned(),
+                                event.kind.as_str().to_owned(),
+                            )]),
+                        })?);
+                    }
+                }
+                SWEEP_ID => {
+                    let analysis = analyze_sweep(&bars, &SweepParams::default());
+                    let snapshot_id = input_snapshot_id(
+                        symbol,
+                        &config.timeframe,
+                        SWEEP_ID,
+                        METHOD_VERSION,
+                        candles.first().expect("window is not empty").open_time(),
+                        latest.open_time(),
+                        candles.len(),
+                    );
+
+                    for event in &analysis.events {
+                        let candle = &candles[event.bar_index];
+                        let observed_at = timestamp_for(symbol, candle.close_time())?;
+                        let source_id = candle.source();
+                        let mut evidence = BTreeMap::from([
+                            ("open".to_owned(), candle.open()),
+                            ("high".to_owned(), candle.high()),
+                            ("low".to_owned(), candle.low()),
+                            ("close".to_owned(), candle.close()),
+                            ("volume".to_owned(), candle.volume()),
+                            ("score".to_owned(), event.score),
+                        ]);
+                        evidence.insert("swept_level".to_owned(), event.swept_level);
+
+                        events.push(ResearchEvent::new(NewResearchEvent {
+                            owner_scope: config.owner_scope.clone(),
+                            symbol: symbol.clone(),
+                            timeframe: config.timeframe.clone(),
+                            method: SWEEP_ID.to_owned(),
+                            method_version: METHOD_VERSION.to_owned(),
+                            event_type: event.kind.as_str().to_owned(),
+                            direction: score_direction(event.score),
+                            score: event.score,
+                            observed_at,
+                            detected_at: observed_at,
+                            ingested_at: now,
+                            source_id: source_id.to_owned(),
+                            provider_method: provider_method(source_id),
+                            input_snapshot_id: snapshot_id.clone(),
+                            quality_state: ResearchQuality::Complete,
+                            quality_reasons: Vec::new(),
+                            evidence,
+                            context: BTreeMap::from([(
+                                "event".to_owned(),
+                                event.kind.as_str().to_owned(),
+                            )]),
+                        })?);
+                    }
+                }
+                _ => {}
+            }
         }
 
         outcome.scanned_symbols += 1;
@@ -717,6 +952,16 @@ fn direction(kind: VsaEventKind) -> i8 {
     }
 }
 
+fn score_direction(score: f64) -> i8 {
+    if score > 0.0 {
+        1
+    } else if score < 0.0 {
+        -1
+    } else {
+        0
+    }
+}
+
 fn provider_method(source: &str) -> String {
     match source {
         "binance" => "binance.klines".to_owned(),
@@ -749,6 +994,7 @@ mod tests {
             heartbeat_interval: std::time::Duration::from_secs(5),
             cycle_timeout: std::time::Duration::from_secs(30),
             source_of_truth: true,
+            methods: vec![VSA_ID.to_owned()],
         }
     }
 
@@ -859,6 +1105,49 @@ mod tests {
         assert!(event.evidence().contains_key("close"));
         assert!(event.evidence().contains_key("volume_ratio"));
         assert!(event.context().contains_key("volume_bucket"));
+    }
+
+    #[tokio::test]
+    async fn multi_method_scan_produces_events_across_methods() {
+        let candles = fixture_candles();
+        let now = latest_time(&candles) + chrono::Duration::seconds(1);
+        let candle_repository = InMemoryCandleRepository::new();
+        candle_repository
+            .upsert_closed(&candles)
+            .await
+            .expect("seed candles");
+        let event_repository = InMemoryResearchEventRepository::new();
+
+        let mut multi_config = config();
+        multi_config.methods = vec![
+            VSA_ID.to_owned(),
+            PRICE_ACTION_ID.to_owned(),
+            TREND_ID.to_owned(),
+            WONDERWHALES_ID.to_owned(),
+            SWEEP_ID.to_owned(),
+        ];
+
+        let outcome =
+            scan_research_events(&candle_repository, &event_repository, &multi_config, now)
+                .await
+                .expect("scan succeeds");
+
+        assert_eq!(outcome.scanned_symbols, 1);
+        assert!(
+            outcome.detected_events >= 5,
+            "multi-method should detect vsa + any additional pattern events"
+        );
+
+        let stored = event_repository
+            .list(&ResearchEventQuery {
+                owner_scope: Some("test-operator".to_owned()),
+                ..ResearchEventQuery::default()
+            })
+            .await
+            .expect("list events");
+
+        let vsa_events: Vec<_> = stored.iter().filter(|e| e.method() == "vsa").collect();
+        assert_eq!(vsa_events.len(), 5);
     }
 
     #[tokio::test]
