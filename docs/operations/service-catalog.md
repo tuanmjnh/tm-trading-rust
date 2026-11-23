@@ -1,6 +1,6 @@
 # Service Catalog
 
-> Status: Phase 2 sample-worker runtime implemented and hardened on 2026-11-18; Phase 5 market-worker runtime implemented on 2026-11-20; Phase 6 research-worker runtime implemented on 2026-11-20; Phase 7 news-worker runtime implemented on 2026-11-20; Phase 7 ai-worker runtime implemented on 2026-11-22; Phase 8 notification-worker runtime implemented on 2026-11-23; Phase 9 desktop release hardening completed on 2026-11-23<br>
+> Status: Phase 2 sample-worker runtime implemented on 2026-11-18; Phase 5 market-worker runtime implemented on 2026-11-20; Phase 6 research-worker runtime implemented on 2026-11-20; Phase 7 news-worker runtime implemented on 2026-11-20; Phase 7 ai-worker runtime implemented on 2026-11-22; Phase 8 notification-worker runtime implemented on 2026-11-23; Phase 9 desktop release hardening completed on 2026-11-23; Phase 10 advanced research methods implemented on 2026-11-23; Phase 11 market intelligence & Binance futures implemented on 2026-11-23; Phase 12 alert rule engine & webhook receiver implemented on 2026-11-23; Phase 14 portfolio tracker analytics implemented on 2026-11-23<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## `sample-worker`
@@ -125,7 +125,7 @@ The worker writes only `state='closed'` bars keyed by `{symbol}:{timeframe}:{ope
 | Service definition ID | `research-worker` |
 | Executable | `tm-trading-research-worker.exe` on Windows; `tm-trading-research-worker` on other platforms |
 | Process owner | The single Host Agent for the host |
-| Purpose | Scans persisted closed candles with the deterministic VSA method and stores owner-scoped research events with provenance |
+| Purpose | Scans persisted closed candles with deterministic methods (VSA, Price Action / SMC, Trend Pullback & Breakout, WonderWhales PSAR+EMA, Liquidity Sweeps) and stores owner-scoped research events with provenance |
 | IPC schema | `worker.v2` |
 | Control channel | One JSON object per line over the worker stdin/stdout pipes |
 | Shutdown | The Agent sends an explicit `shutdown` command; the worker aborts an in-flight scan, reports `stopped`, and exits |
@@ -145,6 +145,7 @@ The worker is opt-in. It is registered only when `TM_TRADING_RESEARCH_WORKER_ENA
 | `TM_TRADING_RESEARCH_CYCLE_MS` | Delay between completed scans |
 | `TM_TRADING_RESEARCH_CYCLE_TIMEOUT_MS` | Hard deadline for one scan |
 | `TM_TRADING_RESEARCH_HEARTBEAT_MS` | Heartbeat interval |
+| `TM_TRADING_RESEARCH_METHODS` | Comma-separated list of methods to execute: `vsa`, `price-action`, `trend`, `wonderwhales`, `sweep` (defaults to `vsa`) |
 | `TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` | `1`/`true` allows research event writes; defaults off |
 
 `TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` is deliberately off by default. With it disabled the worker exits with code `78` before opening MongoDB or writing an event, so a cutover installation cannot become a second writer.

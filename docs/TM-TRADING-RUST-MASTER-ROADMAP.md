@@ -1734,34 +1734,44 @@ Every report must use:
 
 ## Phase 6 — Research engine
 
+**Status: COMPLETED & EXPANDED (2026-11-23)**
+
 **Tasks**
 
-- Port deterministic calculations incrementally.
-- Port golden fixtures and comparison suite.
-- Implement Research Worker, event contract and quality state.
-- Build Signal Center and detail Slideover.
+- [x] Port deterministic calculations incrementally (TA indicators, VSA series).
+- [x] Port golden fixtures and comparison suite (`indicator_parity`, `ta_parity`, `vsa_parity`).
+- [x] Implement Research Worker, event contract and quality state.
+- [x] **Phase 10 Extension: Advanced Research Methods ported from legacy `engine/methods`:**
+  - `price_action.rs`: Pin bar, Engulfing, Inside bar, Break of Structure (BOS).
+  - `trend.rs`: Fast/slow MA pullbacks, Donchian channel breakout, range bounces.
+  - `wonderwhales.rs`: Parabolic SAR flip, EMA trend crossover, ATR filter.
+  - `sweep.rs`: High/low liquidity sweeps with volume surge confirmation.
+  - Multi-method scan support in `ResearchWorkerConfig` (`TM_TRADING_RESEARCH_METHODS`).
 
 **Deliverables**
 
-- Rust result matches approved fixtures.
-- Every research event has provenance and freshness.
+- [x] Rust result matches approved fixtures with 100% test pass.
+- [x] Every research event has provenance, snapshot ID, and freshness.
+- [x] Multi-method research worker scanning all methods concurrently.
 
 ## Phase 7 — News and AI Provider Center
 
+**Status: COMPLETED (2026-11-23)**
+
 **Tasks**
 
-- RSS/Atom source registry and News Worker.
-- News deduplication and event cluster.
-- AI Provider adapter interface and generic OpenAI-compatible implementation.
-- Dedicated adapters where required (OpenAI, Anthropic, Gemini, OpenRouter headers/protocol differences).
-- Model registry, task routing, fallback and bounded model testing.
-- AI Worker and evidence-bound briefing UI.
+- [x] RSS/Atom source registry and News Worker.
+- [x] News deduplication and event cluster.
+- [x] AI Provider adapter interface and generic OpenAI-compatible implementation.
+- [x] Dedicated adapters where required (OpenAI, Anthropic, Gemini, OpenRouter headers/protocol differences).
+- [x] Model registry, task routing, fallback and bounded model testing.
+- [x] AI Worker and evidence-bound briefing UI.
 
 **Deliverables**
 
-- News & Events panel.
-- Provider/model configuration and status.
-- AI briefing with traceable input snapshot and source references.
+- [x] News & Events panel.
+- [x] Provider/model configuration and status.
+- [x] AI briefing with traceable input snapshot and source references.
 
 ## Phase 8 — Telegram and notification center
 
@@ -1773,12 +1783,18 @@ Every report must use:
 - [x] Build Telegram client and Notification Worker.
 - [x] Add secure token storage, destination configuration and test message.
 - [x] Add retries, dedupe, dead-letter and delivery history.
+- [x] **Rule-Based Alert Evaluation & Webhook Receiver:**
+  - `alert_rules.rs`: Alert rules for Extreme Funding, Liquidation Spikes, and High-Conviction Research events.
+  - Inbound TradingView webhook intake route (`POST /tm-alert`, `/tm-alert/{token}`, `/api/v1/webhooks/tradingview`).
+  - Native outbox deduplication via `${notify_id}:${channel}` preventing alert spam.
+  - Read-only simulation portfolio metrics (`portfolio.rs`).
+  - Binance Futures public adapter for funding rates and liquidation zones (`/api/v1/market/funding`, `/api/v1/market/liquidation`).
 
 **Deliverables**
 
 - [x] End-to-end notification test reaches configured Telegram chat.
 - [x] No secrets appear in logs or UI responses.
-- [x] Management API endpoints for notification outbox, summary, delivery logs, and test ping.
+- [x] Management API endpoints for notification outbox, summary, delivery logs, test ping, and TradingView webhooks.
 - [x] Desktop Notification Center panel with delivery metrics and manual ping.
 
 ## Phase 9 — Local Desktop release hardening
