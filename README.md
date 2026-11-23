@@ -51,6 +51,34 @@ git diff --exit-code -- docs/api/openapi.yaml
 
 The CI workflow also runs a RustSec dependency audit and a repository secret scan with pinned third-party actions.
 
+### Running the Desktop UI in Development
+
+The Desktop Control Center is a native GUI application built with **Dioxus Desktop** and **WebView2**.
+
+To run it locally in development mode:
+
+```powershell
+# 1. (Optional) Run the Management API backend on loopback (port 8787)
+cargo run -p tm-trading-management-api
+
+# 2. In another terminal, launch the Desktop UI
+cargo run -p tm-trading-desktop
+```
+
+#### Environment Variables for Desktop Development:
+- `TM_TRADING_API_URL`: Backend API URL (default: `http://127.0.0.1:8787`).
+- `TM_TRADING_LOCAL_API_TOKEN`: Local operator bearer token for authenticated commands.
+- `TM_TRADING_LOCALE`: UI language (`en` for English, `vi` for Vietnamese, default: `en`).
+- `TM_TRADING_DESKTOP_DATA_DIR`: Custom data cache directory for WebView2 profile storage.
+- `RUST_LOG`: Log level filter (e.g. `info`, `debug`, `trace`).
+
+```powershell
+# Example: Launch Desktop UI with Vietnamese language and custom API endpoint
+$env:TM_TRADING_LOCALE="vi"
+$env:TM_TRADING_API_URL="http://127.0.0.1:8787"
+cargo run -p tm-trading-desktop
+```
+
 Build and exercise the independent Agent/sample-worker runtime:
 
 ```powershell

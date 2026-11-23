@@ -56,7 +56,39 @@ The desktop application performs pre-flight verification at startup and displays
 
 ---
 
-## 3. Automated Windows Packaging Tool
+## 3. Running Desktop UI in Development
+
+For local development and testing, you can launch the desktop GUI directly using `cargo run`:
+
+```powershell
+# 1. Start the backend Management API (Optional but recommended for live data)
+cargo run -p tm-trading-management-api
+
+# 2. In another terminal, run the Desktop UI
+cargo run -p tm-trading-desktop
+```
+
+### Configurable Environment Variables
+
+| Variable | Description | Default | Example |
+| :--- | :--- | :--- | :--- |
+| `TM_TRADING_API_URL` | Loopback Management API endpoint | `http://127.0.0.1:8787` | `http://127.0.0.1:8787` |
+| `TM_TRADING_LOCAL_API_TOKEN` | Bearer token for privileged control commands | *(empty)* | `secret-token-xyz` |
+| `TM_TRADING_LOCALE` | Initial UI language (`en` or `vi`) | `en` | `vi` |
+| `TM_TRADING_DESKTOP_DATA_DIR` | Custom WebView2 profile cache directory | `<target_dir>/data/desktop` | `C:\Users\AppData\Local\tm-trading` |
+| `RUST_LOG` | Tracing log level filter | `info` | `debug,tm_trading_desktop=trace` |
+
+### Running with Hot Reload (Optional with Dioxus CLI)
+
+If you have `dioxus-cli` installed (`cargo install dioxus-cli`):
+```powershell
+cd apps/desktop
+dx serve --platform desktop
+```
+
+---
+
+## 4. Automated Windows Packaging Tool
 
 The project includes an automated PowerShell release packager: [`scripts/package-desktop-windows.ps1`](../../scripts/package-desktop-windows.ps1).
 
