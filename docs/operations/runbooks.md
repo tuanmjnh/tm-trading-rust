@@ -380,7 +380,7 @@ briefing, job, logs, or Desktop state.
 Expected result:
 
 - `GET /api/v1/services` lists `ai-worker` alongside the other enabled workers;
-- `ai-worker` becomes `READY` only after the route, provider, model, and credential resolve;
+- `ai-worker` becomes `READY` only after transaction-capable MongoDB and the route, provider, model, and credential resolve;
 - a request from the Desktop or `POST /api/v1/ai/jobs` moves from `QUEUED` to `CLAIMED` and then to a terminal status;
 - a successful job atomically publishes its briefing and changes to `SUCCEEDED`, so the returned briefing ID is readable;
 - a failed request records a sanitized error code and never publishes a partial briefing;
