@@ -5849,6 +5849,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tm-trading-telegram-client"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tm-trading-domain",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "tokio"
 version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -10,11 +10,11 @@ use tm_trading_domain::{
     DEFAULT_OUTBOX_MAX_ATTEMPTS, NotificationLogItem, NotificationOutboxItem, NotificationState,
 };
 
+use crate::RepositoryError;
 use crate::notifications::{
     EnqueueNotificationOutcome, NotificationLogQuery, NotificationLogRepository,
     NotificationOutboxQuery, NotificationOutboxRepository, RecordNotificationLogOutcome,
 };
-use crate::RepositoryError;
 
 type OutboxMap = HashMap<String, NotificationOutboxItem>;
 type LeaseMap = HashMap<String, (String, DateTime<Utc>)>;
@@ -392,10 +392,7 @@ mod tests {
         assert!(none.is_none());
 
         // Mark accepted
-        let accepted = repo
-            .mark_accepted(&item.id, "msg_999", now)
-            .await
-            .unwrap();
+        let accepted = repo.mark_accepted(&item.id, "msg_999", now).await.unwrap();
         assert_eq!(accepted.state, NotificationState::Accepted);
         assert_eq!(accepted.message_id.as_deref(), Some("msg_999"));
     }
@@ -426,7 +423,10 @@ mod tests {
         };
 
         let outcome = repo.record(log_item.clone()).await.unwrap();
-        assert_eq!(outcome, RecordNotificationLogOutcome::Recorded(log_item.clone()));
+        assert_eq!(
+            outcome,
+            RecordNotificationLogOutcome::Recorded(log_item.clone())
+        );
 
         let outcome2 = repo.record(log_item.clone()).await.unwrap();
         assert_eq!(outcome2, RecordNotificationLogOutcome::Existing(log_item));

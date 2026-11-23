@@ -120,7 +120,10 @@ async fn logs_record_first_write_wins() {
     };
 
     let outcome = log_repo.record(log_item.clone()).await.unwrap();
-    assert_eq!(outcome, RecordNotificationLogOutcome::Recorded(log_item.clone()));
+    assert_eq!(
+        outcome,
+        RecordNotificationLogOutcome::Recorded(log_item.clone())
+    );
 
     // First write wins
     let outcome2 = log_repo.record(log_item.clone()).await.unwrap();

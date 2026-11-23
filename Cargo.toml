@@ -13,6 +13,7 @@ members = [
     "crates/supervisor-core",
     "crates/api-client",
     "crates/research-engine",
+    "crates/telegram-client",
     "workers/research-worker",
     "apps/agent",
     "apps/management-api",
@@ -62,6 +63,7 @@ tm-trading-observability = { path = "crates/observability" }
 tm-trading-research-engine = { path = "crates/research-engine" }
 tm-trading-storage = { path = "crates/storage" }
 tm-trading-supervisor-core = { path = "crates/supervisor-core" }
+tm-trading-telegram-client = { path = "crates/telegram-client" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

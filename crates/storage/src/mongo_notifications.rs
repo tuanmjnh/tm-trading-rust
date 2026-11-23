@@ -15,14 +15,17 @@ use tm_trading_domain::{
     OUTBOX_SCHEMA_VERSION, ROUTER_SCHEMA_VERSION,
 };
 
+use crate::RepositoryError;
 use crate::bson_support::{from_timestamp, is_duplicate_key, number_as_i64, timestamp};
 use crate::notifications::{
     EnqueueNotificationOutcome, NotificationLogQuery, NotificationLogRepository,
     NotificationOutboxQuery, NotificationOutboxRepository, RecordNotificationLogOutcome,
 };
-use crate::RepositoryError;
 
-fn parse_millis_or_date(doc: &Document, field: &'static str) -> Result<DateTime<Utc>, RepositoryError> {
+fn parse_millis_or_date(
+    doc: &Document,
+    field: &'static str,
+) -> Result<DateTime<Utc>, RepositoryError> {
     match doc.get(field) {
         Some(Bson::DateTime(dt)) => from_timestamp(*dt),
         Some(Bson::Int64(ms)) => Utc
@@ -516,7 +519,12 @@ impl NotificationOutboxRepository for MongoNotificationOutboxRepository {
             if !retryable || attempts >= DEFAULT_OUTBOX_MAX_ATTEMPTS {
                 ("failed", true, None, Some(now.timestamp_millis()))
             } else {
-                ("queued", false, next_attempt_at.map(|t| t.timestamp_millis()), None)
+                (
+                    "queued",
+                    false,
+                    next_attempt_at.map(|t| t.timestamp_millis()),
+                    None,
+                )
             };
 
         let filter = doc! { "_id": id };
@@ -591,7 +599,11 @@ async fn ensure_log_indexes(database: &Database) -> Result<(), RepositoryError> 
         .build();
     let kind_sent = IndexModel::builder()
         .keys(doc! { "kind": 1, "sentAt": -1 })
-        .options(IndexOptions::builder().name("kind_sentAt".to_owned()).build())
+        .options(
+            IndexOptions::builder()
+                .name("kind_sentAt".to_owned())
+                .build(),
+        )
         .build();
     let priority_sent = IndexModel::builder()
         .keys(doc! { "priority": 1, "sentAt": -1 })
@@ -730,11 +742,7 @@ fn doc_to_log(doc: &Document) -> Result<NotificationLogItem, RepositoryError> {
                         .unwrap_or(NotificationChannel::Telegram);
                     let ok = att_doc.get_bool("ok").unwrap_or(false);
                     let error = att_doc.get_str("error").ok().map(str::to_owned);
-                    records.push(NotificationAttemptRecord {
-                        channel,
-                        ok,
-                        error,
-                    });
+                    records.push(NotificationAttemptRecord { channel, ok, error });
                 }
             }
             records
