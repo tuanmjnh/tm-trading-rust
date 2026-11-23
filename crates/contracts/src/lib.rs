@@ -6,6 +6,7 @@ mod ai_task;
 mod error;
 mod market;
 mod news;
+mod notification;
 pub mod openapi;
 mod operation;
 mod provider;
@@ -35,6 +36,12 @@ pub use news::{
     NewsClusterDto, NewsClusterListDto, NewsClusterQueryDto, NewsDirectionDto, NewsFreshnessDto,
     NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto, NewsQueryDto, NewsSourceDto,
     NewsSourceListDto,
+};
+pub use notification::{
+    NotificationAttemptDto, NotificationChannelDto, NotificationLogItemDto, NotificationLogListDto,
+    NotificationOutboxItemDto, NotificationOutboxListDto, NotificationOutboxSummaryDto,
+    NotificationPriorityDto, NotificationStateDto, SendTestNotificationRequest,
+    SendTestNotificationResponse,
 };
 pub use openapi::ApiDoc;
 pub use operation::{

@@ -3505,6 +3505,271 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NewsSourceDto'
+    NotificationAttemptDto:
+      type: object
+      description: Single channel attempt outcome recorded in delivery logs.
+      required:
+      - channel
+      - ok
+      properties:
+        channel:
+          $ref: '#/components/schemas/NotificationChannelDto'
+        error:
+          type:
+          - string
+          - 'null'
+        ok:
+          type: boolean
+    NotificationChannelDto:
+      type: string
+      description: Delivery channel for outbox and log contracts.
+      enum:
+      - telegram
+      - webPush
+      - electron
+    NotificationLogItemDto:
+      type: object
+      description: One immutable record in the notification delivery audit ledger.
+      required:
+      - id
+      - notify_id
+      - kind
+      - priority
+      - at
+      - sent_at
+      - attempts
+      - delivered
+      - deduped
+      - router_version
+      properties:
+        at:
+          type: string
+          format: date-time
+        attempts:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationAttemptDto'
+        body:
+          type:
+          - string
+          - 'null'
+        dedupe_key:
+          type:
+          - string
+          - 'null'
+        deduped:
+          type: boolean
+        delivered:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationChannelDto'
+        id:
+          type: string
+        kind:
+          type: string
+        name:
+          type:
+          - string
+          - 'null'
+        notify_id:
+          type: string
+        owner_id:
+          type:
+          - string
+          - 'null'
+        preset:
+          type:
+          - string
+          - 'null'
+        priority:
+          $ref: '#/components/schemas/NotificationPriorityDto'
+        router_version:
+          type: string
+        sent_at:
+          type: string
+          format: date-time
+        symbol:
+          type:
+          - string
+          - 'null'
+        title:
+          type:
+          - string
+          - 'null'
+    NotificationLogListDto:
+      type: object
+      description: A bounded list of delivery log records.
+      required:
+      - generated_at
+      - count
+      - logs
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationLogItemDto'
+    NotificationOutboxItemDto:
+      type: object
+      description: One item in the durable outbox queue.
+      required:
+      - id
+      - notify_id
+      - channel
+      - kind
+      - priority
+      - at
+      - state
+      - attempts
+      - dead
+      - created_at
+      - updated_at
+      properties:
+        at:
+          type: string
+          format: date-time
+        attempts:
+          type: integer
+          format: int32
+          minimum: 0
+        body:
+          type:
+          - string
+          - 'null'
+        category:
+          type:
+          - string
+          - 'null'
+        channel:
+          $ref: '#/components/schemas/NotificationChannelDto'
+        created_at:
+          type: string
+          format: date-time
+        dead:
+          type: boolean
+        dedupe_key:
+          type:
+          - string
+          - 'null'
+        id:
+          type: string
+        kind:
+          type: string
+        last_error:
+          type:
+          - string
+          - 'null'
+        message_id:
+          type:
+          - string
+          - 'null'
+        name:
+          type:
+          - string
+          - 'null'
+        next_attempt_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        notify_id:
+          type: string
+        outcome_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        owner_id:
+          type:
+          - string
+          - 'null'
+        preset:
+          type:
+          - string
+          - 'null'
+        priority:
+          $ref: '#/components/schemas/NotificationPriorityDto'
+        state:
+          $ref: '#/components/schemas/NotificationStateDto'
+        symbol:
+          type:
+          - string
+          - 'null'
+        title:
+          type:
+          - string
+          - 'null'
+        updated_at:
+          type: string
+          format: date-time
+    NotificationOutboxListDto:
+      type: object
+      description: A bounded list of outbox items.
+      required:
+      - generated_at
+      - count
+      - items
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationOutboxItemDto'
+    NotificationOutboxSummaryDto:
+      type: object
+      description: Summary counts of the durable outbox state.
+      required:
+      - queued
+      - sent
+      - accepted
+      - failed
+      - dead
+      - generated_at
+      properties:
+        accepted:
+          type: integer
+          minimum: 0
+        dead:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        generated_at:
+          type: string
+          format: date-time
+        queued:
+          type: integer
+          minimum: 0
+        sent:
+          type: integer
+          minimum: 0
+    NotificationPriorityDto:
+      type: string
+      description: Notification severity ladder.
+      enum:
+      - info
+      - normal
+      - important
+      - critical
+    NotificationStateDto:
+      type: string
+      description: Outbox item delivery state.
+      enum:
+      - queued
+      - sent
+      - accepted
+      - failed
     ObservedStateDto:
       type: string
       description: Canonical observed state of a service instance.
@@ -3895,6 +4160,44 @@ components:
       - COMPLETE
       - PARTIAL
       - UNKNOWN
+    SendTestNotificationRequest:
+      type: object
+      description: Request to send a test notification.
+      properties:
+        chat_id:
+          type:
+          - string
+          - 'null'
+          description: Optional target chat ID override. If omitted, uses the configured default chat ID.
+        message:
+          type:
+          - string
+          - 'null'
+          description: Optional custom text to send. If omitted, uses a standard verification test message.
+      additionalProperties: false
+    SendTestNotificationResponse:
+      type: object
+      description: Response from sending a test notification.
+      required:
+      - ok
+      - accepted
+      - sent_at
+      properties:
+        accepted:
+          type: boolean
+        error:
+          type:
+          - string
+          - 'null'
+        message_id:
+          type:
+          - string
+          - 'null'
+        ok:
+          type: boolean
+        sent_at:
+          type: string
+          format: date-time
     ServiceSnapshot:
       type: object
       description: Read model of one service instance as reported by its owning Agent.
@@ -4121,5 +4424,7 @@ tags:
   description: Rights-safe normalized news items and their source registry
 - name: AI
   description: AI provider, model, routing, and evidence-bound briefing records
+- name: Notifications
+  description: Durable outbox, delivery logs, and notification transport
 - name: Agent
   description: Agent-only heartbeat and command endpoints

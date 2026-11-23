@@ -8,6 +8,7 @@ mod lifecycle;
 mod news;
 mod news_cluster;
 mod news_item;
+mod notification;
 mod operation;
 mod provider;
 mod research;
@@ -56,6 +57,13 @@ pub use news_item::{
     NEWS_ITEM_ID_PREFIX, NEWS_ITEM_SCHEMA_VERSION, NewNewsItem, NewsDirection, NewsItem,
     NewsItemError, NewsItemRights, NewsLevel, StoredNewsItem, canonicalize_news_url,
     market_group_for, news_content_hash_for, news_item_id_for,
+};
+pub use notification::{
+    DEFAULT_OUTBOX_BASE_MS, DEFAULT_OUTBOX_FACTOR, DEFAULT_OUTBOX_JITTER_RATIO,
+    DEFAULT_OUTBOX_MAX_ATTEMPTS, DEFAULT_OUTBOX_MAX_MS, MAX_NOTIFICATION_BODY_CHARS,
+    MAX_NOTIFICATION_TITLE_CHARS, NotificationAttemptRecord, NotificationChannel,
+    NotificationError, NotificationLogItem, NotificationOutboxItem, NotificationPriority,
+    NotificationState, OUTBOX_SCHEMA_VERSION, ROUTER_SCHEMA_VERSION, calculate_backoff_ms,
 };
 pub use operation::{
     NewOperation, OPERATION_SCHEMA_VERSION, Operation, OperationAction, OperationError,

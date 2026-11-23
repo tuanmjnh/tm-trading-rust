@@ -22,6 +22,12 @@ use crate::news::{
     NewsHealthStateDto, NewsItemDto, NewsLevelDto, NewsListDto, NewsQueryDto, NewsSourceDto,
     NewsSourceListDto,
 };
+use crate::notification::{
+    NotificationAttemptDto, NotificationChannelDto, NotificationLogItemDto, NotificationLogListDto,
+    NotificationOutboxItemDto, NotificationOutboxListDto, NotificationOutboxSummaryDto,
+    NotificationPriorityDto, NotificationStateDto, SendTestNotificationRequest,
+    SendTestNotificationResponse,
+};
 use crate::operation::{CreateOperationRequest, OperationResponse};
 use crate::provider::{
     CreateProviderInstanceRequest, ProviderDefinitionDto, ProviderHealthStateDto,
@@ -167,7 +173,18 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         AiJobStatusDto,
         NewAiJobDto,
         NewsClusterListDto,
-        NewsClusterQueryDto
+        NewsClusterQueryDto,
+        NotificationChannelDto,
+        NotificationPriorityDto,
+        NotificationStateDto,
+        NotificationOutboxSummaryDto,
+        NotificationOutboxItemDto,
+        NotificationOutboxListDto,
+        NotificationAttemptDto,
+        NotificationLogItemDto,
+        NotificationLogListDto,
+        SendTestNotificationRequest,
+        SendTestNotificationResponse
     )),
     tags(
         (name = "System", description = "Version and health endpoints"),
@@ -179,6 +196,7 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         (name = "Research", description = "Owner-scoped deterministic research observations"),
         (name = "News", description = "Rights-safe normalized news items and their source registry"),
         (name = "AI", description = "AI provider, model, routing, and evidence-bound briefing records"),
+        (name = "Notifications", description = "Durable outbox, delivery logs, and notification transport"),
         (name = "Agent", description = "Agent-only heartbeat and command endpoints")
     )
 )]
