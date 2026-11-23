@@ -45,6 +45,91 @@ jobs:
           cargo run -p tm-trading-contracts --example generate_openapi
           git diff --exit-code -- docs/api/openapi.yaml
 
+  mongodb-live:
+    name: Live MongoDB AI jobs
+    runs-on: ubuntu-latest
+    env:
+      TM_TRADING_TEST_MONGODB_URI: "mongodb://localhost:27017/?replicaSet=rs0&tls=true&tlsCAFile=${{ runner.temp }}/mongo-certs/ca.pem"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc
+        with:
+          toolchain: 1.99.1
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+
+      - name: Start a TLS replica-set MongoDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mongo-certs"
+          openssl req -x509 -newkey rsa:2048 -sha256 -days 1 -nodes \
+            -keyout "$RUNNER_TEMP/mongo-certs/ca-key.pem" \
+            -out "$RUNNER_TEMP/mongo-certs/ca.pem" \
+            -subj "/CN=localhost"
+          openssl req -newkey rsa:2048 -sha256 -nodes \
+            -keyout "$RUNNER_TEMP/mongo-certs/server-key.pem" \
+            -out "$RUNNER_TEMP/mongo-certs/server.csr" \
+            -subj "/CN=localhost"
+          printf "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n" \
+            > "$RUNNER_TEMP/mongo-certs/server.ext"
+          openssl x509 -req -sha256 -days 1 \
+            -in "$RUNNER_TEMP/mongo-certs/server.csr" \
+            -CA "$RUNNER_TEMP/mongo-certs/ca.pem" \
+            -CAkey "$RUNNER_TEMP/mongo-certs/ca-key.pem" \
+            -CAcreateserial \
+            -extfile "$RUNNER_TEMP/mongo-certs/server.ext" \
+            -out "$RUNNER_TEMP/mongo-certs/server-cert.pem"
+          cat "$RUNNER_TEMP/mongo-certs/server-cert.pem" \
+            "$RUNNER_TEMP/mongo-certs/server-key.pem" \
+            > "$RUNNER_TEMP/mongo-certs/server.pem"
+          chmod 644 "$RUNNER_TEMP/mongo-certs/server.pem"
+
+          docker run --detach --name tm-trading-mongodb \
+            --publish 27017:27017 \
+            --volume "$RUNNER_TEMP/mongo-certs:/mongo-certs:ro" \
+            mongo:8.0@sha256:479e85ced54ffb8a40dade1dcde2da2a9ae858515b9415e9cc54bfb8f0575d01 \
+            mongod --replSet rs0 --bind_ip_all \
+            --tlsMode requireTLS \
+            --tlsCertificateKeyFile /mongo-certs/server.pem \
+            --tlsCAFile /mongo-certs/ca.pem \
+            --tlsAllowConnectionsWithoutCertificates
+
+          for attempt in {1..60}; do
+            if docker exec tm-trading-mongodb mongosh --quiet \
+              "mongodb://localhost:27017/?tls=true&tlsCAFile=/mongo-certs/ca.pem" \
+              --eval "quit(0)" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec tm-trading-mongodb mongosh --quiet \
+            "mongodb://localhost:27017/?tls=true&tlsCAFile=/mongo-certs/ca.pem" \
+            --eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "localhost:27017"}]})'
+
+          primary=false
+          for attempt in {1..60}; do
+            primary=$(docker exec tm-trading-mongodb mongosh --quiet \
+              "mongodb://localhost:27017/?tls=true&tlsCAFile=/mongo-certs/ca.pem" \
+              --eval 'db.hello().isWritablePrimary')
+            if [ "$primary" = "true" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test "$primary" = "true"
+
+      - name: Run live AI job transaction tests
+        run: cargo test -p tm-trading-storage --locked --test mongo_ai_jobs -- --ignored --test-threads=1
+
+      - name: Show MongoDB logs
+        if: failure()
+        run: docker logs tm-trading-mongodb || true
+
   security:
     name: Dependency audit and secret scan
     runs-on: ubuntu-latest
