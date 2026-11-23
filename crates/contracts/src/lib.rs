@@ -39,8 +39,9 @@ pub use news::{
 };
 pub use notification::{
     NotificationAttemptDto, NotificationChannelDto, NotificationLogItemDto, NotificationLogListDto,
-    NotificationOutboxItemDto, NotificationOutboxListDto, NotificationOutboxSummaryDto,
-    NotificationPriorityDto, NotificationStateDto, SendTestNotificationRequest,
+    NotificationLogQueryDto, NotificationOutboxItemDto, NotificationOutboxListDto,
+    NotificationOutboxQueryDto, NotificationOutboxSummaryDto, NotificationPriorityDto,
+    NotificationStateDto, NotificationSummaryQueryDto, SendTestNotificationRequest,
     SendTestNotificationResponse,
 };
 pub use openapi::ApiDoc;

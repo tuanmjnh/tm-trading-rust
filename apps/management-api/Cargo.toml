@@ -22,6 +22,7 @@ tm-trading-market-providers = { workspace = true }
 tm-trading-ai-providers = { workspace = true }
 tm-trading-observability = { workspace = true }
 tm-trading-storage = { workspace = true }
+tm-trading-telegram-client = { workspace = true }
 
 [dev-dependencies]
 http-body-util = "=0.1.5"

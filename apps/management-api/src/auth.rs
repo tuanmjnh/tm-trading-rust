@@ -16,6 +16,8 @@ pub const CAPABILITY_RESEARCH_READ: &str = "trading.research.read";
 pub const CAPABILITY_NEWS_READ: &str = "trading.news.read";
 pub const CAPABILITY_AI_READ: &str = "trading.ai.read";
 pub const CAPABILITY_AI_WRITE: &str = "trading.ai.write";
+pub const CAPABILITY_NOTIFICATIONS_READ: &str = "trading.notifications.read";
+pub const CAPABILITY_NOTIFICATIONS_MANAGE: &str = "trading.notifications.manage";
 
 /// Identity resolved from the bearer token.
 #[derive(Debug, Clone)]
@@ -133,6 +135,8 @@ impl FromRequestParts<AppState> for AuthContext {
                         CAPABILITY_NEWS_READ.to_owned(),
                         CAPABILITY_AI_READ.to_owned(),
                         CAPABILITY_AI_WRITE.to_owned(),
+                        CAPABILITY_NOTIFICATIONS_READ.to_owned(),
+                        CAPABILITY_NOTIFICATIONS_MANAGE.to_owned(),
                     ],
                 },
             });

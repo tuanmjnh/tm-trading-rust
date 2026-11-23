@@ -8,8 +8,9 @@ use tm_trading_storage::{
     MongoAiBriefingRepository, MongoAiJobRepository, MongoAiModelRepository,
     MongoAiProviderProfileRepository, MongoAiTaskRouteRepository, MongoCandleRepository,
     MongoConnection, MongoNewsClusterRepository, MongoNewsItemRepository,
-    MongoNewsSourceRepository, MongoOperationRepository, MongoProviderInstanceRepository,
-    MongoResearchEventRepository, MongoServiceSnapshotRepository, MongoWatchlistRepository,
+    MongoNewsSourceRepository, MongoNotificationLogRepository, MongoNotificationOutboxRepository,
+    MongoOperationRepository, MongoProviderInstanceRepository, MongoResearchEventRepository,
+    MongoServiceSnapshotRepository, MongoWatchlistRepository,
 };
 use tokio::net::TcpListener;
 
@@ -49,7 +50,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let repositories = stores().await?;
-    let state = AppState::with_repositories(auth, repositories);
+    let mut state = AppState::with_repositories(auth, repositories);
+    if let Ok(token_str) = std::env::var("TM_TRADING_TELEGRAM_BOT_TOKEN")
+        && let Ok(token) = tm_trading_telegram_client::TelegramBotToken::new(token_str)
+    {
+        let base_url = std::env::var("TM_TRADING_TELEGRAM_BASE_URL").ok();
+        if let Ok(client) =
+            tm_trading_telegram_client::TelegramClient::new(token, base_url.as_deref(), None)
+        {
+            state.telegram_client = Some(client);
+        }
+    }
+    state.default_telegram_chat_id = std::env::var("TM_TRADING_TELEGRAM_CHAT_ID").ok();
     let app = router(state);
     let listener = TcpListener::bind(bind).await?;
     tracing::info!(address = %bind, "management api listening");
@@ -106,6 +118,12 @@ async fn stores() -> Result<Repositories, Box<dyn std::error::Error>> {
                 news_items: Arc::new(MongoNewsItemRepository::new(connection.database()).await?),
                 news_clusters: Arc::new(
                     MongoNewsClusterRepository::new(connection.database()).await?,
+                ),
+                notification_outbox: Arc::new(
+                    MongoNotificationOutboxRepository::new(connection.database()).await?,
+                ),
+                notification_logs: Arc::new(
+                    MongoNotificationLogRepository::new(connection.database()).await?,
                 ),
             })
         }

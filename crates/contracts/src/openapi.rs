@@ -24,8 +24,9 @@ use crate::news::{
 };
 use crate::notification::{
     NotificationAttemptDto, NotificationChannelDto, NotificationLogItemDto, NotificationLogListDto,
-    NotificationOutboxItemDto, NotificationOutboxListDto, NotificationOutboxSummaryDto,
-    NotificationPriorityDto, NotificationStateDto, SendTestNotificationRequest,
+    NotificationLogQueryDto, NotificationOutboxItemDto, NotificationOutboxListDto,
+    NotificationOutboxQueryDto, NotificationOutboxSummaryDto, NotificationPriorityDto,
+    NotificationStateDto, NotificationSummaryQueryDto, SendTestNotificationRequest,
     SendTestNotificationResponse,
 };
 use crate::operation::{CreateOperationRequest, OperationResponse};
@@ -103,7 +104,11 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         get_ai_briefing,
         list_ai_jobs,
         create_ai_job,
-        get_ai_job
+        get_ai_job,
+        list_notification_outbox,
+        summary_notification_outbox,
+        list_notification_logs,
+        send_test_notification
     ),
     components(schemas(
         ApiVersionInfo,
@@ -180,9 +185,12 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         NotificationOutboxSummaryDto,
         NotificationOutboxItemDto,
         NotificationOutboxListDto,
+        NotificationOutboxQueryDto,
+        NotificationSummaryQueryDto,
         NotificationAttemptDto,
         NotificationLogItemDto,
         NotificationLogListDto,
+        NotificationLogQueryDto,
         SendTestNotificationRequest,
         SendTestNotificationResponse
     )),
@@ -992,3 +1000,77 @@ pub fn create_ai_job() {}
     )
 )]
 pub fn get_ai_job() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/notifications/outbox",
+    tag = "Notifications",
+    params(
+        ("owner_id" = Option<String>, Query, description = "Owner identifier filter"),
+        ("channel" = Option<NotificationChannelDto>, Query, description = "Target delivery channel filter"),
+        ("state" = Option<NotificationStateDto>, Query, description = "Delivery state filter"),
+        ("dead" = Option<bool>, Query, description = "Filter dead-letter items"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of items, 1 to 200, default 50", minimum = 1, maximum = 200)
+    ),
+    responses(
+        (status = 200, description = "Durable outbox items", body = NotificationOutboxListDto),
+        (status = 400, description = "Malformed query parameter", body = ApiErrorResponse),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 422, description = "The requested limit or parameters are invalid", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_notification_outbox() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/notifications/outbox/summary",
+    tag = "Notifications",
+    params(
+        ("owner_id" = Option<String>, Query, description = "Owner identifier filter")
+    ),
+    responses(
+        (status = 200, description = "Summary counts of durable notification outbox", body = NotificationOutboxSummaryDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn summary_notification_outbox() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/notifications/logs",
+    tag = "Notifications",
+    params(
+        ("owner_id" = Option<String>, Query, description = "Owner identifier filter"),
+        ("kind" = Option<String>, Query, description = "Notification kind filter"),
+        ("priority" = Option<NotificationPriorityDto>, Query, description = "Priority filter"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of logs, 1 to 200, default 50", minimum = 1, maximum = 200)
+    ),
+    responses(
+        (status = 200, description = "Delivery audit logs, newest first", body = NotificationLogListDto),
+        (status = 400, description = "Malformed query parameter", body = ApiErrorResponse),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 422, description = "The requested limit or parameters are invalid", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn list_notification_logs() {}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/notifications/test",
+    tag = "Notifications",
+    request_body = SendTestNotificationRequest,
+    responses(
+        (status = 200, description = "Test notification outcome", body = SendTestNotificationResponse),
+        (status = 400, description = "Malformed JSON request body", body = ApiErrorResponse),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn send_test_notification() {}

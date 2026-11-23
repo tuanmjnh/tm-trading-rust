@@ -1464,6 +1464,229 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/notifications/logs:
+    get:
+      tags:
+      - Notifications
+      operationId: list_notification_logs
+      parameters:
+      - name: owner_id
+        in: query
+        description: Owner identifier filter
+        required: false
+        schema:
+          type: string
+      - name: kind
+        in: query
+        description: Notification kind filter
+        required: false
+        schema:
+          type: string
+      - name: priority
+        in: query
+        description: Priority filter
+        required: false
+        schema:
+          $ref: '#/components/schemas/NotificationPriorityDto'
+      - name: limit
+        in: query
+        description: Maximum number of logs, 1 to 200, default 50
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+      responses:
+        '200':
+          description: Delivery audit logs, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationLogListDto'
+        '400':
+          description: Malformed query parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The requested limit or parameters are invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/notifications/outbox:
+    get:
+      tags:
+      - Notifications
+      operationId: list_notification_outbox
+      parameters:
+      - name: owner_id
+        in: query
+        description: Owner identifier filter
+        required: false
+        schema:
+          type: string
+      - name: channel
+        in: query
+        description: Target delivery channel filter
+        required: false
+        schema:
+          $ref: '#/components/schemas/NotificationChannelDto'
+      - name: state
+        in: query
+        description: Delivery state filter
+        required: false
+        schema:
+          $ref: '#/components/schemas/NotificationStateDto'
+      - name: dead
+        in: query
+        description: Filter dead-letter items
+        required: false
+        schema:
+          type: boolean
+      - name: limit
+        in: query
+        description: Maximum number of items, 1 to 200, default 50
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+      responses:
+        '200':
+          description: Durable outbox items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationOutboxListDto'
+        '400':
+          description: Malformed query parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: The requested limit or parameters are invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/notifications/outbox/summary:
+    get:
+      tags:
+      - Notifications
+      operationId: summary_notification_outbox
+      parameters:
+      - name: owner_id
+        in: query
+        description: Owner identifier filter
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Summary counts of durable notification outbox
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationOutboxSummaryDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/notifications/test:
+    post:
+      tags:
+      - Notifications
+      operationId: send_test_notification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendTestNotificationRequest'
+        required: true
+      responses:
+        '200':
+          description: Test notification outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendTestNotificationResponse'
+        '400':
+          description: Malformed JSON request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/operations/{operation_id}:
     get:
       tags:
@@ -3614,6 +3837,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NotificationLogItemDto'
+    NotificationLogQueryDto:
+      type: object
+      description: Optional filters for listing delivery logs.
+      properties:
+        kind:
+          type:
+          - string
+          - 'null'
+        limit:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+        owner_id:
+          type:
+          - string
+          - 'null'
+        priority:
+          oneOf:
+          - $ref: '#/components/schemas/NotificationPriorityDto'
+          - type: 'null'
     NotificationOutboxItemDto:
       type: object
       description: One item in the durable outbox queue.
@@ -3725,6 +3969,31 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NotificationOutboxItemDto'
+    NotificationOutboxQueryDto:
+      type: object
+      description: Optional filters for listing notification outbox entries.
+      properties:
+        channel:
+          oneOf:
+          - $ref: '#/components/schemas/NotificationChannelDto'
+          - type: 'null'
+        dead:
+          type:
+          - boolean
+          - 'null'
+        limit:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+        owner_id:
+          type:
+          - string
+          - 'null'
+        state:
+          oneOf:
+          - $ref: '#/components/schemas/NotificationStateDto'
+          - type: 'null'
     NotificationOutboxSummaryDto:
       type: object
       description: Summary counts of the durable outbox state.
@@ -3770,6 +4039,14 @@ components:
       - sent
       - accepted
       - failed
+    NotificationSummaryQueryDto:
+      type: object
+      description: Optional filters for requesting notification outbox summary.
+      properties:
+        owner_id:
+          type:
+          - string
+          - 'null'
     ObservedStateDto:
       type: string
       description: Canonical observed state of a service instance.

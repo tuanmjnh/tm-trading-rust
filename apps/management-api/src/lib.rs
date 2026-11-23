@@ -7,6 +7,7 @@ mod auth;
 mod error;
 mod market;
 mod news;
+mod notifications;
 mod research;
 mod routes;
 mod state;
@@ -18,10 +19,10 @@ use utoipa::OpenApi;
 use tm_trading_contracts::ApiDoc;
 
 pub use auth::{
-    AuthContext, CAPABILITY_MARKET_READ, CAPABILITY_NEWS_READ, CAPABILITY_OPERATION_READ,
-    CAPABILITY_PROVIDER_READ, CAPABILITY_PROVIDER_WRITE, CAPABILITY_RESEARCH_READ,
-    CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ, CAPABILITY_WATCHLIST_READ,
-    CAPABILITY_WATCHLIST_WRITE, Principal,
+    AuthContext, CAPABILITY_MARKET_READ, CAPABILITY_NEWS_READ, CAPABILITY_NOTIFICATIONS_MANAGE,
+    CAPABILITY_NOTIFICATIONS_READ, CAPABILITY_OPERATION_READ, CAPABILITY_PROVIDER_READ,
+    CAPABILITY_PROVIDER_WRITE, CAPABILITY_RESEARCH_READ, CAPABILITY_SERVICE_CONTROL,
+    CAPABILITY_SERVICE_READ, CAPABILITY_WATCHLIST_READ, CAPABILITY_WATCHLIST_WRITE, Principal,
 };
 pub use error::ApiError;
 pub use state::{AppState, AuthConfig, Repositories};
@@ -143,6 +144,19 @@ pub fn router(state: AppState) -> Router {
             get(ai_jobs::list_ai_jobs).post(ai_jobs::create_ai_job),
         )
         .route("/api/v1/ai/jobs/{job_id}", get(ai_jobs::get_ai_job))
+        .route(
+            "/api/v1/notifications/outbox",
+            get(notifications::list_outbox),
+        )
+        .route(
+            "/api/v1/notifications/outbox/summary",
+            get(notifications::summary_outbox),
+        )
+        .route("/api/v1/notifications/logs", get(notifications::list_logs))
+        .route(
+            "/api/v1/notifications/test",
+            post(notifications::send_test_notification),
+        )
         .route("/api/v1/agent/heartbeat", post(routes::agent_heartbeat))
         .route(
             "/api/v1/agent/commands/claim",

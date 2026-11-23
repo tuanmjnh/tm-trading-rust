@@ -5709,6 +5709,7 @@ dependencies = [
  "tm-trading-market-providers",
  "tm-trading-observability",
  "tm-trading-storage",
+ "tm-trading-telegram-client",
  "tokio",
  "tower",
  "tracing",

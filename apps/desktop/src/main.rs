@@ -6,6 +6,7 @@ mod ai_briefings;
 mod ai_providers;
 mod i18n;
 mod news;
+mod notifications;
 mod signal_center;
 mod slideover;
 
@@ -17,14 +18,17 @@ use futures_util::StreamExt;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
     AiBriefingQueryDto, AiJobQueryDto, AiJobTaskDto, MarketMoverDto, MarketOverviewDto,
-    MarketPulseDto, MarketStateDto, MarketSymbolDto, NewAiJobDto, NewsQueryDto, OperationActionDto,
-    OperationResponse, OperationStatusDto, ResearchEventQueryDto, ServiceSnapshot, WatchlistDto,
+    MarketPulseDto, MarketStateDto, MarketSymbolDto, NewAiJobDto, NewsQueryDto,
+    NotificationLogQueryDto, NotificationOutboxQueryDto, NotificationSummaryQueryDto,
+    OperationActionDto, OperationResponse, OperationStatusDto, ResearchEventQueryDto,
+    SendTestNotificationRequest, ServiceSnapshot, WatchlistDto,
 };
 
 use ai_briefings::{AiBriefingPanel, AiBriefingPanelState, AiBriefingSlideover};
 use ai_providers::{AiProviderPanel, AiProviderPanelState};
 use i18n::{Locale, UiStrings};
 use news::{NewsItemSlideover, NewsPanel, NewsPanelState};
+use notifications::{NotificationCenterPanel, NotificationPanelState};
 use signal_center::{ResearchEventSlideover, ResearchPanelState, SignalCenterPanel};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
@@ -100,6 +104,10 @@ enum UiAction {
     TestAiModel {
         id: String,
     },
+    SendTestNotification {
+        chat_id: Option<String>,
+        message: Option<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -157,6 +165,7 @@ fn App() -> Element {
     let news = use_signal(NewsPanelState::default);
     let ai_briefings = use_signal(AiBriefingPanelState::default);
     let ai_providers = use_signal(AiProviderPanelState::default);
+    let notifications = use_signal(NotificationPanelState::default);
 
     let client_task = client.clone();
     let actions = use_coroutine(move |mut actions: UnboundedReceiver<UiAction>| {
@@ -172,6 +181,7 @@ fn App() -> Element {
         let mut news = news;
         let mut ai_briefings = ai_briefings;
         let mut ai_providers = ai_providers;
+        let mut notifications = notifications;
         async move {
             loop {
                 tokio::select! {
@@ -286,6 +296,16 @@ fn App() -> Element {
                                     Err(error) => {
                                         ai_providers.write().model_test_failed(&id, error.to_string())
                                     }
+                                }
+                            }
+                            Some(UiAction::SendTestNotification { chat_id, message }) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                let req = SendTestNotificationRequest { chat_id, message };
+                                match client.send_test_notification(&req).await {
+                                    Ok(res) => notifications.write().test_completed(res),
+                                    Err(error) => notifications.write().test_failed(error.to_string()),
                                 }
                             }
                             None => break,
@@ -425,6 +445,32 @@ fn App() -> Element {
                     Err(error) => ai_providers.write().routes_failed(error.to_string()),
                 }
 
+                let outbox_query = NotificationOutboxQueryDto {
+                    limit: Some(20),
+                    ..NotificationOutboxQueryDto::default()
+                };
+                match client.list_notification_outbox(&outbox_query).await {
+                    Ok(list) => notifications.write().outbox_loaded(list),
+                    Err(error) => notifications.write().outbox_failed(error.to_string()),
+                }
+
+                match client
+                    .notification_outbox_summary(&NotificationSummaryQueryDto::default())
+                    .await
+                {
+                    Ok(summary) => notifications.write().summary_loaded(summary),
+                    Err(error) => notifications.write().summary_failed(error.to_string()),
+                }
+
+                let log_query = NotificationLogQueryDto {
+                    limit: Some(20),
+                    ..NotificationLogQueryDto::default()
+                };
+                match client.list_notification_logs(&log_query).await {
+                    Ok(logs) => notifications.write().logs_loaded(logs),
+                    Err(error) => notifications.write().logs_failed(error.to_string()),
+                }
+
                 if let Some(operation_id) = pending_operation() {
                     match client.get_operation(&operation_id).await {
                         Ok(current) => {
@@ -472,6 +518,8 @@ fn App() -> Element {
     let ai_providers_state = ai_providers();
     let ai_test_sender = actions;
     let ai_model_test_sender = actions;
+    let notifications_state = notifications();
+    let notifications_test_sender = actions;
     let status_class = current_operation
         .as_ref()
         .map(|current| operation_status_class(current.status))
@@ -785,6 +833,16 @@ fn App() -> Element {
                     },
                     on_test_model: move |id| {
                         ai_model_test_sender.send(UiAction::TestAiModel { id });
+                    },
+                }
+                NotificationCenterPanel {
+                    state: notifications_state,
+                    strings: strings(),
+                    on_send_test: move |(chat_id, message)| {
+                        notifications_test_sender.send(UiAction::SendTestNotification {
+                            chat_id,
+                            message,
+                        });
                     },
                 }
             }

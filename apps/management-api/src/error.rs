@@ -162,6 +162,13 @@ impl From<RepositoryError> for ApiError {
             RepositoryError::AiBriefing(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::AiJobNotFound => Self::NotFound("ai job was not found".to_owned()),
             RepositoryError::AiJob(error) => Self::UnprocessableEntity(error.to_string()),
+            RepositoryError::NotificationOutboxNotFound => {
+                Self::NotFound("notification outbox item was not found".to_owned())
+            }
+            RepositoryError::NotificationLogNotFound => {
+                Self::NotFound("notification log was not found".to_owned())
+            }
+            RepositoryError::Notification(error) => Self::UnprocessableEntity(error.to_string()),
             RepositoryError::Mongo(_) => {
                 Self::Internal("operation store is unavailable".to_owned())
             }

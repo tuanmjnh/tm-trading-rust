@@ -11,7 +11,9 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use tm_trading_domain::{
     AiBriefing, AiBriefingReference, AiBriefingReferenceKind, AiJob, AiTaskKind, Candle,
     NewAiBriefing, NewAiJob, NewCandle, NewNewsItem, NewNewsSource, NewResearchEvent, NewsItem,
-    NewsLevel, ResearchEvent, ResearchQuality,
+    NewsLevel, NotificationAttemptRecord, NotificationChannel, NotificationLogItem,
+    NotificationOutboxItem, NotificationPriority, NotificationState, ResearchEvent,
+    ResearchQuality,
 };
 use tm_trading_management_api::{AppState, AuthConfig, Repositories, router};
 use tm_trading_storage::{AiJobRepository, InMemoryAiJobRepository};
@@ -2405,4 +2407,296 @@ async fn ai_jobs_are_owner_scoped_idempotent_and_bounded() {
         .expect("response");
     assert_eq!(foreign_list.status(), StatusCode::OK);
     assert_eq!(json_body(foreign_list).await["count"], 0);
+}
+
+#[tokio::test]
+async fn notification_outbox_and_summary_lifecycle_and_security() {
+    let state = state();
+    let app = router(state.clone());
+
+    // 1. Anonymous access is unauthorized
+    let anon = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/notifications/outbox", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    let anon_summary = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/notifications/outbox/summary",
+            None,
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(anon_summary.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. Agent token lacks read capability
+    let agent = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/notifications/outbox",
+            Some(AGENT_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    // 3. User token lists empty outbox and summary
+    let user_list = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/notifications/outbox",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(user_list.status(), StatusCode::OK);
+    let list_json = json_body(user_list).await;
+    assert_eq!(list_json["count"], 0);
+    assert_eq!(list_json["items"].as_array().unwrap().len(), 0);
+
+    let user_summary = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/notifications/outbox/summary",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(user_summary.status(), StatusCode::OK);
+    let summary_json = json_body(user_summary).await;
+    assert_eq!(summary_json["queued"], 0);
+    assert_eq!(summary_json["dead"], 0);
+
+    // 4. Seed an outbox item
+    let now = Utc::now();
+    let mut item = NotificationOutboxItem::new(
+        "evt_test_001".to_owned(),
+        NotificationChannel::Telegram,
+        "signal_alert".to_owned(),
+        NotificationPriority::Important,
+        now,
+        now,
+    )
+    .expect("valid outbox item");
+    assert_eq!(item.state, NotificationState::Queued);
+    item.owner_id = Some("test-operator".to_owned());
+    item.title = Some("Breakout Detected".to_owned());
+    item.body = Some("BTC/USDT 1h breakout above resistance".to_owned());
+
+    state
+        .notification_outbox
+        .enqueue(item.clone())
+        .await
+        .expect("enqueue succeeds");
+
+    // 5. Query outbox list
+    let list_after = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/notifications/outbox",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(list_after.status(), StatusCode::OK);
+    let list_after_json = json_body(list_after).await;
+    assert_eq!(list_after_json["count"], 1);
+    assert_eq!(list_after_json["items"][0]["notify_id"], "evt_test_001");
+    assert_eq!(list_after_json["items"][0]["channel"], "telegram");
+    assert_eq!(list_after_json["items"][0]["priority"], "important");
+    assert_eq!(list_after_json["items"][0]["state"], "queued");
+
+    // 6. Summary reflects queued item
+    let summary_after = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/notifications/outbox/summary",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(summary_after.status(), StatusCode::OK);
+    let summary_after_json = json_body(summary_after).await;
+    assert_eq!(summary_after_json["queued"], 1);
+    assert_eq!(summary_after_json["dead"], 0);
+
+    // 7. Filter by channel mismatch
+    let filter_mismatch = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/notifications/outbox?channel=webPush",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(filter_mismatch.status(), StatusCode::OK);
+    assert_eq!(json_body(filter_mismatch).await["count"], 0);
+}
+
+#[tokio::test]
+async fn notification_logs_lifecycle_and_security() {
+    let state = state();
+    let app = router(state.clone());
+
+    // 1. Anonymous access is unauthorized
+    let anon = app
+        .clone()
+        .oneshot(request("GET", "/api/v1/notifications/logs", None, None))
+        .await
+        .expect("response");
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. Agent token lacks read capability
+    let agent = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/notifications/logs",
+            Some(AGENT_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    // 3. User lists empty logs
+    let user_list = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/notifications/logs",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(user_list.status(), StatusCode::OK);
+    assert_eq!(json_body(user_list).await["count"], 0);
+
+    // 4. Seed a delivery log
+    let now = Utc::now();
+    let log_item = NotificationLogItem {
+        id: NotificationLogItem::build_id("evt_log_001", now),
+        notify_id: "evt_log_001".to_owned(),
+        owner_id: Some("test-operator".to_owned()),
+        dedupe_key: Some("dedupe-001".to_owned()),
+        kind: "research_alert".to_owned(),
+        priority: NotificationPriority::Normal,
+        preset: None,
+        name: None,
+        symbol: Some("ETHUSDT".to_owned()),
+        title: Some("Volume Spike".to_owned()),
+        body: Some("Unusual volume spike observed on ETHUSDT".to_owned()),
+        at: now,
+        sent_at: now,
+        attempts: vec![NotificationAttemptRecord {
+            channel: NotificationChannel::Telegram,
+            ok: true,
+            error: None,
+        }],
+        delivered: vec![NotificationChannel::Telegram],
+        deduped: false,
+        router_version: "notify-router.v1".to_owned(),
+    };
+
+    state
+        .notification_logs
+        .record(log_item)
+        .await
+        .expect("record succeeds");
+
+    // 5. Query logs
+    let list_after = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/notifications/logs",
+            Some(USER_TOKEN),
+            None,
+        ))
+        .await
+        .expect("response");
+    assert_eq!(list_after.status(), StatusCode::OK);
+    let list_after_json = json_body(list_after).await;
+    assert_eq!(list_after_json["count"], 1);
+    assert_eq!(list_after_json["logs"][0]["notify_id"], "evt_log_001");
+    assert_eq!(list_after_json["logs"][0]["symbol"], "ETHUSDT");
+    assert_eq!(list_after_json["logs"][0]["delivered"][0], "telegram");
+}
+
+#[tokio::test]
+async fn notification_send_test_security_and_diagnostics() {
+    let state = state();
+    let app = router(state);
+
+    // 1. Anonymous access is unauthorized
+    let anon = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/notifications/test",
+            None,
+            Some(json!({
+                "message": "ping"
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. Agent token lacks manage capability
+    let agent = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/notifications/test",
+            Some(AGENT_TOKEN),
+            Some(json!({
+                "message": "ping"
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(agent.status(), StatusCode::FORBIDDEN);
+
+    // 3. User token sends test ping without configured telegram client
+    let user_test = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/notifications/test",
+            Some(USER_TOKEN),
+            Some(json!({
+                "chat_id": "12345678",
+                "message": "Test ping verification"
+            })),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(user_test.status(), StatusCode::OK);
+    let test_json = json_body(user_test).await;
+    assert_eq!(test_json["ok"], false);
+    assert_eq!(test_json["accepted"], false);
+    assert!(
+        test_json["error"]
+            .as_str()
+            .unwrap()
+            .contains("Telegram client is not configured")
+    );
 }

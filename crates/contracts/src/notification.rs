@@ -116,6 +116,31 @@ pub struct NotificationLogListDto {
     pub logs: Vec<NotificationLogItemDto>,
 }
 
+/// Optional filters for listing notification outbox entries.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NotificationOutboxQueryDto {
+    pub owner_id: Option<String>,
+    pub channel: Option<NotificationChannelDto>,
+    pub state: Option<NotificationStateDto>,
+    pub dead: Option<bool>,
+    pub limit: Option<usize>,
+}
+
+/// Optional filters for requesting notification outbox summary.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NotificationSummaryQueryDto {
+    pub owner_id: Option<String>,
+}
+
+/// Optional filters for listing delivery logs.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NotificationLogQueryDto {
+    pub owner_id: Option<String>,
+    pub kind: Option<String>,
+    pub priority: Option<NotificationPriorityDto>,
+    pub limit: Option<usize>,
+}
+
 /// Request to send a test notification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]

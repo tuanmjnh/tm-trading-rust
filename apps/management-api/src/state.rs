@@ -6,12 +6,15 @@ use tm_trading_storage::{
     AiTaskRouteRepository, CandleRepository, InMemoryAiBriefingRepository, InMemoryAiJobRepository,
     InMemoryAiModelRepository, InMemoryAiProviderProfileRepository, InMemoryAiTaskRouteRepository,
     InMemoryCandleRepository, InMemoryNewsClusterRepository, InMemoryNewsItemRepository,
-    InMemoryNewsSourceRepository, InMemoryOperationRepository, InMemoryProviderInstanceRepository,
-    InMemoryResearchEventRepository, InMemoryServiceSnapshotRepository,
-    InMemoryWatchlistRepository, NewsClusterRepository, NewsItemRepository, NewsSourceRepository,
-    OperationRepository, ProviderInstanceRepository, RepositoryError, ResearchEventRepository,
-    ServiceSnapshotRepository, WatchlistRepository,
+    InMemoryNewsSourceRepository, InMemoryNotificationLogRepository,
+    InMemoryNotificationOutboxRepository, InMemoryOperationRepository,
+    InMemoryProviderInstanceRepository, InMemoryResearchEventRepository,
+    InMemoryServiceSnapshotRepository, InMemoryWatchlistRepository, NewsClusterRepository,
+    NewsItemRepository, NewsSourceRepository, NotificationLogRepository,
+    NotificationOutboxRepository, OperationRepository, ProviderInstanceRepository, RepositoryError,
+    ResearchEventRepository, ServiceSnapshotRepository, WatchlistRepository,
 };
+use tm_trading_telegram_client::TelegramClient;
 
 /// Credentials and capabilities used in local deployment mode.
 #[derive(Debug, Clone)]
@@ -38,6 +41,8 @@ pub struct Repositories {
     pub news_sources: Arc<dyn NewsSourceRepository>,
     pub news_items: Arc<dyn NewsItemRepository>,
     pub news_clusters: Arc<dyn NewsClusterRepository>,
+    pub notification_outbox: Arc<dyn NotificationOutboxRepository>,
+    pub notification_logs: Arc<dyn NotificationLogRepository>,
 }
 
 impl Repositories {
@@ -59,6 +64,8 @@ impl Repositories {
             news_sources: Arc::new(InMemoryNewsSourceRepository::new()),
             news_items: Arc::new(InMemoryNewsItemRepository::new()),
             news_clusters: Arc::new(InMemoryNewsClusterRepository::new()),
+            notification_outbox: Arc::new(InMemoryNotificationOutboxRepository::new()),
+            notification_logs: Arc::new(InMemoryNotificationLogRepository::new()),
         }
     }
 }
@@ -80,6 +87,10 @@ pub struct AppState {
     pub news_sources: Arc<dyn NewsSourceRepository>,
     pub news_items: Arc<dyn NewsItemRepository>,
     pub news_clusters: Arc<dyn NewsClusterRepository>,
+    pub notification_outbox: Arc<dyn NotificationOutboxRepository>,
+    pub notification_logs: Arc<dyn NotificationLogRepository>,
+    pub telegram_client: Option<TelegramClient>,
+    pub default_telegram_chat_id: Option<String>,
     pub auth: AuthConfig,
 }
 
@@ -106,6 +117,10 @@ impl AppState {
             news_sources: repositories.news_sources,
             news_items: repositories.news_items,
             news_clusters: repositories.news_clusters,
+            notification_outbox: repositories.notification_outbox,
+            notification_logs: repositories.notification_logs,
+            telegram_client: None,
+            default_telegram_chat_id: None,
             auth,
         }
     }

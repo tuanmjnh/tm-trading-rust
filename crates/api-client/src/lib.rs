@@ -7,10 +7,12 @@ use tm_trading_contracts::{
     AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto, AiTaskRouteListDto,
     CreateOperationRequest, CreateProviderInstanceRequest, CreateWatchlistRequest, HealthResponse,
     MarketOverviewDto, MarketPulseDto, NewAiJobDto, NewsClusterListDto, NewsClusterQueryDto,
-    NewsItemDto, NewsListDto, NewsQueryDto, NewsSourceListDto, OperationActionDto,
+    NewsItemDto, NewsListDto, NewsQueryDto, NewsSourceListDto, NotificationLogListDto,
+    NotificationLogQueryDto, NotificationOutboxListDto, NotificationOutboxQueryDto,
+    NotificationOutboxSummaryDto, NotificationSummaryQueryDto, OperationActionDto,
     OperationResponse, ProviderDefinitionDto, ProviderInstanceDto, ReplaceWatchlistSymbolsRequest,
-    ResearchEventDto, ResearchEventListDto, ResearchEventQueryDto, ServiceSnapshot,
-    UpdateProviderInstanceRequest, WatchlistDto,
+    ResearchEventDto, ResearchEventListDto, ResearchEventQueryDto, SendTestNotificationRequest,
+    SendTestNotificationResponse, ServiceSnapshot, UpdateProviderInstanceRequest, WatchlistDto,
 };
 
 /// Typed client for the versioned Management API contract.
@@ -621,6 +623,127 @@ impl ManagementApiClient {
                 message: error.to_string(),
             })?;
         Self::decode(response, &path).await
+    }
+
+    pub async fn list_notification_outbox(
+        &self,
+        query: &NotificationOutboxQueryDto,
+    ) -> Result<NotificationOutboxListDto, ApiClientError> {
+        let path = "/api/v1/notifications/outbox";
+        let mut request = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token);
+        if let Some(owner) = &query.owner_id {
+            request = request.query(&[("owner_id", owner)]);
+        }
+        if let Some(channel) = &query.channel {
+            request = request.query(&[(
+                "channel",
+                serde_json::to_string(channel)
+                    .unwrap_or_default()
+                    .trim_matches('"'),
+            )]);
+        }
+        if let Some(state) = &query.state {
+            request = request.query(&[(
+                "state",
+                serde_json::to_string(state)
+                    .unwrap_or_default()
+                    .trim_matches('"'),
+            )]);
+        }
+        if let Some(dead) = query.dead {
+            request = request.query(&[("dead", dead.to_string())]);
+        }
+        if let Some(limit) = query.limit {
+            request = request.query(&[("limit", limit.to_string())]);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn notification_outbox_summary(
+        &self,
+        query: &NotificationSummaryQueryDto,
+    ) -> Result<NotificationOutboxSummaryDto, ApiClientError> {
+        let path = "/api/v1/notifications/outbox/summary";
+        let mut request = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token);
+        if let Some(owner) = &query.owner_id {
+            request = request.query(&[("owner_id", owner)]);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn list_notification_logs(
+        &self,
+        query: &NotificationLogQueryDto,
+    ) -> Result<NotificationLogListDto, ApiClientError> {
+        let path = "/api/v1/notifications/logs";
+        let mut request = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token);
+        if let Some(owner) = &query.owner_id {
+            request = request.query(&[("owner_id", owner)]);
+        }
+        if let Some(kind) = &query.kind {
+            request = request.query(&[("kind", kind)]);
+        }
+        if let Some(priority) = &query.priority {
+            request = request.query(&[(
+                "priority",
+                serde_json::to_string(priority)
+                    .unwrap_or_default()
+                    .trim_matches('"'),
+            )]);
+        }
+        if let Some(limit) = query.limit {
+            request = request.query(&[("limit", limit.to_string())]);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn send_test_notification(
+        &self,
+        payload: &SendTestNotificationRequest,
+    ) -> Result<SendTestNotificationResponse, ApiClientError> {
+        let path = "/api/v1/notifications/test";
+        let response = self
+            .http
+            .post(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .json(payload)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
     }
 
     async fn get_market<TResponse>(
