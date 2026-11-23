@@ -1,12 +1,12 @@
 # AI Providers and Models
 
-> Status: the AI provider profile registry, generic OpenAI-compatible health/generation adapter, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, evidence-bound briefing contract/API/UI, the durable `ai_jobs` request queue, the supervised AI Worker, and the Desktop research-event request action are implemented (2026-11-23).
+> Status: the AI provider profile registry, OpenAI-compatible, Anthropic Messages, and Gemini `generateContent` health/generation adapters, model registry, task routing, bounded route execution, owner-scoped evidence assembly with model-output validation, evidence-bound briefing contract/API/UI, the durable `ai_jobs` request queue, the supervised AI Worker, and the Desktop research-event request action are implemented (2026-11-23).
 
 ## 1. Scope
 
-AI providers are configuration, not execution. A profile records where an OpenAI-compatible Chat Completions endpoint lives, which model is the default, and how long one request may take. The platform never places orders or reads balances through a provider, and no provider response can trigger a trading action.
+AI providers are configuration, not execution. A profile records the provider protocol, endpoint, default model, and request timeout. The platform never places orders or reads balances through a provider, and no provider response can trigger a trading action.
 
-Profiles carry no secret. `api_key_env` is the *name* of an environment variable in the dedicated `TM_TRADING_AI_` namespace; the secret value is read from the environment of the Management API process at request time, used for one HTTP request, and never stored, returned, logged, or attached to an error. Names outside that namespace are rejected, so a profile cannot read an unrelated process secret such as `PATH` or a platform token.
+Profiles carry no secret. `api_key_env` is the *name* of an environment variable in the dedicated `TM_TRADING_AI_` namespace; the secret value is read from the environment of the process executing the request (the Management API for health/model tests or the AI Worker for generation), used for one HTTP request, and never stored, returned, logged, or attached to an error. Names outside that namespace are rejected, so a profile cannot read an unrelated process secret such as `PATH` or a platform token.
 
 ## 2. Profile contract
 
@@ -46,18 +46,29 @@ Known limit: hostnames are validated textually, not by resolved address, so a pu
 1. loads the profile and returns `404` when it does not exist;
 2. validates the stored base URL;
 3. reads the API key from `api_key_env`, failing with `missing_api_key` when unset;
-4. sends one bounded Chat Completions request with `max_tokens: 8` and `temperature: 0`;
-5. records `HEALTHY` with a cleared error code, or `UNHEALTHY` with one sanitized code.
+4. selects the adapter explicitly from the stored `kind`, never from the URL;
+5. sends one bounded protocol-specific request with an eight-token output ceiling;
+6. records `HEALTHY` with a cleared error code, or `UNHEALTHY` with one sanitized code.
 
-Failure codes: `invalid_base_url`, `forbidden_host`, `insecure_base_url`, `client_error`, `request_failed`, `timeout`, `auth_failed`, `not_found`, `provider_unavailable`, `http_error`, `invalid_response`, `response_too_large`, `missing_api_key`, and `unsupported_kind`. A response body is capped at 64 KiB.
+Failure codes: `invalid_base_url`, `forbidden_host`, `insecure_base_url`, `client_error`, `request_failed`, `timeout`, `auth_failed`, `not_found`, `provider_unavailable`, `http_error`, `invalid_response`, `response_too_large`, and `missing_api_key`. A response body is capped at 64 KiB.
 
-`anthropic` and `gemini` profiles are stored but report `unsupported_kind` until a dedicated adapter exists; only the OpenAI-compatible protocol is implemented today.
+Protocol mapping and credential headers are explicit:
+
+| Stored kind | Protocol | Endpoint | Credential header |
+|---|---|---|---|
+| `openai-compatible`, `openai`, `openrouter` | Chat Completions | `{base_url}/chat/completions` | `Authorization: Bearer ...` |
+| `anthropic` | Anthropic Messages | API root + `/v1/messages` | `x-api-key` plus `anthropic-version: 2026-10-21` |
+| `gemini` | Gemini `generateContent` | API root + `/v1beta/models/{model}:generateContent` | `x-goog-api-key` |
+
+The Anthropic and Gemini base URLs are API roots, not complete request URLs. For example, use `https://api.anthropic.com` and `https://generativelanguage.googleapis.com`. The key is never accepted in a URL.
 
 A failed test is still a successful observation: the endpoint returns `200` with the recorded `UNHEALTHY` state instead of failing the request. Provider liveness and platform health stay separate.
 
 ## 5. Bounded generation
 
-The OpenAI-compatible adapter also exposes one bounded Chat Completions generation operation. It accepts a system prompt, user prompt, output-token ceiling, and an explicit JSON-mode flag. The combined prompt is capped at 256 KiB, the response body at 256 KiB, temperature is fixed at zero, and redirects remain disabled. Provider usage is returned when the endpoint reports it.
+Each adapter exposes one bounded generation operation. It accepts a system prompt, user prompt, output-token ceiling, an explicit JSON-mode flag, and an optional provider-neutral JSON Schema. The combined prompt is capped at 256 KiB, a supplied schema at 64 KiB, and the response body at 256 KiB. Redirects remain disabled, and provider usage is returned when the endpoint reports it.
+
+The OpenAI-compatible adapter sends Chat Completions JSON mode. Anthropic sends top-level `system` and maps the schema to `output_config.format`; Gemini sends `systemInstruction` and maps it to `generationConfig.responseFormat.text.schema`. The AI Worker supplies the briefing schema for both native structured-output protocols, while still validating the returned object before publication.
 
 Provider failures are classified as transient only for network failures, timeouts, HTTP 408/429, and HTTP 5xx. Authentication, configuration, invalid input, malformed output, and other 4xx responses are not transient and must not silently switch the task to another model.
 
@@ -97,7 +108,7 @@ A model belongs to exactly one provider profile. `provider_id` comes from the pa
 | `last_health_check_at` | Observation time of the last model test |
 | `last_error_code` | Sanitized diagnostic code from the last failed test |
 
-Capabilities are declared, not probed. A model is stored with `UNKNOWN` health until `POST /api/v1/ai-models/{id}/test` runs the same bounded OpenAI-compatible probe as the provider test, using the model's own `model_id` and the owning provider's base URL, timeout, and API-key environment variable. A successful probe records `HEALTHY` and clears the error code; a failed probe records `UNHEALTHY` plus the sanitized code. A model whose provider is missing returns `422`.
+Capabilities are declared, not probed. A model is stored with `UNKNOWN` health until `POST /api/v1/ai-models/{id}/test` runs the same bounded provider-protocol probe as the provider test, using the model's own `model_id` and the owning provider's kind, base URL, timeout, and API-key environment variable. A successful probe records `HEALTHY` and clears the error code; a failed probe records `UNHEALTHY` plus the sanitized code. A model whose provider is missing returns `422`.
 
 | Method | Path | Capability |
 |---|---|---|
@@ -311,4 +322,11 @@ A job failure is recorded on the job with a sanitized code (`no_usable_evidence`
 
 ## 12. Pending
 
-- dedicated Anthropic and Gemini adapters. OpenAI and OpenRouter currently use the OpenAI-compatible adapter and need dedicated adapters only if their protocol differences require them.
+- dedicated OpenAI and OpenRouter adapters only if their protocol or header differences require them; they currently use the OpenAI-compatible adapter.
+
+## 13. Protocol sources
+
+The dedicated request shapes were checked against the official provider documentation on 2026-11-23:
+
+- [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages) and [Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
+- [Gemini `generateContent`](https://ai.google.dev/api/generate-content) and [Gemini structured outputs](https://ai.google.dev/gemini-api/docs/structured-output)

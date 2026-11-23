@@ -1,13 +1,22 @@
 //! Generic AI provider adapters.
 //!
-//! The first adapter is OpenAI-compatible Chat Completions. Adapters are bounded,
-//! read-only with respect to the platform, and never log or return secret values.
+//! Adapters translate OpenAI-compatible Chat Completions, Anthropic Messages,
+//! and Gemini generateContent requests. They are bounded, read-only with respect to
+//! the platform, and never log or return secret values.
 
+mod anthropic;
+mod gemini;
+
+pub use anthropic::{ANTHROPIC_API_VERSION, ANTHROPIC_BASE_URL, AnthropicProvider};
+pub use gemini::{GEMINI_BASE_URL, GeminiProvider};
+
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use reqwest::Client;
 use thiserror::Error;
+use tm_trading_domain::AiProviderKind;
 use url::Url;
 
 /// Largest response body accepted from one provider health request.
@@ -18,6 +27,9 @@ pub const MAX_GENERATION_PROMPT_BYTES: usize = 256 * 1024;
 
 /// Largest response body accepted from one generation request.
 pub const MAX_GENERATION_RESPONSE_BYTES: usize = 256 * 1024;
+
+/// Largest JSON schema accepted for one generation request.
+pub const MAX_GENERATION_SCHEMA_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AiProviderHealth {
@@ -32,6 +44,8 @@ pub struct AiGenerationRequest {
     pub user_prompt: String,
     pub max_output_tokens: u32,
     pub json_mode: bool,
+    /// Optional provider-neutral JSON schema for adapters with native structured output.
+    pub json_schema: Option<serde_json::Value>,
 }
 
 /// One bounded text-generation response.
@@ -48,8 +62,6 @@ pub struct AiGenerationResponse {
 pub enum AiProviderError {
     #[error("ai provider base URL is invalid")]
     InvalidBaseUrl,
-    #[error("ai provider kind is not supported")]
-    UnsupportedKind,
     #[error("ai provider base URL host is not allowed")]
     ForbiddenHost,
     #[error("ai provider base URL must use HTTPS outside loopback")]
@@ -77,7 +89,6 @@ impl AiProviderError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::InvalidBaseUrl => "invalid_base_url",
-            Self::UnsupportedKind => "unsupported_kind",
             Self::ForbiddenHost => "forbidden_host",
             Self::InsecureBaseUrl => "insecure_base_url",
             Self::Client(_) => "client_error",
@@ -121,6 +132,29 @@ pub trait AiProvider: Send + Sync {
     ) -> Result<AiGenerationResponse, AiProviderError>;
 }
 
+/// Builds the adapter selected explicitly by the stored provider kind.
+pub fn build_provider(
+    kind: AiProviderKind,
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+    timeout: Duration,
+) -> Result<Arc<dyn AiProvider>, AiProviderError> {
+    match kind {
+        AiProviderKind::OpenAiCompatible | AiProviderKind::OpenAi | AiProviderKind::OpenRouter => {
+            Ok(Arc::new(OpenAiCompatibleProvider::new(
+                base_url, model, api_key, timeout,
+            )?))
+        }
+        AiProviderKind::Anthropic => Ok(Arc::new(AnthropicProvider::new(
+            base_url, model, api_key, timeout,
+        )?)),
+        AiProviderKind::Gemini => Ok(Arc::new(GeminiProvider::new(
+            base_url, model, api_key, timeout,
+        )?)),
+    }
+}
+
 /// Generic OpenAI-compatible Chat Completions adapter.
 #[derive(Clone)]
 pub struct OpenAiCompatibleProvider {
@@ -138,12 +172,7 @@ impl OpenAiCompatibleProvider {
         timeout: Duration,
     ) -> Result<Self, AiProviderError> {
         validate_ai_provider_base_url(base_url)?;
-        let client = Client::builder()
-            .timeout(timeout)
-            // A provider redirect could otherwise reach an internal address.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|error| AiProviderError::Client(error.to_string()))?;
+        let client = build_client(timeout)?;
         Ok(Self {
             client,
             base_url: base_url.trim_end_matches('/').to_owned(),
@@ -171,13 +200,7 @@ impl AiProvider for OpenAiCompatibleProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|error| {
-                if error.is_timeout() {
-                    AiProviderError::Timeout
-                } else {
-                    AiProviderError::Request(error.to_string())
-                }
-            })?;
+            .map_err(map_request_error)?;
         let status = response.status();
         if !status.is_success() {
             return Err(AiProviderError::HttpStatus(status.as_u16()));
@@ -213,13 +236,7 @@ impl AiProvider for OpenAiCompatibleProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|error| {
-                if error.is_timeout() {
-                    AiProviderError::Timeout
-                } else {
-                    AiProviderError::Request(error.to_string())
-                }
-            })?;
+            .map_err(map_request_error)?;
         let status = response.status();
         if !status.is_success() {
             return Err(AiProviderError::HttpStatus(status.as_u16()));
@@ -231,7 +248,45 @@ impl AiProvider for OpenAiCompatibleProvider {
     }
 }
 
-async fn read_bounded_body(
+pub(crate) fn build_client(timeout: Duration) -> Result<Client, AiProviderError> {
+    Client::builder()
+        .timeout(timeout)
+        // A provider redirect could otherwise reach an internal address.
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| AiProviderError::Client(error.to_string()))
+}
+
+pub(crate) fn validate_generation_request(
+    request: &AiGenerationRequest,
+) -> Result<(), AiProviderError> {
+    let prompt_bytes = request
+        .system_prompt
+        .len()
+        .checked_add(request.user_prompt.len());
+    if request.max_output_tokens == 0
+        || prompt_bytes.is_none_or(|length| length > MAX_GENERATION_PROMPT_BYTES)
+        || (request.json_schema.is_some() && !request.json_mode)
+    {
+        return Err(AiProviderError::InvalidRequest);
+    }
+    if request.json_schema.as_ref().is_some_and(|schema| {
+        serde_json::to_vec(schema).is_ok_and(|bytes| bytes.len() > MAX_GENERATION_SCHEMA_BYTES)
+    }) {
+        return Err(AiProviderError::InvalidRequest);
+    }
+    Ok(())
+}
+
+pub(crate) fn map_request_error(error: reqwest::Error) -> AiProviderError {
+    if error.is_timeout() {
+        AiProviderError::Timeout
+    } else {
+        AiProviderError::Request(error.to_string())
+    }
+}
+
+pub(crate) async fn read_bounded_body(
     response: &mut reqwest::Response,
     max_bytes: usize,
 ) -> Result<Vec<u8>, AiProviderError> {
@@ -242,13 +297,7 @@ async fn read_bounded_body(
         return Err(AiProviderError::ResponseTooLarge);
     }
     let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|error| {
-        if error.is_timeout() {
-            AiProviderError::Timeout
-        } else {
-            AiProviderError::Request(error.to_string())
-        }
-    })? {
+    while let Some(chunk) = response.chunk().await.map_err(map_request_error)? {
         append_bounded_body(&mut body, &chunk, max_bytes)?;
     }
     Ok(body)
@@ -274,11 +323,7 @@ fn generation_body(
     model: &str,
     request: &AiGenerationRequest,
 ) -> Result<serde_json::Value, AiProviderError> {
-    if request.max_output_tokens == 0
-        || request.system_prompt.len() + request.user_prompt.len() > MAX_GENERATION_PROMPT_BYTES
-    {
-        return Err(AiProviderError::InvalidRequest);
-    }
+    validate_generation_request(request)?;
     let mut body = serde_json::json!({
         "model": model,
         "messages": [
@@ -385,6 +430,7 @@ fn is_private_or_reserved_host(host: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn builds_a_bounded_json_generation_request() {
@@ -393,6 +439,7 @@ mod tests {
             user_prompt: "Summarize the supplied evidence.".to_owned(),
             max_output_tokens: 512,
             json_mode: true,
+            json_schema: None,
         };
 
         let body = generation_body("model-a", &request).unwrap();
@@ -411,8 +458,32 @@ mod tests {
             user_prompt: "user".to_owned(),
             max_output_tokens: 0,
             json_mode: true,
+            json_schema: None,
         };
 
+        assert!(matches!(
+            generation_body("model-a", &request).unwrap_err(),
+            AiProviderError::InvalidRequest
+        ));
+    }
+
+    #[test]
+    fn rejects_an_oversized_schema_or_schema_without_json_mode() {
+        let mut request = AiGenerationRequest {
+            system_prompt: "system".to_owned(),
+            user_prompt: "user".to_owned(),
+            max_output_tokens: 512,
+            json_mode: true,
+            json_schema: Some(json!({"padding": "x".repeat(MAX_GENERATION_SCHEMA_BYTES)})),
+        };
+
+        assert!(matches!(
+            generation_body("model-a", &request).unwrap_err(),
+            AiProviderError::InvalidRequest
+        ));
+
+        request.json_schema = Some(json!({"type": "object"}));
+        request.json_mode = false;
         assert!(matches!(
             generation_body("model-a", &request).unwrap_err(),
             AiProviderError::InvalidRequest

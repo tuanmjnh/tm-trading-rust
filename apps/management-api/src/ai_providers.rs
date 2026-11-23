@@ -185,7 +185,7 @@ async fn run_health_test(
     probe_model(profile, profile.default_model()).await
 }
 
-/// Runs the bounded OpenAI-compatible probe with the given model identifier.
+/// Runs the bounded provider-protocol probe with the given model identifier.
 pub(crate) async fn probe_model(
     profile: &AiProviderProfile,
     model: &str,
@@ -193,18 +193,12 @@ pub(crate) async fn probe_model(
     tm_trading_ai_providers::validate_ai_provider_base_url(profile.base_url())?;
     let api_key = std::env::var(profile.api_key_env())
         .map_err(|_| tm_trading_ai_providers::AiProviderError::MissingApiKey)?;
-    let adapter = match profile.kind() {
-        AiProviderKind::OpenAiCompatible | AiProviderKind::OpenAi | AiProviderKind::OpenRouter => {
-            tm_trading_ai_providers::OpenAiCompatibleProvider::new(
-                profile.base_url(),
-                model,
-                &api_key,
-                std::time::Duration::from_millis(profile.timeout_ms()),
-            )?
-        }
-        AiProviderKind::Anthropic | AiProviderKind::Gemini => {
-            return Err(tm_trading_ai_providers::AiProviderError::UnsupportedKind);
-        }
-    };
-    tm_trading_ai_providers::AiProvider::health(&adapter).await
+    let adapter = tm_trading_ai_providers::build_provider(
+        profile.kind(),
+        profile.base_url(),
+        model,
+        &api_key,
+        std::time::Duration::from_millis(profile.timeout_ms()),
+    )?;
+    adapter.health().await
 }

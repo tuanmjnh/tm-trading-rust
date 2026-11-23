@@ -380,6 +380,8 @@ Initial Rust behavior:
 3. Do not delete or rewrite `secretEnc` during metadata migration.
 4. Deactivate a legacy secret reference only after a tested secure-store path exists.
 
+The Rust provider profile's `kind` is the explicit protocol selector. `openai-compatible`, `openai`, and `openrouter` use the Chat Completions protocol; `anthropic` uses the Messages protocol; `gemini` uses the `generateContent` protocol. The adapter selection does not change the persisted collection or field names. `apiKeyEnv` stores only the `TM_TRADING_AI_` environment-variable name, while each adapter supplies the credential in its provider-specific header. The base URL never carries a key or other secret.
+
 ### 6.12 `research_events` (new in Rust)
 
 There is no legacy collection with this name. The collection stores new deterministic

@@ -35,6 +35,24 @@ Use only the evidence in the user message. Never invent prices, facts, sources, 
 Reply with a JSON object that has only the keys \"interpretations\" and \"uncertainties\", \
 each an array of short strings. Do not restate facts as certainty.";
 
+fn briefing_output_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "interpretations": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "uncertainties": {
+                "type": "array",
+                "items": {"type": "string"}
+            }
+        },
+        "required": ["interpretations", "uncertainties"],
+        "additionalProperties": false
+    })
+}
+
 /// The exact evidence a caller asks the worker to assemble.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BriefingEvidenceRequest {
@@ -188,6 +206,7 @@ pub(super) fn capability_test_request() -> AiGenerationRequest {
             .to_owned(),
         max_output_tokens: CAPABILITY_TEST_MAX_OUTPUT_TOKENS,
         json_mode: true,
+        json_schema: Some(briefing_output_schema()),
     }
 }
 
@@ -226,6 +245,7 @@ pub fn research_explanation_request(
         user_prompt,
         max_output_tokens,
         json_mode: true,
+        json_schema: Some(briefing_output_schema()),
     })
 }
 
@@ -811,6 +831,10 @@ mod tests {
 
         let request = research_explanation_request(&evidence, 512).unwrap();
         assert!(request.json_mode);
+        assert_eq!(
+            request.json_schema.as_ref().expect("output schema")["required"],
+            serde_json::json!(["interpretations", "uncertainties"])
+        );
         assert_eq!(request.max_output_tokens, 512);
         assert!(request.system_prompt.contains("\"interpretations\""));
         for fact in evidence.facts() {

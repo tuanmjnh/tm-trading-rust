@@ -124,6 +124,8 @@ Create these only when their owning slice begins:
 | Legacy path | Target | Action | Compatibility requirement |
 |---|---|---|---|
 | `ai/gateway.mjs` | `crates/ai-providers` | Reimplement behind trait | Protocol translation only; provider metadata and health are explicit |
+| `ai/gateway.mjs` Anthropic request/response mapping | `crates/ai-providers` Anthropic Messages adapter | Reimplemented | Preserve top-level `system`, user-message translation, `max_tokens`, `input_tokens`/`output_tokens` usage, and `/v1/messages` endpoint selection; use current versioned authentication headers and never expose the key |
+| New Gemini compatibility target (no legacy dedicated adapter) | `crates/ai-providers` Gemini `generateContent` adapter | Reimplemented | Use the dedicated model endpoint, `systemInstruction`, JSON response constraints, token usage metadata, and a header-only API key; never infer the protocol from a URL |
 | `ai/providerStore.mjs` | `crates/storage` + provider core | Port later | Keep provider connection/model metadata; move secret to secret store |
 | `ai/daily-brief.mjs` | `crates/ai-providers` + AI worker | Port later | Persist model/prompt/input versions and source references; Rust briefings keep facts, interpretations, uncertainty, and evidence references separate |
 | `ai/agent.mjs` | AI worker/application service | Port later, read-only | Facts vs interpretation; no mutation of deterministic research records |
@@ -270,5 +272,5 @@ For each worker cutover:
 - The sample worker is intentionally not a market worker; its purpose is to prove lifecycle truth.
 - The in-memory repository is the first test implementation, not a production cache.
 - MongoDB operations/outbox schema is introduced before remote Agents, so local and remote modes use the same contract.
-- Market, watchlist, provider, candle, the first VSA research-event port, the legacy-compatible News source registry and item store, the News Worker, the news read API with its Desktop panel, and the core Phase 7 AI provider/model/routing, evidence-bound briefing, durable job queue, supervised AI Worker, and Desktop request flow are implemented; dedicated Anthropic/Gemini adapters, remaining research methods, deeper news scoring/clustering, and the notification plane continue incrementally.
+- Market, watchlist, provider, candle, the first VSA research-event port, the legacy-compatible News source registry and item store, the News Worker, the news read API with its Desktop panel, and the core Phase 7 AI provider/model/routing, evidence-bound briefing, durable job queue, supervised AI Worker, Desktop request flow, and dedicated Anthropic/Gemini adapters are implemented; remaining research methods, deeper news scoring/clustering, and the notification plane continue incrementally.
 - Execution, paper trading, bot launch, exchange-demo, and autonomous-agent behavior are excluded.

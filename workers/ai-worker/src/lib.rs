@@ -11,7 +11,7 @@ use tokio::sync::Notify;
 use tm_trading_ai_providers::{
     AiGenerationRequest, AiGenerationResponse, AiProvider, AiProviderError,
 };
-use tm_trading_domain::{AiModel, AiProviderKind, AiProviderProfile, AiTaskKind, AiTaskModelRef};
+use tm_trading_domain::{AiModel, AiProviderProfile, AiTaskKind, AiTaskModelRef};
 use tm_trading_storage::{
     AiModelRepository, AiProviderProfileRepository, AiTaskRouteRepository, RepositoryError,
 };
@@ -40,7 +40,7 @@ pub trait AiProviderResolver: Send + Sync {
     ) -> Result<Arc<dyn AiProvider>, AiProviderError>;
 }
 
-/// Resolves an OpenAI-compatible provider from an environment-backed secret reference.
+/// Resolves the configured provider protocol from an environment-backed secret reference.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EnvironmentAiProviderResolver;
 
@@ -56,21 +56,13 @@ impl AiProviderResolver for EnvironmentAiProviderResolver {
         if api_key.is_empty() {
             return Err(AiProviderError::MissingApiKey);
         }
-        match profile.kind() {
-            AiProviderKind::OpenAiCompatible
-            | AiProviderKind::OpenAi
-            | AiProviderKind::OpenRouter => Ok(Arc::new(
-                tm_trading_ai_providers::OpenAiCompatibleProvider::new(
-                    profile.base_url(),
-                    model.model_id(),
-                    &api_key,
-                    timeout,
-                )?,
-            )),
-            AiProviderKind::Anthropic | AiProviderKind::Gemini => {
-                Err(AiProviderError::UnsupportedKind)
-            }
-        }
+        tm_trading_ai_providers::build_provider(
+            profile.kind(),
+            profile.base_url(),
+            model.model_id(),
+            &api_key,
+            timeout,
+        )
     }
 }
 
@@ -397,7 +389,9 @@ mod tests {
     use super::*;
     use crate::evidence::CAPABILITY_TEST_MAX_OUTPUT_TOKENS;
     use tm_trading_ai_providers::AiProviderHealth;
-    use tm_trading_domain::{AiTaskRoute, NewAiModel, NewAiProviderProfile, NewAiTaskRoute};
+    use tm_trading_domain::{
+        AiProviderKind, AiTaskRoute, NewAiModel, NewAiProviderProfile, NewAiTaskRoute,
+    };
     use tm_trading_storage::{
         InMemoryAiModelRepository, InMemoryAiProviderProfileRepository,
         InMemoryAiTaskRouteRepository,
@@ -583,6 +577,7 @@ mod tests {
             user_prompt: "Summarize the supplied evidence.".to_owned(),
             max_output_tokens,
             json_mode,
+            json_schema: None,
         }
     }
 

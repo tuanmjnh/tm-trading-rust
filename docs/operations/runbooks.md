@@ -1,6 +1,6 @@
 # Operations Runbooks
 
-> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 market data and watchlists, Phase 6 research events, and Phase 7's core news plus AI provider/model/routing, evidence-bound briefing requests, and the supervised AI Worker are implemented (2026-11-22). Dedicated Anthropic and Gemini adapters remain pending.<br>
+> Status: Phase 3 local Management API and Agent command channel, Phase 4 Desktop Control Center, Phase 5 market data and watchlists, Phase 6 research events, and Phase 7's core news plus AI provider/model/routing, evidence-bound briefing requests, and the supervised AI Worker are implemented (2026-11-22). Dedicated Anthropic and Gemini adapters are implemented.<br>
 > Authority: [`docs/TM-TRADING-RUST-MASTER-ROADMAP.md`](../TM-TRADING-RUST-MASTER-ROADMAP.md)
 
 ## Build the Agent and sample worker
