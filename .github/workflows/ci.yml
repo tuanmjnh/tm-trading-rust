@@ -48,8 +48,6 @@ jobs:
   mongodb-live:
     name: Live MongoDB AI jobs
     runs-on: ubuntu-latest
-    env:
-      TM_TRADING_TEST_MONGODB_URI: "mongodb://localhost:27017/?replicaSet=rs0&tls=true&tlsCAFile=${{ runner.temp }}/mongo-certs/ca.pem"
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -129,7 +127,9 @@ jobs:
           test "$primary" = "true"
 
       - name: Run live AI job transaction tests
-        run: cargo test -p tm-trading-storage --locked --test mongo_ai_jobs -- --ignored --test-threads=1
+        run: |
+          export TM_TRADING_TEST_MONGODB_URI="mongodb://localhost:27017/?replicaSet=rs0&tls=true&tlsCAFile=$RUNNER_TEMP/mongo-certs/ca.pem"
+          cargo test -p tm-trading-storage --locked --test mongo_ai_jobs -- --ignored --test-threads=1
 
       - name: Show MongoDB logs
         if: failure()
