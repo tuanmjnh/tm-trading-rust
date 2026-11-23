@@ -60,27 +60,15 @@ fn main() {
         );
     }
 
-    // Windows defaults to a small 1 MB stack. We spawn a dedicated 8 MB UI thread
-    // to ensure complex financial terminal dashboards with WebView2 never exhaust stack space.
-    let builder = std::thread::Builder::new()
-        .name("tm-trading-desktop-gui".to_owned())
-        .stack_size(8 * 1024 * 1024);
-
-    let handler = builder
-        .spawn(|| {
-            let config = dioxus::desktop::Config::default()
-                .with_data_directory(data_directory())
-                .with_window(
-                    dioxus::desktop::WindowBuilder::new()
-                        .with_title("TM Trading Control Center")
-                        .with_resizable(true)
-                        .with_inner_size(dioxus::desktop::LogicalSize::new(1280.0, 820.0)),
-                );
-            dioxus::LaunchBuilder::new().with_cfg(config).launch(App);
-        })
-        .expect("failed to spawn desktop UI thread with 8MB stack");
-
-    let _ = handler.join();
+    let config = dioxus::desktop::Config::default()
+        .with_data_directory(data_directory())
+        .with_window(
+            dioxus::desktop::WindowBuilder::new()
+                .with_title("TM Trading Control Center")
+                .with_resizable(true)
+                .with_inner_size(dioxus::desktop::LogicalSize::new(1280.0, 820.0)),
+        );
+    dioxus::LaunchBuilder::new().with_cfg(config).launch(App);
 }
 
 /// Resolves the WebView2 profile directory.
