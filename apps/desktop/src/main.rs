@@ -9,6 +9,8 @@ mod news;
 mod notifications;
 mod signal_center;
 mod slideover;
+mod system_diagnostics;
+mod webview2_check;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -30,6 +32,8 @@ use i18n::{Locale, UiStrings};
 use news::{NewsItemSlideover, NewsPanel, NewsPanelState};
 use notifications::{NotificationCenterPanel, NotificationPanelState};
 use signal_center::{ResearchEventSlideover, ResearchPanelState, SignalCenterPanel};
+use system_diagnostics::{SystemDiagnosticsPanel, SystemDiagnosticsPanelState};
+use webview2_check::detect_webview2_runtime;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const DEFAULT_API_URL: &str = "http://127.0.0.1:8787";
@@ -38,6 +42,20 @@ fn main() {
     let log_format =
         tm_trading_config::LogFormat::from_env().unwrap_or(tm_trading_config::LogFormat::Compact);
     let _ = tm_trading_observability::init(log_format);
+
+    let webview2_status = detect_webview2_runtime();
+    if !webview2_status.detected || !webview2_status.meets_minimum {
+        tracing::warn!(
+            status = ?webview2_status,
+            "WebView2 runtime verification: {}",
+            webview2_status.advisory
+        );
+    } else {
+        tracing::info!(
+            version = ?webview2_status.version,
+            "WebView2 runtime verification passed."
+        );
+    }
 
     let config = dioxus::desktop::Config::default()
         .with_data_directory(data_directory())
@@ -108,6 +126,7 @@ enum UiAction {
         chat_id: Option<String>,
         message: Option<String>,
     },
+    GenerateSupportBundle,
 }
 
 #[derive(Clone)]
@@ -166,6 +185,8 @@ fn App() -> Element {
     let ai_briefings = use_signal(AiBriefingPanelState::default);
     let ai_providers = use_signal(AiProviderPanelState::default);
     let notifications = use_signal(NotificationPanelState::default);
+    let system_diagnostics =
+        use_signal(|| SystemDiagnosticsPanelState::new(detect_webview2_runtime()));
 
     let client_task = client.clone();
     let actions = use_coroutine(move |mut actions: UnboundedReceiver<UiAction>| {
@@ -182,6 +203,7 @@ fn App() -> Element {
         let mut ai_briefings = ai_briefings;
         let mut ai_providers = ai_providers;
         let mut notifications = notifications;
+        let mut system_diagnostics = system_diagnostics;
         async move {
             loop {
                 tokio::select! {
@@ -306,6 +328,16 @@ fn App() -> Element {
                                 match client.send_test_notification(&req).await {
                                     Ok(res) => notifications.write().test_completed(res),
                                     Err(error) => notifications.write().test_failed(error.to_string()),
+                                }
+                            }
+                            Some(UiAction::GenerateSupportBundle) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                system_diagnostics.write().bundle_generating();
+                                match client.create_support_bundle().await {
+                                    Ok(bundle) => system_diagnostics.write().bundle_loaded(bundle),
+                                    Err(error) => system_diagnostics.write().bundle_failed(error.to_string()),
                                 }
                             }
                             None => break,
@@ -471,6 +503,13 @@ fn App() -> Element {
                     Err(error) => notifications.write().logs_failed(error.to_string()),
                 }
 
+                match client.system_diagnostics().await {
+                    Ok(diag) => system_diagnostics.write().diagnostics_loaded(diag),
+                    Err(error) => system_diagnostics
+                        .write()
+                        .diagnostics_failed(error.to_string()),
+                }
+
                 if let Some(operation_id) = pending_operation() {
                     match client.get_operation(&operation_id).await {
                         Ok(current) => {
@@ -520,6 +559,8 @@ fn App() -> Element {
     let ai_model_test_sender = actions;
     let notifications_state = notifications();
     let notifications_test_sender = actions;
+    let system_diagnostics_state = system_diagnostics();
+    let diagnostics_bundle_sender = actions;
     let status_class = current_operation
         .as_ref()
         .map(|current| operation_status_class(current.status))
@@ -843,6 +884,14 @@ fn App() -> Element {
                             chat_id,
                             message,
                         });
+                    },
+                }
+                SystemDiagnosticsPanel {
+                    state: system_diagnostics_state,
+                    strings: strings(),
+                    disabled: pending,
+                    on_generate_bundle: move |_| {
+                        diagnostics_bundle_sender.send(UiAction::GenerateSupportBundle);
                     },
                 }
             }
