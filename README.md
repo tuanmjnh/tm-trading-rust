@@ -94,6 +94,20 @@ dx serve --platform desktop
 ```
 *(The configuration file `apps/desktop/Dioxus.toml` is pre-configured for desktop hot-reloading).*
 
+#### Option D: Workspace Cleanup & Disk Optimization
+Cargo build caches can accumulate gigabytes of debug symbols and intermediate objects over time. You can clean up with:
+```powershell
+# Quick clean of target/ and temporary logs:
+.\scripts\clean.ps1
+
+# Full clean including dist/ release bundles:
+.\scripts\clean.ps1 -Full
+
+# Or clean before dev run:
+.\scripts\dev.ps1 -Clean
+```
+*Note: The project's root `Cargo.toml` is configured with `[profile.dev.package."*"] debug = 1` to prevent multi-gigabyte PDB debug symbol bloat from third-party dependencies while preserving full debuginfo for workspace crates.*
+
 #### Environment Variables for Desktop Development:
 - `TM_TRADING_API_URL`: Backend API URL (default: `http://127.0.0.1:8787`).
 - `TM_TRADING_LOCAL_API_TOKEN`: Local operator bearer token for authenticated commands.

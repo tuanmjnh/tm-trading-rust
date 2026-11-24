@@ -12,6 +12,12 @@
     UI language ('en' or 'vi'). Defaults to 'vi'.
 .EXAMPLE
     .\scripts\dev.ps1
+.PARAMETER Clean
+    Performs a clean build by removing target/ directory before launching. Defaults to $false.
+.EXAMPLE
+    .\scripts\dev.ps1
+.EXAMPLE
+    .\scripts\dev.ps1 -Clean
 .EXAMPLE
     .\scripts\dev.ps1 -Watch -Locale vi
 #>
@@ -19,6 +25,7 @@
 param(
     [switch]$WithBackend = $true,
     [switch]$Watch = $false,
+    [switch]$Clean = $false,
     [string]$Locale = "vi",
     [string]$ApiUrl = "http://127.0.0.1:8787",
     [string]$ApiToken = "local-dev-operator-token"
@@ -27,6 +34,12 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
+
+if ($Clean) {
+    Write-Host "[...] Clean flag detected. Cleaning Cargo build cache..." -ForegroundColor Yellow
+    & cargo clean
+    Write-Host "[OK] Clean completed." -ForegroundColor Green
+}
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "  TM TRADING - DESKTOP & API DEV ENVIRONMENT RUNNER      " -ForegroundColor Cyan

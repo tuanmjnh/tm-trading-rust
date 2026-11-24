@@ -74,3 +74,13 @@ unsafe_code = "forbid"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
+
+# Build profile optimizations to control disk usage and compile times:
+# Restrict debug symbols to line-tables-only (debug = 1) for external dependencies (Dioxus, Tokio, Wry, Mongo, Windows-rs).
+# This prevents multi-gigabyte PDB debug symbol bloat in target/debug/deps while preserving full debug info for local workspace crates.
+[profile.dev.package."*"]
+debug = 1
+
+[profile.test.package."*"]
+debug = 1
+

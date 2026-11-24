@@ -34,6 +34,12 @@ echo "=========================================================="
 echo "  TM TRADING - DESKTOP & API DEV ENVIRONMENT RUNNER (UNIX)"
 echo "=========================================================="
 
+if [ "${1:-}" = "--clean" ] || [ "${2:-}" = "--clean" ]; then
+    echo "[...] Cleaning Cargo build cache..."
+    cargo clean
+    echo "[OK] Clean completed."
+fi
+
 API_PID=""
 cleanup() {
     if [ -n "$API_PID" ] && kill -0 "$API_PID" 2>/dev/null; then
