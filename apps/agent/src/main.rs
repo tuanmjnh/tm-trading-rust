@@ -49,20 +49,29 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(crash_after_ms) = cli.crash_after_ms {
         agent.enable_crash_drill(crash_after_ms);
     }
-    let start_result = if cli.self_test || cli.crash_after_ms.is_some() {
-        agent.start_service(&cli.service_id).await.map(|_| ())
+    let service_ids: Vec<String> = if cli.service_id == "all" {
+        agent.registry().iter().map(|d| d.id.to_string()).collect()
     } else {
-        agent
-            .start_service_for_launch(&cli.service_id)
-            .await
-            .map(|_| ())
+        vec![cli.service_id.clone()]
     };
-    if let Err(error) = start_result {
-        if matches!(error, AgentError::ShutdownRequested) {
-            agent.shutdown("agent shutdown").await?;
-            return Ok(());
+
+    for service_id in &service_ids {
+        let start_result = if cli.self_test || cli.crash_after_ms.is_some() {
+            agent.start_service(service_id).await.map(|_| ())
+        } else {
+            agent.start_service_for_launch(service_id).await.map(|_| ())
+        };
+        if let Err(error) = start_result {
+            if matches!(error, AgentError::ShutdownRequested) {
+                agent.shutdown("agent shutdown").await?;
+                return Ok(());
+            }
+            if cli.service_id == "all" {
+                tracing::warn!(service_id, %error, "service failed to start at launch; continuing");
+            } else {
+                return Err(error.into());
+            }
         }
-        return Err(error.into());
     }
 
     if cli.self_test {

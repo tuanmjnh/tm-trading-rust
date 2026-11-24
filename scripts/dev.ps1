@@ -95,16 +95,37 @@ $apiExe = Join-Path $RepoRoot "target\debug\tm-trading-management-api.exe"
 $agentExe = Join-Path $RepoRoot "target\debug\tm-trading-agent.exe"
 $desktopExe = Join-Path $RepoRoot "target\debug\tm-trading-desktop.exe"
 
+# All required workspace binaries (Backend API, Host Agent, Desktop UI, and Workers)
+$requiredBins = @(
+    "tm-trading-management-api.exe",
+    "tm-trading-agent.exe",
+    "tm-trading-desktop.exe",
+    "tm-trading-sample-worker.exe",
+    "tm-trading-market-worker.exe",
+    "tm-trading-research-worker.exe",
+    "tm-trading-news-worker.exe",
+    "tm-trading-ai-worker.exe",
+    "tm-trading-notification-worker.exe"
+)
+
+$allBinsPresent = $true
+foreach ($bin in $requiredBins) {
+    if (-not (Test-Path (Join-Path $RepoRoot "target\debug\$bin"))) {
+        $allBinsPresent = $false
+        break
+    }
+}
+
 # Pre-build workspace binaries if missing or after clean to prevent Cargo lock contention
-$needsPrebuild = $Clean -or (-not (Test-Path $apiExe)) -or (-not (Test-Path $agentExe)) -or (-not (Test-Path $desktopExe))
+$needsPrebuild = $Clean -or (-not $allBinsPresent)
 if ($needsPrebuild) {
-    Write-Host "[...] Pre-building workspace binaries (API, Agent, Desktop)..." -ForegroundColor Cyan
-    & cargo build -p tm-trading-management-api -p tm-trading-agent -p tm-trading-desktop
+    Write-Host "[...] Pre-building all workspace binaries (API, Agent, Desktop, Workers)..." -ForegroundColor Cyan
+    & cargo build --workspace --bins
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Workspace build failed. Please resolve compiler errors above." -ForegroundColor Red
         exit 1
     }
-    Write-Host "[OK] Workspace binaries built successfully." -ForegroundColor Green
+    Write-Host "[OK] All workspace binaries built successfully." -ForegroundColor Green
 }
 
 # 1. Check & Start Management API if requested
@@ -168,10 +189,10 @@ if ($WithBackend) {
     $agentPsi = New-Object System.Diagnostics.ProcessStartInfo
     if (Test-Path $agentExe) {
         $agentPsi.FileName = $agentExe
-        $agentPsi.Arguments = "--api-url http://127.0.0.1:8787 --start sample-worker"
+        $agentPsi.Arguments = "--api-url http://127.0.0.1:8787 --start all"
     } else {
         $agentPsi.FileName = "cargo"
-        $agentPsi.Arguments = "run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start sample-worker"
+        $agentPsi.Arguments = "run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start all"
     }
     $agentPsi.WorkingDirectory = $RepoRoot
     $agentPsi.UseShellExecute = $true

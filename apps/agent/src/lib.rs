@@ -291,6 +291,11 @@ impl Agent {
     }
 
     #[must_use]
+    pub fn registry(&self) -> &WorkerRegistry {
+        &self.registry
+    }
+
+    #[must_use]
     pub fn state_dir(&self) -> &Path {
         &self.state_dir
     }

@@ -43,10 +43,11 @@ fi
 API_BIN="$REPO_ROOT/target/debug/tm-trading-management-api"
 AGENT_BIN="$REPO_ROOT/target/debug/tm-trading-agent"
 DESKTOP_BIN="$REPO_ROOT/target/debug/tm-trading-desktop"
+MARKET_BIN="$REPO_ROOT/target/debug/tm-trading-market-worker"
 
-if [ ! -f "$API_BIN" ] || [ ! -f "$AGENT_BIN" ] || [ ! -f "$DESKTOP_BIN" ]; then
-    echo "[...] Pre-building workspace binaries (API, Agent, Desktop)..."
-    cargo build -p tm-trading-management-api -p tm-trading-agent -p tm-trading-desktop
+if [ ! -f "$API_BIN" ] || [ ! -f "$AGENT_BIN" ] || [ ! -f "$DESKTOP_BIN" ] || [ ! -f "$MARKET_BIN" ]; then
+    echo "[...] Pre-building all workspace binaries (API, Agent, Desktop, Workers)..."
+    cargo build --workspace --bins
     echo "[OK] Workspace binaries built successfully."
 fi
 
@@ -88,9 +89,9 @@ export TM_TRADING_AI_WORKER_ENABLED="1"
 export TM_TRADING_NOTIFICATION_WORKER_ENABLED="1"
 
 if [ -f "$AGENT_BIN" ]; then
-    "$AGENT_BIN" --api-url http://127.0.0.1:8787 --start sample-worker &
+    "$AGENT_BIN" --api-url http://127.0.0.1:8787 --start all &
 else
-    cargo run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start sample-worker &
+    cargo run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start all &
 fi
 AGENT_PID=$!
 cleanup() {
