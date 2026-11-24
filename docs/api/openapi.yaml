@@ -3219,6 +3219,10 @@ components:
       - ai_provider_profiles
       - ai_task_routes
       properties:
+        ai_models:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiModelDto'
         ai_provider_profiles:
           type: array
           items:
@@ -4684,6 +4688,9 @@ components:
       - ai_task_routes_restored
       - message
       properties:
+        ai_models_restored:
+          type: integer
+          minimum: 0
         ai_provider_profiles_restored:
           type: integer
           minimum: 0
