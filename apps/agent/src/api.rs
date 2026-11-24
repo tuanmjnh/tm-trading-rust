@@ -147,8 +147,9 @@ impl ManagementApiClient {
 /// Enforces HTTPS for remote Management API connections while permitting plain HTTP on loopback addresses.
 fn validate_management_api_url(base_url: &str) -> Result<String, AgentError> {
     let trimmed = base_url.trim().trim_end_matches('/');
-    let parsed = url::Url::parse(trimmed)
-        .map_err(|error| AgentError::Api(format!("invalid management API URL '{base_url}': {error}")))?;
+    let parsed = url::Url::parse(trimmed).map_err(|error| {
+        AgentError::Api(format!("invalid management API URL '{base_url}': {error}"))
+    })?;
 
     let scheme = parsed.scheme();
     let host = parsed.host_str().unwrap_or_default();

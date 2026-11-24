@@ -67,9 +67,15 @@ async fn run() -> Result<(), RunError> {
         Arc::new(MongoNotificationOutboxRepository::new(connection.database()).await?);
     let log_repo = Arc::new(MongoNotificationLogRepository::new(connection.database()).await?);
 
-    let telegram_token_str = std::env::var("TM_TRADING_TELEGRAM_BOT_TOKEN").ok();
-    let telegram_chat_id = std::env::var("TM_TRADING_TELEGRAM_CHAT_ID").ok();
-    let telegram_base_url = std::env::var("TM_TRADING_TELEGRAM_BASE_URL").ok();
+    let telegram_token_str = std::env::var("TM_TRADING_TELEGRAM_BOT_TOKEN")
+        .or_else(|_| std::env::var("TM_TELEGRAM_BOT_TOKEN"))
+        .ok();
+    let telegram_chat_id = std::env::var("TM_TRADING_TELEGRAM_CHAT_ID")
+        .or_else(|_| std::env::var("TM_TELEGRAM_CHAT_ID"))
+        .ok();
+    let telegram_base_url = std::env::var("TM_TRADING_TELEGRAM_BASE_URL")
+        .or_else(|_| std::env::var("TM_TELEGRAM_BASE_URL"))
+        .ok();
 
     let (telegram_client, telegram_configured) = match telegram_token_str {
         Some(token_str) => match TelegramBotToken::new(token_str) {

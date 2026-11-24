@@ -190,14 +190,19 @@ if ($WithBackend) {
 
     $agentLog = Join-Path $logDir "agent.log"
     $agentErrLog = Join-Path $logDir "agent.err.log"
-    $agentProcess = Start-Process -FilePath $agentExe `
-        -ArgumentList "--api-url http://127.0.0.1:8787 --start all" `
-        -WorkingDirectory $RepoRoot `
-        -RedirectStandardOutput $agentLog `
-        -RedirectStandardError $agentErrLog `
-        -NoNewWindow `
-        -PassThru
-    Write-Host "[OK] Host Agent started!" -ForegroundColor Green
+    try {
+        $agentProcess = Start-Process -FilePath $agentExe `
+            -ArgumentList "--api-url http://127.0.0.1:8787 --start all" `
+            -WorkingDirectory $RepoRoot `
+            -RedirectStandardOutput $agentLog `
+            -RedirectStandardError $agentErrLog `
+            -NoNewWindow `
+            -PassThru
+        Write-Host "[OK] Host Agent started!" -ForegroundColor Green
+    } catch {
+        Write-Host "[WARN] Could not start Host Agent automatically: $_" -ForegroundColor DarkYellow
+        Write-Host "[INFO] You can start it in a separate terminal via: target\debug\tm-trading-agent.exe --api-url http://127.0.0.1:8787 --start all" -ForegroundColor Gray
+    }
 }
 
 # 2. Check if dx (Dioxus CLI) or cargo-watch is available

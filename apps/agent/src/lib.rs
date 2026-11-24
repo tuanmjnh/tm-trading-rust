@@ -103,6 +103,9 @@ const NOTIFICATION_WORKER_ENVIRONMENT: &[&str] = &[
     "TM_TRADING_TELEGRAM_BOT_TOKEN",
     "TM_TRADING_TELEGRAM_CHAT_ID",
     "TM_TRADING_TELEGRAM_BASE_URL",
+    "TM_TELEGRAM_BOT_TOKEN",
+    "TM_TELEGRAM_CHAT_ID",
+    "TM_TELEGRAM_BASE_URL",
     "TM_TRADING_NOTIFICATION_CLAIM_MS",
     "TM_TRADING_NOTIFICATION_HEARTBEAT_MS",
     "TM_TRADING_NOTIFICATION_LEASE_MS",
@@ -1269,7 +1272,12 @@ fn worker_specific_environment(command: &mut Command, keys: &[&str]) {
 /// The values stay in the process environment and are never logged or persisted.
 fn ai_provider_secret_environment(command: &mut Command) {
     for (key, value) in std::env::vars() {
-        if key.starts_with(AI_PROVIDER_SECRET_PREFIX) {
+        if key.starts_with(AI_PROVIDER_SECRET_PREFIX)
+            || key == "GEMINI_API_KEY"
+            || key == "OPENAI_API_KEY"
+            || key == "OPENROUTER_API_KEY"
+            || key == "ANTHROPIC_API_KEY"
+        {
             command.env(key, value);
         }
     }

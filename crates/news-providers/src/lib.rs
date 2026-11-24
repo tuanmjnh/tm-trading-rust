@@ -386,7 +386,15 @@ impl HttpFeedFetcher {
         let client = reqwest::Client::builder()
             .timeout(timeout)
             .connect_timeout(timeout)
-            .redirect(reqwest::redirect::Policy::none())
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 {
+                    attempt.error("too many redirects")
+                } else if !is_safe_news_feed_url(attempt.url().as_str()) {
+                    attempt.error("unsafe redirect url")
+                } else {
+                    attempt.follow()
+                }
+            }))
             .user_agent(concat!(
                 "tm-trading-news-providers/",
                 env!("CARGO_PKG_VERSION")

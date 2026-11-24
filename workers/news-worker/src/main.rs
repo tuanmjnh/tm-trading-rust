@@ -75,7 +75,7 @@ async fn run() -> Result<(), RunError> {
             name: "CoinDesk RSS".to_owned(),
             provider: Some("coindesk".to_owned()),
             transport: NewsTransport::Rss,
-            feed_url: Some("https://www.coindesk.com/arc/outboundfeeds/rss/".to_owned()),
+            feed_url: Some("https://www.coindesk.com/arc/outboundfeeds/rss".to_owned()),
             trust_tier: NewsTrustTier::T1LicensedNews,
             market_groups: vec!["crypto".to_owned()],
             languages: vec!["en".to_owned()],
