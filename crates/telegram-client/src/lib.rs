@@ -120,7 +120,7 @@ struct TelegramResponseParameters {
 }
 
 /// Telegram Bot API client.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TelegramClient {
     token: TelegramBotToken,
     base_url: Url,
@@ -332,7 +332,8 @@ mod tests {
 
     #[test]
     fn safe_truncate_chars_handles_vietnamese_and_emojis() {
-        let vietnamese = "Hệ thống giao dịch TM Trading: Tín hiệu MUA BTCUSDT tại vùng giá $95,000! 🚀🔥📈";
+        let vietnamese =
+            "Hệ thống giao dịch TM Trading: Tín hiệu MUA BTCUSDT tại vùng giá $95,000! 🚀🔥📈";
         // String has multi-byte Vietnamese chars and 4-byte emojis
         assert_eq!(safe_truncate_chars(vietnamese, 10), "Hệ thống g");
         assert_eq!(safe_truncate_chars(vietnamese, 1000), vietnamese);
@@ -355,15 +356,24 @@ mod tests {
 
         // Remote host with HTTPS is allowed
         assert!(TelegramClient::new(token.clone(), Some("https://api.telegram.org"), None).is_ok());
-        assert!(TelegramClient::new(token.clone(), Some("https://custom-telegram.proxy.internal"), None).is_ok());
+        assert!(
+            TelegramClient::new(
+                token.clone(),
+                Some("https://custom-telegram.proxy.internal"),
+                None
+            )
+            .is_ok()
+        );
 
         // Remote host with HTTP is rejected
-        let err = TelegramClient::new(token.clone(), Some("http://api.telegram.org"), None).unwrap_err();
+        let err =
+            TelegramClient::new(token.clone(), Some("http://api.telegram.org"), None).unwrap_err();
         assert!(matches!(err, TelegramError::InvalidBaseUrl(_)));
         assert!(err.to_string().contains("must use HTTPS"));
 
         // Unsupported scheme is rejected
-        let err_scheme = TelegramClient::new(token, Some("ftp://api.telegram.org"), None).unwrap_err();
+        let err_scheme =
+            TelegramClient::new(token, Some("ftp://api.telegram.org"), None).unwrap_err();
         assert!(matches!(err_scheme, TelegramError::InvalidBaseUrl(_)));
     }
 }

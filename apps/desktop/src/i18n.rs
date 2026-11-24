@@ -405,6 +405,16 @@ pub struct UiStrings {
     pub quick_view_subtitle: &'static str,
     pub modal_close: &'static str,
     pub copy_json: &'static str,
+    pub quick_settings: &'static str,
+    pub service_details: &'static str,
+    pub view_details: &'static str,
+    pub service_logs: &'static str,
+    pub watchlists_manage: &'static str,
+    pub add_watchlist: &'static str,
+    pub telemetry_agent: &'static str,
+    pub telemetry_outbox: &'static str,
+    pub telemetry_mongodb: &'static str,
+    pub telemetry_live: &'static str,
 }
 
 impl UiStrings {
@@ -793,6 +803,16 @@ impl UiStrings {
             quick_view_subtitle: "Real-time metrics, system health, and market pulse at a glance",
             modal_close: "Close",
             copy_json: "Copy JSON",
+            quick_settings: "Settings & Tools",
+            service_details: "Service Details",
+            view_details: "View Details",
+            service_logs: "Logs",
+            watchlists_manage: "Manage Watchlists",
+            add_watchlist: "Add Watchlist",
+            telemetry_agent: "Host Agent",
+            telemetry_outbox: "Outbox",
+            telemetry_mongodb: "Database",
+            telemetry_live: "ONLINE",
         }
     }
 
@@ -1173,6 +1193,16 @@ impl UiStrings {
             quick_view_subtitle: "Chỉ số tức thời, sức khỏe hệ thống và nhịp đập thị trường",
             modal_close: "Đóng",
             copy_json: "Sao chép JSON",
+            quick_settings: "Cài đặt & Công cụ",
+            service_details: "Chi tiết dịch vụ",
+            view_details: "Xem chi tiết",
+            service_logs: "Nhật ký",
+            watchlists_manage: "Quản lý Danh mục",
+            add_watchlist: "Thêm danh mục",
+            telemetry_agent: "Tiến trình giám sát",
+            telemetry_outbox: "Hàng đợi gửi",
+            telemetry_mongodb: "Cơ sở dữ liệu",
+            telemetry_live: "HOẠT ĐỘNG",
         }
     }
 }

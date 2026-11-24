@@ -114,7 +114,8 @@ pub fn AiProviderPanel(
     let mut new_provider_id = use_signal(String::new);
     let mut new_provider_kind = use_signal(|| "gemini".to_owned());
     let mut new_provider_display = use_signal(String::new);
-    let mut new_provider_base_url = use_signal(|| "https://generativelanguage.googleapis.com/v1beta".to_owned());
+    let mut new_provider_base_url =
+        use_signal(|| "https://generativelanguage.googleapis.com/v1beta".to_owned());
     let mut new_provider_default_model = use_signal(|| "gemini-2.5-flash".to_owned());
     let new_provider_timeout = use_signal(|| 30000u64);
     let mut new_provider_api_key_env = use_signal(|| "GEMINI_API_KEY".to_owned());

@@ -1501,4 +1501,85 @@ td.numeric {
   font-size: 12px;
 }
 
+/* Wide Slideover for deep configuration */
+.slideover.wide {
+  width: min(880px, 100vw);
+}
+
+/* Interactive KPI Chips */
+.kpi-chip.interactive {
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.kpi-chip.interactive:hover {
+  background: var(--surface-raised);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+/* Unified Telemetry & Status Bar */
+.telemetry-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 24px;
+  background: #0d1218;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+}
+
+.telemetry-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.telemetry-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.telemetry-item.interactive {
+  cursor: pointer;
+}
+
+.telemetry-item.interactive:hover {
+  color: var(--text);
+}
+
+.telemetry-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.telemetry-pill.live {
+  background: rgba(63, 185, 80, 0.18);
+  color: #7ee787;
+  border: 1px solid rgba(63, 185, 80, 0.35);
+}
+
+.telemetry-pill.idle {
+  background: rgba(110, 125, 145, 0.18);
+  color: var(--text-muted);
+  border: 1px solid rgba(110, 125, 145, 0.35);
+}
+
+.telemetry-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
 

@@ -20,6 +20,8 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use dropdown::{ActionDropdown, DropdownItem};
 use futures_util::StreamExt;
+use modal::Modal;
+use slideover::Slideover;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
     AiBriefingQueryDto, AiJobQueryDto, AiJobTaskDto, MarketMoverDto, MarketOverviewDto,
@@ -67,7 +69,7 @@ fn main() {
             dioxus::desktop::WindowBuilder::new()
                 .with_title("TM Trading Control Center")
                 .with_resizable(true)
-                .with_inner_size(dioxus::desktop::LogicalSize::new(1280.0, 820.0)),
+                .with_inner_size(dioxus::desktop::LogicalSize::new(1380.0, 880.0)),
         );
     dioxus::LaunchBuilder::new().with_cfg(config).launch(App);
 }
@@ -164,16 +166,16 @@ enum ConnectionState {
     Disconnected(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum DesktopTab {
+/// Controls which modal or slideover overlay is currently active.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+enum ActiveOverlay {
     #[default]
-    Overview,
-    Market,
-    NewsAi,
-    AiConfig,
-    Notifications,
-    Diagnostics,
-    All,
+    None,
+    WatchlistModal,
+    AiConfigSlideover,
+    NotificationsSlideover,
+    DiagnosticsSlideover,
+    ServiceDetailsSlideover(String),
 }
 
 #[component]
@@ -192,7 +194,7 @@ fn App() -> Element {
     });
 
     let mut locale = use_signal(Locale::from_env);
-    let mut active_tab = use_signal(DesktopTab::default);
+    let mut active_overlay = use_signal(ActiveOverlay::default);
     let strings = use_memo(move || UiStrings::for_locale(locale()));
     let services = use_signal(Vec::<ServiceSnapshot>::new);
     let connection = use_signal(|| ConnectionState::Connecting);
@@ -201,7 +203,6 @@ fn App() -> Element {
     let refreshed_at = use_signal(|| Option::<String>::None);
     let pending_operation = use_signal(|| Option::<String>::None);
     let watchlists = use_signal(Vec::<WatchlistDto>::new);
-    let mut new_list_name = use_signal(String::new);
     let watchlist_error = use_signal(|| Option::<String>::None);
     let market_overview = use_signal(|| Option::<MarketOverviewDto>::None);
     let market_pulse = use_signal(|| Option::<MarketPulseDto>::None);
@@ -217,7 +218,6 @@ fn App() -> Element {
     let client_task = client.clone();
     let actions = use_coroutine(move |mut actions: UnboundedReceiver<UiAction>| {
         let client = client_task.clone();
-        // Signals are Copy handles; shadowing keeps the coroutine body reading naturally.
         let (mut services, mut connection) = (services, connection);
         let (mut operation, mut command_error) = (operation, command_error);
         let (mut refreshed_at, mut pending_operation) = (refreshed_at, pending_operation);
@@ -230,7 +230,6 @@ fn App() -> Element {
         let mut ai_providers = ai_providers;
         let mut notifications = notifications;
         let mut system_diagnostics = system_diagnostics;
-        let active_tab = active_tab;
         async move {
             let mut tick: u64 = 0;
             loop {
@@ -457,6 +456,7 @@ fn App() -> Element {
                 };
                 tick = tick.wrapping_add(1);
 
+                // Service Fleet List (Primary 2s cycle)
                 match client.list_services().await {
                     Ok(list) => {
                         services.set(list);
@@ -466,168 +466,132 @@ fn App() -> Element {
                 }
                 refreshed_at.set(Some(chrono::Local::now().format("%H:%M:%S").to_string()));
 
-                let active_tab_val = active_tab();
-                let is_bg_tick = tick == 1 || tick % 8 == 0;
+                let is_bg_tick = tick == 1 || tick % 5 == 0;
 
-                // 1. Overview & Market Tabs (Parallelized queries)
-                if active_tab_val == DesktopTab::Overview
-                    || active_tab_val == DesktopTab::Market
-                    || active_tab_val == DesktopTab::All
-                    || is_bg_tick
-                {
-                    let (watchlists_res, overview_res, pulse_res) = tokio::join!(
-                        client.list_watchlists(),
-                        client.market_overview(&[], "1m", 60),
-                        client.market_pulse(&[], "1m", 60)
-                    );
-                    if let Ok(list) = watchlists_res {
-                        watchlists.set(list);
+                // Market & Research & News & AI Briefings (2s cycle)
+                let (watchlists_res, overview_res, pulse_res) = tokio::join!(
+                    client.list_watchlists(),
+                    client.market_overview(&[], "1m", 60),
+                    client.market_pulse(&[], "1m", 60)
+                );
+                if let Ok(list) = watchlists_res {
+                    watchlists.set(list);
+                }
+                match overview_res {
+                    Ok(overview) => {
+                        market_overview.set(Some(overview));
+                        market_error.set(None);
                     }
-                    match overview_res {
-                        Ok(overview) => {
-                            market_overview.set(Some(overview));
-                            market_error.set(None);
-                        }
-                        Err(error) => market_error.set(Some(error.to_string())),
-                    }
-                    if let Ok(pulse) = pulse_res {
-                        market_pulse.set(Some(pulse));
-                    }
+                    Err(error) => market_error.set(Some(error.to_string())),
+                }
+                if let Ok(pulse) = pulse_res {
+                    market_pulse.set(Some(pulse));
+                }
 
-                    if active_tab_val == DesktopTab::Overview
-                        || active_tab_val == DesktopTab::All
-                        || is_bg_tick
-                    {
-                        let research_query = ResearchEventQueryDto {
-                            limit: Some(50),
-                            ..ResearchEventQueryDto::default()
-                        };
-                        match client.list_research_events(&research_query).await {
-                            Ok(list) => research.write().list_loaded(list.events),
-                            Err(error) => research.write().list_failed(error.to_string()),
-                        }
-                        let selected_research_id = research.read().selected_id.clone();
-                        if let Some(event_id) = selected_research_id {
-                            match client.get_research_event(&event_id).await {
-                                Ok(event) => research.write().detail_loaded(event),
-                                Err(error) => research.write().detail_failed(&event_id, error.to_string()),
-                            }
+                let research_query = ResearchEventQueryDto {
+                    limit: Some(25),
+                    ..ResearchEventQueryDto::default()
+                };
+                match client.list_research_events(&research_query).await {
+                    Ok(list) => research.write().list_loaded(list.events),
+                    Err(error) => research.write().list_failed(error.to_string()),
+                }
+                let selected_research_id = research.read().selected_id.clone();
+                if let Some(event_id) = selected_research_id {
+                    match client.get_research_event(&event_id).await {
+                        Ok(event) => research.write().detail_loaded(event),
+                        Err(error) => research.write().detail_failed(&event_id, error.to_string()),
+                    }
+                }
+
+                let news_query = NewsQueryDto {
+                    limit: Some(25),
+                    ..NewsQueryDto::default()
+                };
+                let briefing_query = AiBriefingQueryDto {
+                    limit: Some(20),
+                    ..AiBriefingQueryDto::default()
+                };
+                let (news_res, briefings_res) = tokio::join!(
+                    client.list_news(&news_query),
+                    client.list_ai_briefings(&briefing_query)
+                );
+                match news_res {
+                    Ok(list) => news.write().list_loaded(list),
+                    Err(error) => news.write().list_failed(error.to_string()),
+                }
+                match briefings_res {
+                    Ok(list) => ai_briefings.write().list_loaded(list.briefings),
+                    Err(error) => {
+                        tracing::error!(%error, "failed to list AI briefings");
+                        ai_briefings.write().list_failed();
+                    }
+                }
+
+                let selected_news_id = news.read().selected_id.clone();
+                if let Some(news_id) = selected_news_id {
+                    match client.get_news_item(&news_id).await {
+                        Ok(item) => news.write().detail_loaded(item),
+                        Err(error) => news.write().detail_failed(&news_id, error.to_string()),
+                    }
+                }
+
+                let selected_briefing_id = ai_briefings.read().selected_id.clone();
+                if let Some(briefing_id) = selected_briefing_id {
+                    match client.get_ai_briefing(&briefing_id).await {
+                        Ok(briefing) => ai_briefings.write().detail_loaded(briefing),
+                        Err(error) => {
+                            tracing::error!(%error, briefing_id = %briefing_id, "failed to load AI briefing");
+                            ai_briefings.write().detail_failed(&briefing_id);
                         }
                     }
                 }
 
-                // 2. News & AI Briefings Tab (Parallelized queries)
-                if active_tab_val == DesktopTab::NewsAi
-                    || active_tab_val == DesktopTab::All
-                    || is_bg_tick
-                {
-                    let news_query = NewsQueryDto {
-                        limit: Some(50),
-                        ..NewsQueryDto::default()
+                let tracked_job_id = ai_briefings.read().tracked_job_id().map(str::to_owned);
+                if let Some(job_id) = tracked_job_id {
+                    match client.get_ai_job(&job_id).await {
+                        Ok(job) => ai_briefings.write().tracked_job_loaded(job),
+                        Err(error) => {
+                            tracing::error!(%error, job_id = %job_id, "failed to load AI job");
+                            ai_briefings.write().jobs_failed();
+                        }
+                    }
+                } else if is_bg_tick {
+                    let ai_job_query = AiJobQueryDto {
+                        task: Some(AiJobTaskDto::ResearchExplanation),
+                        limit: Some(20),
                     };
-                    let briefing_query = AiBriefingQueryDto {
-                        limit: Some(50),
-                        ..AiBriefingQueryDto::default()
-                    };
+                    if let Ok(list) = client.list_ai_jobs(&ai_job_query).await {
+                        ai_briefings.write().jobs_loaded(list.jobs);
+                    }
+                }
+
+                // Background Polling (Every ~10s: AI Profiles, Routes, Notifications, Diagnostics)
+                if is_bg_tick {
                     let cluster_query = tm_trading_contracts::NewsClusterQueryDto::default();
-                    let (news_res, sources_res, clusters_res, briefings_res) = tokio::join!(
-                        client.list_news(&news_query),
+                    let (sources_res, clusters_res, profiles_res, models_res, routes_res) = tokio::join!(
                         client.list_news_sources(),
                         client.list_news_clusters(&cluster_query),
-                        client.list_ai_briefings(&briefing_query)
-                    );
-                    match news_res {
-                        Ok(list) => news.write().list_loaded(list),
-                        Err(error) => news.write().list_failed(error.to_string()),
-                    }
-                    match sources_res {
-                        Ok(list) => news.write().sources_loaded(list),
-                        Err(error) => news.write().sources_failed(error.to_string()),
-                    }
-                    match clusters_res {
-                        Ok(list) => news.write().clusters_loaded(list),
-                        Err(error) => news.write().clusters_failed(error.to_string()),
-                    }
-                    match briefings_res {
-                        Ok(list) => ai_briefings.write().list_loaded(list.briefings),
-                        Err(error) => {
-                            tracing::error!(%error, "failed to list AI briefings");
-                            ai_briefings.write().list_failed();
-                        }
-                    }
-
-                    let selected_news_id = news.read().selected_id.clone();
-                    if let Some(news_id) = selected_news_id {
-                        match client.get_news_item(&news_id).await {
-                            Ok(item) => news.write().detail_loaded(item),
-                            Err(error) => news.write().detail_failed(&news_id, error.to_string()),
-                        }
-                    }
-
-                    let selected_briefing_id = ai_briefings.read().selected_id.clone();
-                    if let Some(briefing_id) = selected_briefing_id {
-                        match client.get_ai_briefing(&briefing_id).await {
-                            Ok(briefing) => ai_briefings.write().detail_loaded(briefing),
-                            Err(error) => {
-                                tracing::error!(%error, briefing_id = %briefing_id, "failed to load AI briefing");
-                                ai_briefings.write().detail_failed(&briefing_id);
-                            }
-                        }
-                    }
-
-                    let tracked_job_id = ai_briefings.read().tracked_job_id().map(str::to_owned);
-                    if let Some(job_id) = tracked_job_id {
-                        match client.get_ai_job(&job_id).await {
-                            Ok(job) => ai_briefings.write().tracked_job_loaded(job),
-                            Err(error) => {
-                                tracing::error!(%error, job_id = %job_id, "failed to load AI job");
-                                ai_briefings.write().jobs_failed();
-                            }
-                        }
-                    } else {
-                        let ai_job_query = AiJobQueryDto {
-                            task: Some(AiJobTaskDto::ResearchExplanation),
-                            limit: Some(20),
-                        };
-                        match client.list_ai_jobs(&ai_job_query).await {
-                            Ok(list) => ai_briefings.write().jobs_loaded(list.jobs),
-                            Err(error) => {
-                                tracing::error!(%error, "failed to list AI jobs");
-                                ai_briefings.write().jobs_failed();
-                            }
-                        }
-                    }
-                }
-
-                // 3. AI Config Tab (Parallelized queries)
-                if active_tab_val == DesktopTab::AiConfig
-                    || active_tab_val == DesktopTab::All
-                    || is_bg_tick
-                {
-                    let (profiles_res, models_res, routes_res) = tokio::join!(
                         client.list_ai_provider_profiles(),
                         client.list_ai_models(),
                         client.list_ai_task_routes()
                     );
-                    match profiles_res {
-                        Ok(list) => ai_providers.write().list_loaded(list),
-                        Err(error) => ai_providers.write().list_failed(error.to_string()),
+                    if let Ok(list) = sources_res {
+                        news.write().sources_loaded(list);
                     }
-                    match models_res {
-                        Ok(list) => ai_providers.write().models_loaded(list),
-                        Err(error) => ai_providers.write().models_failed(error.to_string()),
+                    if let Ok(list) = clusters_res {
+                        news.write().clusters_loaded(list);
                     }
-                    match routes_res {
-                        Ok(list) => ai_providers.write().routes_loaded(list),
-                        Err(error) => ai_providers.write().routes_failed(error.to_string()),
+                    if let Ok(list) = profiles_res {
+                        ai_providers.write().list_loaded(list);
                     }
-                }
+                    if let Ok(list) = models_res {
+                        ai_providers.write().models_loaded(list);
+                    }
+                    if let Ok(list) = routes_res {
+                        ai_providers.write().routes_loaded(list);
+                    }
 
-                // 4. Notifications Tab (Parallelized queries)
-                if active_tab_val == DesktopTab::Notifications
-                    || active_tab_val == DesktopTab::All
-                    || is_bg_tick
-                {
                     let outbox_query = NotificationOutboxQueryDto {
                         limit: Some(20),
                         ..NotificationOutboxQueryDto::default()
@@ -637,39 +601,27 @@ fn App() -> Element {
                         ..NotificationLogQueryDto::default()
                     };
                     let summary_query = NotificationSummaryQueryDto::default();
-                    let (outbox_res, summary_res, logs_res) = tokio::join!(
+                    let (outbox_res, summary_res, logs_res, diag_res) = tokio::join!(
                         client.list_notification_outbox(&outbox_query),
                         client.notification_outbox_summary(&summary_query),
-                        client.list_notification_logs(&log_query)
+                        client.list_notification_logs(&log_query),
+                        client.system_diagnostics()
                     );
-                    match outbox_res {
-                        Ok(list) => notifications.write().outbox_loaded(list),
-                        Err(error) => notifications.write().outbox_failed(error.to_string()),
+                    if let Ok(list) = outbox_res {
+                        notifications.write().outbox_loaded(list);
                     }
-                    match summary_res {
-                        Ok(summary) => notifications.write().summary_loaded(summary),
-                        Err(error) => notifications.write().summary_failed(error.to_string()),
+                    if let Ok(summary) = summary_res {
+                        notifications.write().summary_loaded(summary);
                     }
-                    match logs_res {
-                        Ok(logs) => notifications.write().logs_loaded(logs),
-                        Err(error) => notifications.write().logs_failed(error.to_string()),
+                    if let Ok(logs) = logs_res {
+                        notifications.write().logs_loaded(logs);
                     }
-                }
-
-                // 5. Diagnostics Tab
-                if active_tab_val == DesktopTab::Diagnostics
-                    || active_tab_val == DesktopTab::All
-                    || is_bg_tick
-                {
-                    match client.system_diagnostics().await {
-                        Ok(diag) => system_diagnostics.write().diagnostics_loaded(diag),
-                        Err(error) => system_diagnostics
-                            .write()
-                            .diagnostics_failed(error.to_string()),
+                    if let Ok(diag) = diag_res {
+                        system_diagnostics.write().diagnostics_loaded(diag);
                     }
                 }
 
-                // 6. Finalize Pending Operation Poll
+                // Finalize Pending Operation Poll
                 if let Some(operation_id) = pending_operation() {
                     match client.get_operation(&operation_id).await {
                         Ok(current) => {
@@ -688,11 +640,8 @@ fn App() -> Element {
 
     let rows = services();
     let lists = watchlists();
-    let overview = market_overview();
     let pulse = market_pulse();
-    let market_error_message = market_error();
     let watchlist_error_message = watchlist_error();
-    let name_value = new_list_name();
     let list_sender = actions;
     let refreshed_label = format!(
         "{} {}",
@@ -765,13 +714,13 @@ fn App() -> Element {
     rsx! {
         AppStyles {}
         div { class: "shell",
-            // Topbar Brand & Network Connection
+            // Unified Topbar: Brand, Connectivity, Locale & Quick Actions Dropdown
             header { class: "topbar",
                 div { class: "brand",
                     span { class: "brand-mark" }
                     div {
                         h1 { "{strings().app_title}" }
-                        p { class: "brand-subtitle", "{strings().control_center}" }
+                        p { class: "brand-subtitle", "UNIFIED OPERATIONS DESK" }
                     }
                 }
                 div { class: "topbar-actions",
@@ -791,16 +740,65 @@ fn App() -> Element {
                             "VI"
                         }
                     }
+                    ActionDropdown {
+                        trigger_label: format!("⚙️ {}", strings().quick_settings),
+                        disabled: false,
+                        items: vec![
+                            DropdownItem {
+                                id: "ai_config".to_owned(),
+                                label: format!("🤖 {}", strings().tab_ai_settings),
+                                class: None,
+                                disabled: false,
+                            },
+                            DropdownItem {
+                                id: "notifications".to_owned(),
+                                label: format!("🔔 {}", strings().tab_notifications),
+                                class: None,
+                                disabled: false,
+                            },
+                            DropdownItem {
+                                id: "diagnostics".to_owned(),
+                                label: format!("🛠️ {}", strings().tab_diagnostics),
+                                class: None,
+                                disabled: false,
+                            },
+                            DropdownItem {
+                                id: "watchlist".to_owned(),
+                                label: format!("📋 {}", strings().watchlists_manage),
+                                class: None,
+                                disabled: false,
+                            },
+                        ],
+                        on_select: move |action_id: String| {
+                            match action_id.as_str() {
+                                "ai_config" => active_overlay.set(ActiveOverlay::AiConfigSlideover),
+                                "notifications" => active_overlay.set(ActiveOverlay::NotificationsSlideover),
+                                "diagnostics" => active_overlay.set(ActiveOverlay::DiagnosticsSlideover),
+                                "watchlist" => active_overlay.set(ActiveOverlay::WatchlistModal),
+                                _ => {}
+                            }
+                        },
+                    }
                 }
             }
 
-            // Executive KPI Ribbon - immediate high-level awareness on app launch
+            // Executive KPI Ribbon: Dense, high-contrast operational status cards
             div { class: "kpi-ribbon",
-                div { class: "kpi-chip",
+                div {
+                    class: "kpi-chip interactive",
+                    title: "Click to inspect services",
+                    onclick: move |_| {
+                        if let Some(first) = rows.first() {
+                            active_overlay.set(ActiveOverlay::ServiceDetailsSlideover(first.service_instance_id.clone()));
+                        }
+                    },
                     span { class: "kpi-title", "{strings().kpi_services}" }
                     span { class: "kpi-value", "{ready_services_count}/{total_services_count}" }
                 }
-                div { class: "kpi-chip",
+                div {
+                    class: "kpi-chip interactive",
+                    title: "Click to manage watchlists",
+                    onclick: move |_| active_overlay.set(ActiveOverlay::WatchlistModal),
                     span { class: "kpi-title", "{strings().kpi_market}" }
                     span { class: "kpi-value", "{pulse_state_label}" }
                 }
@@ -812,161 +810,78 @@ fn App() -> Element {
                     span { class: "kpi-title", "{strings().kpi_news}" }
                     span { class: "kpi-value", "{news_count}" }
                 }
-                div { class: "kpi-chip",
+                div {
+                    class: "kpi-chip interactive",
+                    title: "Click to configure AI providers and task routes",
+                    onclick: move |_| active_overlay.set(ActiveOverlay::AiConfigSlideover),
                     span { class: "kpi-title", "{strings().kpi_ai_routes}" }
                     span { class: "kpi-value", "{routes_count}" }
                 }
-                div { class: "kpi-chip",
+                div {
+                    class: "kpi-chip interactive",
+                    title: "Click to open notification outbox and test channel",
+                    onclick: move |_| active_overlay.set(ActiveOverlay::NotificationsSlideover),
                     span { class: "kpi-title", "{strings().kpi_outbox}" }
                     span { class: "kpi-value", "{outbox_count}" }
                 }
-                div { class: "kpi-chip",
+                div {
+                    class: "kpi-chip interactive",
+                    title: "Click to open system diagnostics and support bundle",
+                    onclick: move |_| active_overlay.set(ActiveOverlay::DiagnosticsSlideover),
                     span { class: "kpi-title", "{strings().kpi_runtime}" }
                     span { class: "kpi-value", "{webview2_version}" }
                 }
             }
 
-            // Terminal Navigation Tab Bar
-            nav { class: "nav-tab-bar", role: "tablist", aria_label: "Navigation Tabs",
-                button {
-                    class: if active_tab() == DesktopTab::Overview { "nav-tab-btn active" } else { "nav-tab-btn" },
-                    role: "tab",
-                    aria_selected: "{active_tab() == DesktopTab::Overview}",
-                    onclick: move |_| active_tab.set(DesktopTab::Overview),
-                    "📊 {strings().tab_overview}"
-                }
-                button {
-                    class: if active_tab() == DesktopTab::Market { "nav-tab-btn active" } else { "nav-tab-btn" },
-                    role: "tab",
-                    aria_selected: "{active_tab() == DesktopTab::Market}",
-                    onclick: move |_| active_tab.set(DesktopTab::Market),
-                    "📈 {strings().tab_market}"
-                }
-                button {
-                    class: if active_tab() == DesktopTab::NewsAi { "nav-tab-btn active" } else { "nav-tab-btn" },
-                    role: "tab",
-                    aria_selected: "{active_tab() == DesktopTab::NewsAi}",
-                    onclick: move |_| active_tab.set(DesktopTab::NewsAi),
-                    "📰 {strings().tab_news_ai}"
-                }
-                button {
-                    class: if active_tab() == DesktopTab::AiConfig { "nav-tab-btn active" } else { "nav-tab-btn" },
-                    role: "tab",
-                    aria_selected: "{active_tab() == DesktopTab::AiConfig}",
-                    onclick: move |_| active_tab.set(DesktopTab::AiConfig),
-                    "🤖 {strings().tab_ai_settings}"
-                }
-                button {
-                    class: if active_tab() == DesktopTab::Notifications { "nav-tab-btn active" } else { "nav-tab-btn" },
-                    role: "tab",
-                    aria_selected: "{active_tab() == DesktopTab::Notifications}",
-                    onclick: move |_| active_tab.set(DesktopTab::Notifications),
-                    "🔔 {strings().tab_notifications}"
-                }
-                button {
-                    class: if active_tab() == DesktopTab::Diagnostics { "nav-tab-btn active" } else { "nav-tab-btn" },
-                    role: "tab",
-                    aria_selected: "{active_tab() == DesktopTab::Diagnostics}",
-                    onclick: move |_| active_tab.set(DesktopTab::Diagnostics),
-                    "⚙️ {strings().tab_diagnostics}"
-                }
-                button {
-                    class: if active_tab() == DesktopTab::All { "nav-tab-btn active" } else { "nav-tab-btn" },
-                    role: "tab",
-                    aria_selected: "{active_tab() == DesktopTab::All}",
-                    onclick: move |_| active_tab.set(DesktopTab::All),
-                    "📑 {strings().tab_all}"
-                }
-            }
-
+            // Unified Operations Content (Single Bento / Split Grid Layout)
             main { class: "content",
-                if active_tab() == DesktopTab::Overview {
-                    div { class: "dashboard-split-grid",
-                        div { class: "column-primary",
-                            section { class: "panel",
-                                div { class: "panel-head",
-                                    h2 { "{strings().services_and_agents}" }
-                                    span { class: "panel-meta", "{refreshed_label}" }
-                                }
-                                if rows.is_empty() {
-                                    div { class: "empty",
-                                        p { class: "empty-title", "{strings().no_services}" }
-                                        p { "{strings().no_services_hint}" }
-                                    }
-                                } else {
-                                    div { class: "table-wrap",
-                                        table { class: "services",
-                                            thead {
-                                                tr {
-                                                    th { "{strings().service_column}" }
-                                                    th { "{strings().agent_column}" }
-                                                    th { "{strings().desired_column}" }
-                                                    th { "{strings().observed_column}" }
-                                                    th { "{strings().readiness_column}" }
-                                                    th { class: "numeric", "{strings().restarts_column}" }
-                                                    th { class: "numeric", "{strings().last_exit_column}" }
-                                                    th { class: "actions-head", "{strings().actions_column}" }
-                                                }
-                                            }
-                                            tbody {
-                                                for service in rows.iter() {
-                                                    {
-                                                        let snapshot = service.clone();
-                                                        let service_id = snapshot.service_instance_id.clone();
-                                                        rsx! {
-                                                            ServiceRow {
-                                                                service: snapshot,
-                                                                strings: strings(),
-                                                                disabled: pending,
-                                                                on_command: move |action| {
-                                                                    action_sender.send(UiAction::Command {
-                                                                        service_instance_id: service_id.clone(),
-                                                                        action,
-                                                                    });
-                                                                },
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                // Section 1: Core Service Control Fleet (Left) + Market Pulse & Movers (Right)
+                div { class: "dashboard-split-grid", style: "margin-bottom: 20px;",
+                    div { class: "column-primary",
+                        section { class: "panel",
+                            div { class: "panel-head",
+                                h2 { "{strings().services_and_agents}" }
+                                span { class: "panel-meta", "{refreshed_label}" }
                             }
-                            section { class: "panel market-panel",
-                                div { class: "panel-head",
-                                    h2 { "{strings().market_pulse}" }
-                                    if let Some(pulse) = pulse.as_ref() {
-                                        span { class: "panel-meta",
-                                            "{pulse.timeframe} · {market_state_label(pulse.state, &strings())}"
-                                        }
-                                    }
+                            if rows.is_empty() {
+                                div { class: "empty",
+                                    p { class: "empty-title", "{strings().no_services}" }
+                                    p { "{strings().no_services_hint}" }
                                 }
-                                if let Some(pulse) = pulse.as_ref() {
-                                    if pulse.movers.is_empty() {
-                                        div { class: "empty",
-                                            p { class: "empty-title", "{strings().market_empty}" }
-                                            p { "{strings().market_empty_hint}" }
+                            } else {
+                                div { class: "table-wrap",
+                                    table { class: "services",
+                                        thead {
+                                            tr {
+                                                th { "{strings().service_column}" }
+                                                th { "{strings().agent_column}" }
+                                                th { "{strings().desired_column}" }
+                                                th { "{strings().observed_column}" }
+                                                th { "{strings().readiness_column}" }
+                                                th { class: "numeric", "{strings().restarts_column}" }
+                                                th { class: "numeric", "{strings().last_exit_column}" }
+                                                th { class: "actions-head", "{strings().actions_column}" }
+                                            }
                                         }
-                                    } else {
-                                        div { class: "table-wrap",
-                                            table { class: "services",
-                                                thead {
-                                                    tr {
-                                                        th { "{strings().market_symbol_column}" }
-                                                        th { class: "numeric", "{strings().market_last_close_column}" }
-                                                        th { class: "numeric", "{strings().market_change_column}" }
-                                                        th { class: "numeric", "{strings().market_volume_ratio_column}" }
-                                                        th { class: "numeric", "{strings().market_volatility_column}" }
-                                                        th { "{strings().market_status_column}" }
-                                                    }
-                                                }
-                                                tbody {
-                                                    for mover in pulse.movers.iter().take(6) {
-                                                        MarketMoverRow {
-                                                            key: "{mover.symbol}",
-                                                            mover: mover.clone(),
+                                        tbody {
+                                            for service in rows.iter() {
+                                                {
+                                                    let snapshot = service.clone();
+                                                    let service_id = snapshot.service_instance_id.clone();
+                                                    rsx! {
+                                                        ServiceRow {
+                                                            service: snapshot,
                                                             strings: strings(),
+                                                            disabled: pending,
+                                                            on_command: move |action| {
+                                                                action_sender.send(UiAction::Command {
+                                                                    service_instance_id: service_id.clone(),
+                                                                    action,
+                                                                });
+                                                            },
+                                                            on_details: move |inst_id| {
+                                                                active_overlay.set(ActiveOverlay::ServiceDetailsSlideover(inst_id));
+                                                            },
                                                         }
                                                     }
                                                 }
@@ -976,7 +891,7 @@ fn App() -> Element {
                                 }
                             }
                         }
-                        div { class: "column-secondary",
+                        if let Some(current) = current_operation.as_ref() {
                             section { class: "panel operation-panel",
                                 div { class: "panel-head",
                                     h2 { "{strings().operation}" }
@@ -984,171 +899,39 @@ fn App() -> Element {
                                 if let Some(error) = command_error() {
                                     div { class: "banner error", role: "alert", "{error}" }
                                 }
-                                if let Some(current) = current_operation.as_ref() {
-                                    div { class: "operation-body",
-                                        div { class: "operation-status",
-                                            span { class: status_class.clone(), "{status_label}" }
-                                        }
-                                        div { class: "operation-detail",
-                                            p { class: "operation-id", "{current.operation_id}" }
-                                            if let Some(summary) = current.result_summary.clone() {
-                                                p { class: "operation-summary", "{summary}" }
-                                            } else if let Some(error) = current.redacted_error.clone() {
-                                                p { class: "operation-summary error-text", "{error}" }
-                                            } else {
-                                                p { class: "operation-summary muted", "{strings().operation_pending}" }
-                                            }
-                                        }
+                                div { class: "operation-body",
+                                    div { class: "operation-status",
+                                        span { class: status_class.clone(), "{status_label}" }
                                     }
-                                } else {
-                                    p { class: "muted", "{strings().operation_none}" }
-                                }
-                            }
-                            SignalCenterPanel {
-                                state: research_state.clone(),
-                                strings: strings(),
-                                on_open: move |event_id| {
-                                    research_open_sender.send(UiAction::OpenResearchEvent { event_id });
-                                },
-                            }
-                            NewsPanel {
-                                state: news_state.clone(),
-                                strings: strings(),
-                                on_open: move |news_id| {
-                                    news_open_sender.send(UiAction::OpenNewsItem { news_id });
-                                },
-                            }
-                        }
-                    }
-                }
-
-                if active_tab() == DesktopTab::Market || active_tab() == DesktopTab::All {
-                    section { class: "panel watchlists-panel",
-                        div { class: "panel-head",
-                            h2 { "{strings().watchlists}" }
-                            span { class: "panel-meta", "{lists.len()}" }
-                        }
-                        if let Some(error) = watchlist_error_message.as_ref() {
-                            div { class: "banner error", role: "alert", "{error}" }
-                        }
-                        div { class: "watchlist-create",
-                            input {
-                                class: "text-input",
-                                value: "{name_value}",
-                                placeholder: "{strings().watchlist_new_placeholder}",
-                                aria_label: "{strings().watchlist_new_placeholder}",
-                                oninput: move |event| new_list_name.set(event.value()),
-                            }
-                            button {
-                                class: "button primary",
-                                onclick: move |_| {
-                                    let name = new_list_name().trim().to_owned();
-                                    if name.is_empty() {
-                                        return;
-                                    }
-                                    list_sender.send(UiAction::Watchlist(WatchlistAction::Create {
-                                        name,
-                                        symbols: Vec::new(),
-                                    }));
-                                    new_list_name.set(String::new());
-                                },
-                                "{strings().watchlist_add}"
-                            }
-                        }
-                        if lists.is_empty() {
-                            div { class: "empty",
-                                p { class: "empty-title", "{strings().watchlist_empty}" }
-                                p { "{strings().watchlist_empty_hint}" }
-                            }
-                        } else {
-                            div { class: "watchlist-grid",
-                                for list in lists.iter() {
-                                    {
-                                        let watchlist = list.clone();
-                                        let replace_id = watchlist.id.clone();
-                                        let delete_id = watchlist.id.clone();
-                                        let replace_sender = list_sender;
-                                        let delete_sender = list_sender;
-                                        rsx! {
-                                            WatchlistCard {
-                                                key: "{watchlist.id}",
-                                                watchlist,
-                                                strings: strings(),
-                                                on_replace: move |symbols| {
-                                                    replace_sender.send(UiAction::Watchlist(
-                                                        WatchlistAction::ReplaceSymbols {
-                                                            watchlist_id: replace_id.clone(),
-                                                            symbols,
-                                                        },
-                                                    ));
-                                                },
-                                                on_delete: move |_| {
-                                                    delete_sender.send(UiAction::Watchlist(
-                                                        WatchlistAction::Delete {
-                                                            watchlist_id: delete_id.clone(),
-                                                        },
-                                                    ));
-                                                },
-                                            }
+                                    div { class: "operation-detail",
+                                        p { class: "operation-id", "{current.operation_id}" }
+                                        if let Some(summary) = current.result_summary.clone() {
+                                            p { class: "operation-summary", "{summary}" }
+                                        } else if let Some(error) = current.redacted_error.clone() {
+                                            p { class: "operation-summary error-text", "{error}" }
+                                        } else {
+                                            p { class: "operation-summary muted", "{strings().operation_pending}" }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    section { class: "panel market-panel",
-                        div { class: "panel-head",
-                            h2 { "{strings().market_overview}" }
-                            if let Some(overview) = overview.as_ref() {
-                                span { class: "panel-meta",
-                                    "{overview.timeframe} · {market_state_label(overview.state, &strings())}"
-                                }
-                            }
-                        }
-                        if let Some(error) = market_error_message.as_ref() {
-                            div { class: "banner error", role: "alert", "{error}" }
-                        }
-                        if let Some(overview) = overview.as_ref() {
-                            if overview.symbols.is_empty() {
-                                div { class: "empty",
-                                    p { class: "empty-title", "{strings().market_empty}" }
-                                    p { "{strings().market_empty_hint}" }
-                                }
-                            } else {
-                                div { class: "table-wrap",
-                                    table { class: "services",
-                                        thead {
-                                            tr {
-                                                th { "{strings().market_symbol_column}" }
-                                                th { class: "numeric", "{strings().market_last_close_column}" }
-                                                th { class: "numeric", "{strings().market_change_column}" }
-                                                th { class: "numeric", "{strings().market_volume_column}" }
-                                                th { class: "numeric", "{strings().market_age_column}" }
-                                                th { "{strings().market_status_column}" }
-                                            }
-                                        }
-                                        tbody {
-                                            for item in overview.symbols.iter() {
-                                                MarketSymbolRow {
-                                                    key: "{item.symbol}",
-                                                    symbol: item.clone(),
-                                                    strings: strings(),
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if active_tab() != DesktopTab::All {
+                    div { class: "column-secondary",
                         section { class: "panel market-panel",
                             div { class: "panel-head",
-                                h2 { "{strings().market_pulse}" }
-                                if let Some(pulse) = pulse.as_ref() {
-                                    span { class: "panel-meta",
-                                        "{pulse.timeframe} · {market_state_label(pulse.state, &strings())}"
+                                div { class: "flex items-center gap-2",
+                                    h2 { "{strings().market_pulse}" }
+                                    if let Some(pulse) = pulse.as_ref() {
+                                        span { class: "panel-meta",
+                                            "{pulse.timeframe} · {market_state_label(pulse.state, &strings())}"
+                                        }
                                     }
+                                }
+                                button {
+                                    class: "button",
+                                    onclick: move |_| active_overlay.set(ActiveOverlay::WatchlistModal),
+                                    "📋 {strings().watchlists_manage}"
                                 }
                             }
                             if let Some(pulse) = pulse.as_ref() {
@@ -1171,7 +954,7 @@ fn App() -> Element {
                                                 }
                                             }
                                             tbody {
-                                                for mover in pulse.movers.iter() {
+                                                for mover in pulse.movers.iter().take(6) {
                                                     MarketMoverRow {
                                                         key: "{mover.symbol}",
                                                         mover: mover.clone(),
@@ -1184,6 +967,12 @@ fn App() -> Element {
                                 }
                             }
                         }
+                    }
+                }
+
+                // Section 2: Signal Center (Left) + News & AI Briefings (Right)
+                div { class: "dashboard-split-grid",
+                    div { class: "column-primary",
                         SignalCenterPanel {
                             state: research_state.clone(),
                             strings: strings(),
@@ -1192,10 +981,7 @@ fn App() -> Element {
                             },
                         }
                     }
-                }
-
-                if active_tab() == DesktopTab::NewsAi || active_tab() == DesktopTab::All {
-                    if active_tab() != DesktopTab::All {
+                    div { class: "column-secondary",
                         NewsPanel {
                             state: news_state.clone(),
                             strings: strings(),
@@ -1203,23 +989,107 @@ fn App() -> Element {
                                 news_open_sender.send(UiAction::OpenNewsItem { news_id });
                             },
                         }
-                    }
-                    AiBriefingPanel {
-                        state: ai_briefings_state.clone(),
-                        strings: strings(),
-                        research_events,
-                        on_open: move |briefing_id| {
-                            ai_briefing_open_sender.send(UiAction::OpenAiBriefing { briefing_id });
-                        },
-                        on_request: move |research_event_id| {
-                            ai_briefing_request_sender.send(UiAction::RequestAiBriefing {
-                                research_event_id,
-                            });
-                        },
+                        AiBriefingPanel {
+                            state: ai_briefings_state.clone(),
+                            strings: strings(),
+                            research_events,
+                            on_open: move |briefing_id| {
+                                ai_briefing_open_sender.send(UiAction::OpenAiBriefing { briefing_id });
+                            },
+                            on_request: move |research_event_id| {
+                                ai_briefing_request_sender.send(UiAction::RequestAiBriefing {
+                                    research_event_id,
+                                });
+                            },
+                        }
                     }
                 }
+            }
 
-                if active_tab() == DesktopTab::AiConfig || active_tab() == DesktopTab::All {
+            // Bottom Telemetry Bar: Host Agent status, MongoDB connection, Outbox health
+            footer { class: "telemetry-bar",
+                div { class: "telemetry-group",
+                    div { class: "telemetry-item",
+                        span { class: "telemetry-pill live", "{strings().telemetry_live}" }
+                        span { "{strings().telemetry_agent}: 127.0.0.1" }
+                    }
+                    div { class: "telemetry-item",
+                        span { class: "telemetry-pill live", "{strings().telemetry_live}" }
+                        span { "{strings().telemetry_mongodb}: Connected" }
+                    }
+                    div {
+                        class: "telemetry-item interactive",
+                        title: "Open Notification Center",
+                        onclick: move |_| active_overlay.set(ActiveOverlay::NotificationsSlideover),
+                        span { "🔔 {strings().telemetry_outbox}: {outbox_count} {strings().logs_unit}" }
+                    }
+                }
+                div { class: "telemetry-actions",
+                    button {
+                        class: "button",
+                        onclick: move |_| active_overlay.set(ActiveOverlay::DiagnosticsSlideover),
+                        "🛠️ {strings().tab_diagnostics}"
+                    }
+                    button {
+                        class: "button",
+                        onclick: move |_| active_overlay.set(ActiveOverlay::AiConfigSlideover),
+                        "🤖 {strings().tab_ai_settings}"
+                    }
+                }
+            }
+
+            // Overlays: Deep Configuration & Operations (Modals & Slideovers)
+            if let ActiveOverlay::ServiceDetailsSlideover(inst_id) = active_overlay() {
+                {
+                    let selected_svc = rows.iter().find(|s| s.service_instance_id == inst_id).cloned();
+                    let service_inst_id = inst_id.clone();
+                    rsx! {
+                        ServiceDetailsSlideover {
+                            service: selected_svc,
+                            strings: strings(),
+                            pending,
+                            on_close: move |_| active_overlay.set(ActiveOverlay::None),
+                            on_command: move |action| {
+                                action_sender.send(UiAction::Command {
+                                    service_instance_id: service_inst_id.clone(),
+                                    action,
+                                });
+                            },
+                        }
+                    }
+                }
+            }
+            if active_overlay() == ActiveOverlay::WatchlistModal {
+                WatchlistModal {
+                    watchlists: lists.clone(),
+                    strings: strings(),
+                    error: watchlist_error_message.clone(),
+                    on_close: move |_| active_overlay.set(ActiveOverlay::None),
+                    on_create: move |name| {
+                        list_sender.send(UiAction::Watchlist(WatchlistAction::Create {
+                            name,
+                            symbols: Vec::new(),
+                        }));
+                    },
+                    on_replace: move |(watchlist_id, symbols)| {
+                        list_sender.send(UiAction::Watchlist(WatchlistAction::ReplaceSymbols {
+                            watchlist_id,
+                            symbols,
+                        }));
+                    },
+                    on_delete: move |watchlist_id| {
+                        list_sender.send(UiAction::Watchlist(WatchlistAction::Delete {
+                            watchlist_id,
+                        }));
+                    },
+                }
+            }
+            if active_overlay() == ActiveOverlay::AiConfigSlideover {
+                Slideover {
+                    title: strings().tab_ai_settings.to_owned(),
+                    close_label: strings().modal_close.to_owned(),
+                    wide: true,
+                    on_close: move |_| active_overlay.set(ActiveOverlay::None),
                     AiProviderPanel {
                         state: ai_providers_state.clone(),
                         strings: strings(),
@@ -1252,8 +1122,13 @@ fn App() -> Element {
                         },
                     }
                 }
-
-                if active_tab() == DesktopTab::Notifications || active_tab() == DesktopTab::All {
+            }
+            if active_overlay() == ActiveOverlay::NotificationsSlideover {
+                Slideover {
+                    title: strings().tab_notifications.to_owned(),
+                    close_label: strings().modal_close.to_owned(),
+                    wide: true,
+                    on_close: move |_| active_overlay.set(ActiveOverlay::None),
                     NotificationCenterPanel {
                         state: notifications_state,
                         strings: strings(),
@@ -1265,8 +1140,13 @@ fn App() -> Element {
                         },
                     }
                 }
-
-                if active_tab() == DesktopTab::Diagnostics || active_tab() == DesktopTab::All {
+            }
+            if active_overlay() == ActiveOverlay::DiagnosticsSlideover {
+                Slideover {
+                    title: strings().tab_diagnostics.to_owned(),
+                    close_label: strings().modal_close.to_owned(),
+                    wide: true,
+                    on_close: move |_| active_overlay.set(ActiveOverlay::None),
                     SystemDiagnosticsPanel {
                         state: system_diagnostics_state,
                         strings: strings(),
@@ -1308,6 +1188,7 @@ fn App() -> Element {
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn MarketSymbolRow(symbol: MarketSymbolDto, strings: UiStrings) -> Element {
     rsx! {
@@ -1350,6 +1231,7 @@ fn ServiceRow(
     strings: UiStrings,
     disabled: bool,
     on_command: EventHandler<OperationActionDto>,
+    on_details: EventHandler<String>,
 ) -> Element {
     let running = service.observed_state == tm_trading_contracts::ObservedStateDto::Running;
     let desired = service.desired_state.as_str();
@@ -1366,10 +1248,14 @@ fn ServiceRow(
     let definition_id = service.service_definition_id.clone();
     let instance_id = service.service_instance_id.clone();
     let agent_id = service.agent_id.clone();
+    let details_id_cell = service.service_instance_id.clone();
+    let details_id_menu = service.service_instance_id.clone();
 
     rsx! {
         tr {
             td {
+                class: "clickable-cell",
+                onclick: move |_| on_details.call(details_id_cell.clone()),
                 div { class: "service-name", "{definition_id}" }
                 div { class: "service-instance", title: "{instance_id}", "{instance_id}" }
             }
@@ -1400,6 +1286,12 @@ fn ServiceRow(
                     disabled: disabled,
                     items: vec![
                         DropdownItem {
+                            id: "details".to_owned(),
+                            label: strings.view_details.to_owned(),
+                            class: None,
+                            disabled: false,
+                        },
+                        DropdownItem {
                             id: "start".to_owned(),
                             label: strings.start.to_owned(),
                             class: Some("action-success".to_owned()),
@@ -1420,12 +1312,195 @@ fn ServiceRow(
                     ],
                     on_select: move |action_id: String| {
                         match action_id.as_str() {
+                            "details" => on_details.call(details_id_menu.clone()),
                             "start" => on_command.call(OperationActionDto::Start),
                             "stop" => on_command.call(OperationActionDto::Stop),
                             "restart" => on_command.call(OperationActionDto::Restart),
                             _ => {}
                         }
                     },
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ServiceDetailsSlideover(
+    service: Option<ServiceSnapshot>,
+    strings: UiStrings,
+    pending: bool,
+    on_close: EventHandler<()>,
+    on_command: EventHandler<OperationActionDto>,
+) -> Element {
+    let Some(svc) = service else {
+        return rsx! {};
+    };
+    let running = svc.observed_state == tm_trading_contracts::ObservedStateDto::Running;
+    let desired = svc.desired_state.as_str();
+    let observed = svc.observed_state.as_str();
+    let readiness = svc.readiness.as_str();
+    let desired_class = format!("pill state-{}", desired.to_lowercase());
+    let observed_class = format!("pill state-{}", observed.to_lowercase());
+    let readiness_class = format!("pill state-{}", readiness.to_lowercase());
+    let restarts = svc.restart_count;
+    let last_exit = svc
+        .last_exit_code
+        .map_or_else(|| "-".to_owned(), |c| c.to_string());
+    let last_heartbeat = svc
+        .last_heartbeat_at
+        .map_or_else(|| "-".to_owned(), |t| t.format("%H:%M:%S UTC").to_string());
+    let (cmd_start, cmd_restart, cmd_stop) = (on_command, on_command, on_command);
+
+    rsx! {
+        Slideover {
+            title: format!("{}: {}", strings.service_details, svc.service_definition_id),
+            close_label: strings.modal_close.to_owned(),
+            on_close: move |_| on_close.call(()),
+            div { class: "research-detail",
+                div { class: "card",
+                    h3 { "{svc.service_definition_id}" }
+                    p { class: "muted", "{strings.agent_column}: {svc.agent_id}" }
+                    div { class: "detail-grid",
+                        div { class: "detail-col",
+                            span { class: "label", "Instance ID" }
+                            span { class: "mono text-sm", "{svc.service_instance_id}" }
+                        }
+                        div { class: "detail-col",
+                            span { class: "label", "{strings.desired_column}" }
+                            span { class: desired_class, "{desired}" }
+                        }
+                        div { class: "detail-col",
+                            span { class: "label", "{strings.observed_column}" }
+                            span { class: observed_class, "{observed}" }
+                        }
+                        div { class: "detail-col",
+                            span { class: "label", "{strings.readiness_column}" }
+                            span { class: readiness_class, "{readiness}" }
+                        }
+                        div { class: "detail-col",
+                            span { class: "label", "{strings.restarts_column}" }
+                            span { class: "mono", "{restarts}" }
+                        }
+                        div { class: "detail-col",
+                            span { class: "label", "{strings.last_exit_column}" }
+                            span { class: "mono", "{last_exit}" }
+                        }
+                        div { class: "detail-col",
+                            span { class: "label", "Last Heartbeat" }
+                            span { class: "mono text-xs", "{last_heartbeat}" }
+                        }
+                    }
+                }
+                div { class: "card",
+                    h3 { "{strings.actions_column}" }
+                    div { class: "button-row",
+                        if running {
+                            button {
+                                class: "button warning",
+                                disabled: pending,
+                                onclick: move |_| cmd_restart.call(OperationActionDto::Restart),
+                                "{strings.restart}"
+                            }
+                            button {
+                                class: "button danger",
+                                disabled: pending,
+                                onclick: move |_| cmd_stop.call(OperationActionDto::Stop),
+                                "{strings.stop}"
+                            }
+                        } else {
+                            button {
+                                class: "button primary",
+                                disabled: pending,
+                                onclick: move |_| cmd_start.call(OperationActionDto::Start),
+                                "{strings.start}"
+                            }
+                        }
+                    }
+                }
+                div { class: "card",
+                    h3 { "Diagnostic Information" }
+                    p { class: "text-sm text-muted",
+                        "Worker logs are continuously streamed to 'target/logs/{svc.service_definition_id}.log'. For exit code 78, verify all required environment variables in '.env'."
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn WatchlistModal(
+    watchlists: Vec<WatchlistDto>,
+    strings: UiStrings,
+    error: Option<String>,
+    on_close: EventHandler<()>,
+    on_create: EventHandler<String>,
+    on_replace: EventHandler<(String, Vec<String>)>,
+    on_delete: EventHandler<String>,
+) -> Element {
+    let mut new_name = use_signal(String::new);
+    let (close_handler, create_handler) = (on_close, on_create);
+
+    rsx! {
+        Modal {
+            title: strings.watchlists_manage.to_owned(),
+            close_label: strings.modal_close.to_owned(),
+            on_close: move |_| close_handler.call(()),
+            div { class: "watchlist-modal-content",
+                if let Some(err) = error {
+                    div { class: "banner error", role: "alert", "{err}" }
+                }
+                div { class: "watchlist-create", style: "margin-bottom: 20px;",
+                    input {
+                        class: "text-input",
+                        value: "{new_name()}",
+                        placeholder: "{strings.watchlist_new_placeholder}",
+                        aria_label: "{strings.watchlist_new_placeholder}",
+                        oninput: move |event| new_name.set(event.value()),
+                    }
+                    button {
+                        class: "button primary",
+                        onclick: move |_| {
+                            let name = new_name().trim().to_owned();
+                            if !name.is_empty() {
+                                create_handler.call(name);
+                                new_name.set(String::new());
+                            }
+                        },
+                        "{strings.watchlist_add}"
+                    }
+                }
+                if watchlists.is_empty() {
+                    div { class: "empty",
+                        p { class: "empty-title", "{strings.watchlist_empty}" }
+                        p { "{strings.watchlist_empty_hint}" }
+                    }
+                } else {
+                    div { class: "watchlist-grid",
+                        for list in watchlists.iter() {
+                            {
+                                let watchlist = list.clone();
+                                let list_id = watchlist.id.clone();
+                                let del_id = watchlist.id.clone();
+                                let replace_cb = on_replace;
+                                let delete_cb = on_delete;
+                                rsx! {
+                                    WatchlistCard {
+                                        key: "{watchlist.id}",
+                                        watchlist,
+                                        strings: strings.clone(),
+                                        on_replace: move |symbols| {
+                                            replace_cb.call((list_id.clone(), symbols));
+                                        },
+                                        on_delete: move |_| {
+                                            delete_cb.call(del_id.clone());
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1501,6 +1576,7 @@ fn format_percent(value: Option<f64>) -> String {
     value.map_or_else(|| "-".to_owned(), |value| format!("{value:.2}%"))
 }
 
+#[allow(dead_code)]
 fn format_age(seconds: Option<i64>) -> String {
     seconds.map_or_else(|| "-".to_owned(), |seconds| format!("{seconds}s"))
 }

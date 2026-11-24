@@ -7,6 +7,7 @@ pub fn Slideover(
     close_label: String,
     on_close: EventHandler<()>,
     children: Element,
+    #[props(default = false)] wide: bool,
 ) -> Element {
     // Callbacks are Copy, so each handler can take its own value.
     let (close_button, close_key, close_icon) = (on_close, on_close, on_close);
@@ -21,7 +22,7 @@ pub fn Slideover(
                 onclick: move |_| close_button.call(()),
             }
             section {
-                class: "slideover",
+                class: if wide { "slideover wide" } else { "slideover" },
                 role: "dialog",
                 aria_modal: "true",
                 aria_labelledby: "slideover-title",
