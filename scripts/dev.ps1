@@ -45,6 +45,23 @@ Write-Host "==========================================================" -Foregro
 Write-Host "  TM TRADING - DESKTOP & API DEV ENVIRONMENT RUNNER      " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
+# Validate and normalize TMP / TEMP directories to prevent MSVC cl.exe error D8050
+$defaultTemp = [System.IO.Path]::GetTempPath().TrimEnd('\')
+if ([string]::IsNullOrWhiteSpace($env:TMP) -or -not (Test-Path $env:TMP)) {
+    if (Test-Path $defaultTemp) {
+        $env:TMP = $defaultTemp
+    } else {
+        New-Item -ItemType Directory -Force -Path $env:TMP | Out-Null
+    }
+}
+if ([string]::IsNullOrWhiteSpace($env:TEMP) -or -not (Test-Path $env:TEMP)) {
+    if (Test-Path $defaultTemp) {
+        $env:TEMP = $defaultTemp
+    } else {
+        New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+    }
+}
+
 # Set environment variables for Desktop and Management API
 $env:TM_TRADING_LOCALE = $Locale
 $env:TM_TRADING_API_URL = $ApiUrl

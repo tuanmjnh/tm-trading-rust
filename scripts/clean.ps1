@@ -41,6 +41,15 @@ foreach ($t in $tmpDirs) {
     }
 }
 
+# Ensure TMP/TEMP do not point to deleted target\tmp (which triggers MSVC cl.exe error D8050)
+$sysTemp = [System.IO.Path]::GetTempPath().TrimEnd('\')
+if ([string]::IsNullOrWhiteSpace($env:TMP) -or -not (Test-Path $env:TMP)) {
+    $env:TMP = $sysTemp
+}
+if ([string]::IsNullOrWhiteSpace($env:TEMP) -or -not (Test-Path $env:TEMP)) {
+    $env:TEMP = $sysTemp
+}
+
 # 3. Clean root temporary logs
 Get-ChildItem -Path $RepoRoot -Filter "*.log" -File -ErrorAction SilentlyContinue | ForEach-Object {
     Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
