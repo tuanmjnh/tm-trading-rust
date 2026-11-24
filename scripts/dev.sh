@@ -40,6 +40,16 @@ if [ "${1:-}" = "--clean" ] || [ "${2:-}" = "--clean" ]; then
     echo "[OK] Clean completed."
 fi
 
+API_BIN="$REPO_ROOT/target/debug/tm-trading-management-api"
+AGENT_BIN="$REPO_ROOT/target/debug/tm-trading-agent"
+DESKTOP_BIN="$REPO_ROOT/target/debug/tm-trading-desktop"
+
+if [ ! -f "$API_BIN" ] || [ ! -f "$AGENT_BIN" ] || [ ! -f "$DESKTOP_BIN" ]; then
+    echo "[...] Pre-building workspace binaries (API, Agent, Desktop)..."
+    cargo build -p tm-trading-management-api -p tm-trading-agent -p tm-trading-desktop
+    echo "[OK] Workspace binaries built successfully."
+fi
+
 API_PID=""
 cleanup() {
     if [ -n "$API_PID" ] && kill -0 "$API_PID" 2>/dev/null; then
@@ -54,7 +64,11 @@ if nc -z 127.0.0.1 8787 2>/dev/null; then
     echo "[OK] Management API is already running on 127.0.0.1:8787"
 else
     echo "[...] Starting Management API on 127.0.0.1:8787..."
-    cargo run -p tm-trading-management-api &
+    if [ -f "$API_BIN" ]; then
+        "$API_BIN" &
+    else
+        cargo run -p tm-trading-management-api &
+    fi
     API_PID=$!
     echo "[...] Waiting for API to listen on 8787..."
     for i in {1..30}; do
@@ -73,7 +87,11 @@ export TM_TRADING_NEWS_WORKER_ENABLED="1"
 export TM_TRADING_AI_WORKER_ENABLED="1"
 export TM_TRADING_NOTIFICATION_WORKER_ENABLED="1"
 
-cargo run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start sample-worker &
+if [ -f "$AGENT_BIN" ]; then
+    "$AGENT_BIN" --api-url http://127.0.0.1:8787 --start sample-worker &
+else
+    cargo run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start sample-worker &
+fi
 AGENT_PID=$!
 cleanup() {
     if [ -n "$API_PID" ] && kill -0 "$API_PID" 2>/dev/null; then

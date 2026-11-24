@@ -90,6 +90,23 @@ $env:TM_TRADING_NEWS_WORKER_ENABLED = "1"
 $env:TM_TRADING_AI_WORKER_ENABLED = "1"
 $env:TM_TRADING_NOTIFICATION_WORKER_ENABLED = "1"
 
+# Binary paths in target/debug
+$apiExe = Join-Path $RepoRoot "target\debug\tm-trading-management-api.exe"
+$agentExe = Join-Path $RepoRoot "target\debug\tm-trading-agent.exe"
+$desktopExe = Join-Path $RepoRoot "target\debug\tm-trading-desktop.exe"
+
+# Pre-build workspace binaries if missing or after clean to prevent Cargo lock contention
+$needsPrebuild = $Clean -or (-not (Test-Path $apiExe)) -or (-not (Test-Path $agentExe)) -or (-not (Test-Path $desktopExe))
+if ($needsPrebuild) {
+    Write-Host "[...] Pre-building workspace binaries (API, Agent, Desktop)..." -ForegroundColor Cyan
+    & cargo build -p tm-trading-management-api -p tm-trading-agent -p tm-trading-desktop
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Workspace build failed. Please resolve compiler errors above." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "[OK] Workspace binaries built successfully." -ForegroundColor Green
+}
+
 # 1. Check & Start Management API if requested
 $apiProcess = $null
 $agentProcess = $null
@@ -109,8 +126,13 @@ if ($WithBackend) {
     } else {
         Write-Host "[...] Starting Management API on 127.0.0.1:8787 in background..." -ForegroundColor Yellow
         $apiPsi = New-Object System.Diagnostics.ProcessStartInfo
-        $apiPsi.FileName = "cargo"
-        $apiPsi.Arguments = "run -p tm-trading-management-api"
+        if (Test-Path $apiExe) {
+            $apiPsi.FileName = $apiExe
+            $apiPsi.Arguments = ""
+        } else {
+            $apiPsi.FileName = "cargo"
+            $apiPsi.Arguments = "run -p tm-trading-management-api"
+        }
         $apiPsi.WorkingDirectory = $RepoRoot
         $apiPsi.UseShellExecute = $true
         $apiProcess = [System.Diagnostics.Process]::Start($apiPsi)
@@ -144,8 +166,13 @@ if ($WithBackend) {
     $env:TM_TRADING_NOTIFICATION_WORKER_ENABLED = "1"
 
     $agentPsi = New-Object System.Diagnostics.ProcessStartInfo
-    $agentPsi.FileName = "cargo"
-    $agentPsi.Arguments = "run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start sample-worker"
+    if (Test-Path $agentExe) {
+        $agentPsi.FileName = $agentExe
+        $agentPsi.Arguments = "--api-url http://127.0.0.1:8787 --start sample-worker"
+    } else {
+        $agentPsi.FileName = "cargo"
+        $agentPsi.Arguments = "run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start sample-worker"
+    }
     $agentPsi.WorkingDirectory = $RepoRoot
     $agentPsi.UseShellExecute = $true
     $agentProcess = [System.Diagnostics.Process]::Start($agentPsi)
