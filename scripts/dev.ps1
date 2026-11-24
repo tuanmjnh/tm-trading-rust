@@ -142,21 +142,23 @@ if ($WithBackend) {
         $portOpen = $false
     }
 
+    $logDir = Join-Path $RepoRoot "target\logs"
+    if (-not (Test-Path $logDir)) {
+        New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    }
+
     if ($portOpen) {
         Write-Host "[OK] Management API is already running on 127.0.0.1:8787" -ForegroundColor Green
     } else {
         Write-Host "[...] Starting Management API on 127.0.0.1:8787 in background..." -ForegroundColor Yellow
-        $apiPsi = New-Object System.Diagnostics.ProcessStartInfo
-        if (Test-Path $apiExe) {
-            $apiPsi.FileName = $apiExe
-            $apiPsi.Arguments = ""
-        } else {
-            $apiPsi.FileName = "cargo"
-            $apiPsi.Arguments = "run -p tm-trading-management-api"
-        }
-        $apiPsi.WorkingDirectory = $RepoRoot
-        $apiPsi.UseShellExecute = $true
-        $apiProcess = [System.Diagnostics.Process]::Start($apiPsi)
+        $apiLog = Join-Path $logDir "api.log"
+        $apiErrLog = Join-Path $logDir "api.err.log"
+        $apiProcess = Start-Process -FilePath $apiExe `
+            -WorkingDirectory $RepoRoot `
+            -RedirectStandardOutput $apiLog `
+            -RedirectStandardError $apiErrLog `
+            -NoNewWindow `
+            -PassThru
 
         Write-Host "[...] Waiting for Management API to become ready..." -ForegroundColor Yellow
         $ready = $false
@@ -186,17 +188,15 @@ if ($WithBackend) {
     $env:TM_TRADING_AI_WORKER_ENABLED = "1"
     $env:TM_TRADING_NOTIFICATION_WORKER_ENABLED = "1"
 
-    $agentPsi = New-Object System.Diagnostics.ProcessStartInfo
-    if (Test-Path $agentExe) {
-        $agentPsi.FileName = $agentExe
-        $agentPsi.Arguments = "--api-url http://127.0.0.1:8787 --start all"
-    } else {
-        $agentPsi.FileName = "cargo"
-        $agentPsi.Arguments = "run -p tm-trading-agent -- --api-url http://127.0.0.1:8787 --start all"
-    }
-    $agentPsi.WorkingDirectory = $RepoRoot
-    $agentPsi.UseShellExecute = $true
-    $agentProcess = [System.Diagnostics.Process]::Start($agentPsi)
+    $agentLog = Join-Path $logDir "agent.log"
+    $agentErrLog = Join-Path $logDir "agent.err.log"
+    $agentProcess = Start-Process -FilePath $agentExe `
+        -ArgumentList "--api-url http://127.0.0.1:8787 --start all" `
+        -WorkingDirectory $RepoRoot `
+        -RedirectStandardOutput $agentLog `
+        -RedirectStandardError $agentErrLog `
+        -NoNewWindow `
+        -PassThru
     Write-Host "[OK] Host Agent started!" -ForegroundColor Green
 }
 
