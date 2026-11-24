@@ -5,13 +5,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
-use crate::{AiProviderProfileDto, AiTaskRouteDto, ApiVersionInfo, WatchlistDto};
+use crate::{AiModelDto, AiProviderProfileDto, AiTaskRouteDto, ApiVersionInfo, WatchlistDto};
 
 /// Payload containing the backed-up configurations and user data.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct BackupPayloadDto {
     pub watchlists: Vec<WatchlistDto>,
     pub ai_provider_profiles: Vec<AiProviderProfileDto>,
+    #[serde(default)]
+    pub ai_models: Vec<AiModelDto>,
     pub ai_task_routes: Vec<AiTaskRouteDto>,
 }
 
@@ -79,6 +81,8 @@ pub struct RestoreBackupResultDto {
     pub checksum_verified: bool,
     pub watchlists_restored: usize,
     pub ai_provider_profiles_restored: usize,
+    #[serde(default)]
+    pub ai_models_restored: usize,
     pub ai_task_routes_restored: usize,
     pub message: String,
 }
@@ -92,6 +96,7 @@ mod tests {
         let payload = BackupPayloadDto {
             watchlists: Vec::new(),
             ai_provider_profiles: Vec::new(),
+            ai_models: Vec::new(),
             ai_task_routes: Vec::new(),
         };
 

@@ -33,6 +33,7 @@ pub use state::{AppState, AuthConfig, Repositories};
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/health", get(routes::health))
+        .route("/api/v1/health/liveness", get(routes::liveness))
         .route("/api/v1/version", get(routes::version))
         .route(
             "/api/v1/system/diagnostics",

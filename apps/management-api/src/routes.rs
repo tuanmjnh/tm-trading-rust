@@ -31,11 +31,34 @@ pub async fn version() -> Json<ApiVersionInfo> {
     Json(ApiVersionInfo::current())
 }
 
-pub async fn health() -> Json<HealthResponse> {
+/// Lightweight liveness probe verifying the API process is alive.
+pub async fn liveness() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: HealthStatus::Healthy,
         version: ApiVersionInfo::current(),
     })
+}
+
+/// Readiness probe verifying backend storage connectivity and critical readiness.
+pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
+    let storage_ready = state.services.list().await.is_ok();
+    if storage_ready {
+        (
+            StatusCode::OK,
+            Json(HealthResponse {
+                status: HealthStatus::Healthy,
+                version: ApiVersionInfo::current(),
+            }),
+        )
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(HealthResponse {
+                status: HealthStatus::Unhealthy,
+                version: ApiVersionInfo::current(),
+            }),
+        )
+    }
 }
 
 pub async fn list_services(

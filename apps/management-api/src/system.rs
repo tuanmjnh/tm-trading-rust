@@ -6,9 +6,13 @@ use tm_trading_contracts::{
     RestoreBackupRequestDto, RestoreBackupResultDto, StorageDiagnosticsDto, SupportBundleDto,
     SystemDiagnosticsDto, WatchlistDto, WorkerDiagnosticsDto,
 };
-use tm_trading_domain::{AiTaskKind, AiTaskRoute, NewAiTaskRoute};
+use tm_trading_domain::{
+    AiModel, AiProviderKind, AiProviderProfile, AiTaskKind, AiTaskRoute, NewAiModel,
+    NewAiProviderProfile, NewAiTaskRoute,
+};
 use uuid::Uuid;
 
+use crate::ai_models::to_dto as model_to_dto;
 use crate::ai_providers::to_dto as provider_to_dto;
 use crate::ai_task_routes::to_dto as route_to_dto;
 use crate::auth::{AuthContext, CAPABILITY_SERVICE_CONTROL, CAPABILITY_SERVICE_READ};
@@ -81,9 +85,13 @@ pub async fn export_backup(
     let routes_domain = state.ai_task_routes.list().await.map_err(ApiError::from)?;
     let ai_task_routes = routes_domain.iter().map(route_to_dto).collect();
 
+    let models_domain = state.ai_models.list().await.map_err(ApiError::from)?;
+    let ai_models = models_domain.iter().map(model_to_dto).collect();
+
     let payload = BackupPayloadDto {
         watchlists,
         ai_provider_profiles,
+        ai_models,
         ai_task_routes,
     };
 
@@ -108,9 +116,10 @@ pub async fn verify_backup(
     let checksum_verified = archive.verify_integrity();
     let message = if checksum_verified {
         format!(
-            "Integrity verified. Backup contains {} watchlists, {} AI profiles, {} AI routes.",
+            "Integrity verified. Backup contains {} watchlists, {} AI profiles, {} AI models, {} AI routes.",
             archive.payload.watchlists.len(),
             archive.payload.ai_provider_profiles.len(),
+            archive.payload.ai_models.len(),
             archive.payload.ai_task_routes.len()
         )
     } else {
@@ -122,6 +131,7 @@ pub async fn verify_backup(
         checksum_verified,
         watchlists_restored: archive.payload.watchlists.len(),
         ai_provider_profiles_restored: archive.payload.ai_provider_profiles.len(),
+        ai_models_restored: archive.payload.ai_models.len(),
         ai_task_routes_restored: archive.payload.ai_task_routes.len(),
         message,
     }))
@@ -171,6 +181,56 @@ pub async fn restore_backup(
         }
     }
 
+    // 1. Restore AI Provider Profiles first so model references resolve
+    let mut profiles_restored = 0;
+    for p in request.archive.payload.ai_provider_profiles {
+        if let Some(kind) = AiProviderKind::parse(&p.kind)
+            && let Ok(profile) = AiProviderProfile::new(NewAiProviderProfile {
+                id: p.id,
+                kind,
+                display_name: p.display_name,
+                base_url: p.base_url,
+                default_model: p.default_model,
+                timeout_ms: p.timeout_ms,
+                api_key_env: p.api_key_env,
+                created_at: Utc::now(),
+            })
+        {
+            state
+                .ai_provider_profiles
+                .upsert(&profile)
+                .await
+                .map_err(ApiError::from)?;
+            profiles_restored += 1;
+        }
+    }
+
+    // 2. Restore AI Models second
+    let mut models_restored = 0;
+    for m in request.archive.payload.ai_models {
+        if let Ok(model) = AiModel::new(NewAiModel {
+            id: m.id,
+            provider_id: m.provider_id,
+            model_id: m.model_id,
+            display_name: m.display_name,
+            context_window: m.context_window,
+            max_output_tokens: m.max_output_tokens,
+            supports_streaming: m.supports_streaming,
+            supports_json_mode: m.supports_json_mode,
+            supports_tools: m.supports_tools,
+            supports_vision: m.supports_vision,
+            created_at: Utc::now(),
+        }) {
+            state
+                .ai_models
+                .upsert(&model)
+                .await
+                .map_err(ApiError::from)?;
+            models_restored += 1;
+        }
+    }
+
+    // 3. Restore AI Task Routes
     let mut routes_restored = 0;
     for r in request.archive.payload.ai_task_routes {
         if let Some(task) = AiTaskKind::parse(&r.task)
@@ -195,14 +255,15 @@ pub async fn restore_backup(
     }
 
     let message = format!(
-        "Restore completed successfully: {watchlists_restored} watchlists and {routes_restored} AI task routes restored."
+        "Restore completed successfully: {watchlists_restored} watchlists, {profiles_restored} AI profiles, {models_restored} AI models, and {routes_restored} AI task routes restored."
     );
 
     Ok(Json(RestoreBackupResultDto {
         restored_at: Utc::now(),
         checksum_verified: true,
         watchlists_restored,
-        ai_provider_profiles_restored: 0,
+        ai_provider_profiles_restored: profiles_restored,
+        ai_models_restored: models_restored,
         ai_task_routes_restored: routes_restored,
         message,
     }))

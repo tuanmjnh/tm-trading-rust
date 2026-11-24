@@ -80,17 +80,28 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 async fn stores() -> Result<(Repositories, String, Option<String>), Box<dyn std::error::Error>> {
     let store = std::env::var("TM_TRADING_STORE").unwrap_or_else(|_| "memory".to_owned());
     let environment = std::env::var("TM_ENVIRONMENT").unwrap_or_else(|_| "development".to_owned());
+    let is_remote_or_prod = environment == "production" || environment == "staging";
+
+    if is_remote_or_prod && store != "mongodb" {
+        return Err(format!(
+            "TM_TRADING_STORE must be explicitly 'mongodb' when TM_ENVIRONMENT='{environment}'. In-memory storage is forbidden in non-development environments to prevent silent data loss."
+        ).into());
+    }
+
     match store.as_str() {
-        "memory" if environment == "production" => {
-            Err("TM_TRADING_STORE must be 'mongodb' when TM_ENVIRONMENT=production".into())
+        "memory" => {
+            tracing::info!("Storage initialized using ephemeral in-memory repositories (development only).");
+            Ok((Repositories::in_memory(), "memory".to_owned(), None))
         }
-        "memory" => Ok((Repositories::in_memory(), "memory".to_owned(), None)),
         "mongodb" => {
-            let uri = std::env::var("TM_DATABASE_URI")?;
+            let uri = std::env::var("TM_DATABASE_URI").map_err(|_| {
+                "TM_DATABASE_URI environment variable is required when TM_TRADING_STORE=mongodb"
+            })?;
             let database_name =
                 std::env::var("TM_DATABASE_NAME").unwrap_or_else(|_| "tm-trading-rust".to_owned());
             let connection = MongoConnection::connect(&uri, &database_name).await?;
             let db_name = connection.database().name().to_owned();
+            tracing::info!(database = %db_name, "Storage initialized using durable MongoDB repositories.");
             Ok((
                 Repositories {
                     operations: Arc::new(

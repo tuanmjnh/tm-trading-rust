@@ -157,7 +157,7 @@ async fn load(state: &AppState, id: &str) -> Result<AiModel, ApiError> {
         .ok_or_else(|| ApiError::NotFound("ai model was not found".to_owned()))
 }
 
-fn to_dto(model: &AiModel) -> AiModelDto {
+pub(crate) fn to_dto(model: &AiModel) -> AiModelDto {
     AiModelDto {
         id: model.id().to_owned(),
         provider_id: model.provider_id().to_owned(),
