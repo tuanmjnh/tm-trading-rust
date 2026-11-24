@@ -217,14 +217,16 @@ async fn the_database_clock_expires_a_queued_job() {
     let (connection, jobs, _briefings) = harness().await;
     let job = new_job("expired");
     jobs.create(job.clone()).await.unwrap();
-    let past =
+    let requested_past =
+        BsonDateTime::from_millis((Utc::now() - ChronoDuration::minutes(5)).timestamp_millis());
+    let expires_past =
         BsonDateTime::from_millis((Utc::now() - ChronoDuration::minutes(1)).timestamp_millis());
     connection
         .database()
         .collection::<Document>("ai_jobs")
         .update_one(
             doc! { "_id": job.id().to_string() },
-            doc! { "$set": { "expiresAt": past } },
+            doc! { "$set": { "requestedAt": requested_past, "expiresAt": expires_past } },
         )
         .await
         .unwrap();
@@ -246,12 +248,16 @@ async fn a_stale_worker_clock_cannot_claim_an_expired_job() {
     let (connection, jobs, _briefings) = harness().await;
     let job = new_job("stale-clock");
     jobs.create(job.clone()).await.unwrap();
+    let requested_past =
+        BsonDateTime::from_millis((Utc::now() - ChronoDuration::minutes(5)).timestamp_millis());
+    let expires_past =
+        BsonDateTime::from_millis((Utc::now() - ChronoDuration::minutes(1)).timestamp_millis());
     connection
         .database()
         .collection::<Document>("ai_jobs")
         .update_one(
             doc! { "_id": job.id().to_string() },
-            doc! { "$set": { "expiresAt": BsonDateTime::from_millis(0) } },
+            doc! { "$set": { "requestedAt": requested_past, "expiresAt": expires_past } },
         )
         .await
         .unwrap();
