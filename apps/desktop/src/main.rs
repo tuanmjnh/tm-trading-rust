@@ -23,10 +23,11 @@ use futures_util::StreamExt;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
     AiBriefingQueryDto, AiJobQueryDto, AiJobTaskDto, MarketMoverDto, MarketOverviewDto,
-    MarketPulseDto, MarketStateDto, MarketSymbolDto, NewAiJobDto, NewsQueryDto,
-    NotificationLogQueryDto, NotificationOutboxQueryDto, NotificationSummaryQueryDto,
-    OperationActionDto, OperationResponse, OperationStatusDto, ResearchEventQueryDto,
-    SendTestNotificationRequest, ServiceSnapshot, WatchlistDto,
+    MarketPulseDto, MarketStateDto, MarketSymbolDto, NewAiJobDto, NewAiModelDto,
+    NewAiProviderProfileDto, NewAiTaskRouteDto, NewsQueryDto, NotificationLogQueryDto,
+    NotificationOutboxQueryDto, NotificationSummaryQueryDto, OperationActionDto, OperationResponse,
+    OperationStatusDto, ResearchEventQueryDto, SendTestNotificationRequest, ServiceSnapshot,
+    WatchlistDto,
 };
 
 use ai_briefings::{AiBriefingPanel, AiBriefingPanelState, AiBriefingSlideover};
@@ -125,6 +126,15 @@ enum UiAction {
     TestAiModel {
         id: String,
     },
+    CreateAiProviderProfile(NewAiProviderProfileDto),
+    DeleteAiProviderProfile(String),
+    CreateAiModel {
+        provider_id: String,
+        request: NewAiModelDto,
+    },
+    DeleteAiModel(String),
+    CreateAiTaskRoute(NewAiTaskRouteDto),
+    DeleteAiTaskRoute(String),
     SendTestNotification {
         chat_id: Option<String>,
         message: Option<String>,
@@ -220,7 +230,9 @@ fn App() -> Element {
         let mut ai_providers = ai_providers;
         let mut notifications = notifications;
         let mut system_diagnostics = system_diagnostics;
+        let active_tab = active_tab;
         async move {
+            let mut tick: u64 = 0;
             loop {
                 tokio::select! {
                     biased;
@@ -336,6 +348,84 @@ fn App() -> Element {
                                     }
                                 }
                             }
+                            Some(UiAction::CreateAiProviderProfile(request)) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                match client.create_ai_provider_profile(&request).await {
+                                    Ok(_) => {
+                                        if let Ok(list) = client.list_ai_provider_profiles().await {
+                                            ai_providers.write().list_loaded(list);
+                                        }
+                                    }
+                                    Err(error) => ai_providers.write().list_failed(error.to_string()),
+                                }
+                            }
+                            Some(UiAction::DeleteAiProviderProfile(id)) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                match client.delete_ai_provider_profile(&id).await {
+                                    Ok(()) => {
+                                        if let Ok(list) = client.list_ai_provider_profiles().await {
+                                            ai_providers.write().list_loaded(list);
+                                        }
+                                    }
+                                    Err(error) => ai_providers.write().list_failed(error.to_string()),
+                                }
+                            }
+                            Some(UiAction::CreateAiModel { provider_id, request }) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                match client.create_ai_model(&provider_id, &request).await {
+                                    Ok(_) => {
+                                        if let Ok(list) = client.list_ai_models().await {
+                                            ai_providers.write().models_loaded(list);
+                                        }
+                                    }
+                                    Err(error) => ai_providers.write().models_failed(error.to_string()),
+                                }
+                            }
+                            Some(UiAction::DeleteAiModel(id)) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                match client.delete_ai_model(&id).await {
+                                    Ok(()) => {
+                                        if let Ok(list) = client.list_ai_models().await {
+                                            ai_providers.write().models_loaded(list);
+                                        }
+                                    }
+                                    Err(error) => ai_providers.write().models_failed(error.to_string()),
+                                }
+                            }
+                            Some(UiAction::CreateAiTaskRoute(request)) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                match client.create_ai_task_route(&request).await {
+                                    Ok(_) => {
+                                        if let Ok(list) = client.list_ai_task_routes().await {
+                                            ai_providers.write().routes_loaded(list);
+                                        }
+                                    }
+                                    Err(error) => ai_providers.write().routes_failed(error.to_string()),
+                                }
+                            }
+                            Some(UiAction::DeleteAiTaskRoute(task)) => {
+                                let Some(client) = client.as_ref() else {
+                                    break;
+                                };
+                                match client.delete_ai_task_route(&task).await {
+                                    Ok(()) => {
+                                        if let Ok(list) = client.list_ai_task_routes().await {
+                                            ai_providers.write().routes_loaded(list);
+                                        }
+                                    }
+                                    Err(error) => ai_providers.write().routes_failed(error.to_string()),
+                                }
+                            }
                             Some(UiAction::SendTestNotification { chat_id, message }) => {
                                 let Some(client) = client.as_ref() else {
                                     break;
@@ -365,6 +455,8 @@ fn App() -> Element {
                 let Some(client) = client.as_ref() else {
                     break;
                 };
+                tick = tick.wrapping_add(1);
+
                 match client.list_services().await {
                     Ok(list) => {
                         services.set(list);
@@ -374,158 +466,210 @@ fn App() -> Element {
                 }
                 refreshed_at.set(Some(chrono::Local::now().format("%H:%M:%S").to_string()));
 
-                if let Ok(list) = client.list_watchlists().await {
-                    watchlists.set(list);
-                }
+                let active_tab_val = active_tab();
+                let is_bg_tick = tick == 1 || tick % 8 == 0;
 
-                // An empty symbol list means "use my default watchlist" on the server.
-                match client.market_overview(&[], "1m", 60).await {
-                    Ok(overview) => {
-                        market_overview.set(Some(overview));
-                        market_error.set(None);
-                    }
-                    Err(error) => market_error.set(Some(error.to_string())),
-                }
-                if let Ok(pulse) = client.market_pulse(&[], "1m", 60).await {
-                    market_pulse.set(Some(pulse));
-                }
-
-                let research_query = ResearchEventQueryDto {
-                    limit: Some(50),
-                    ..ResearchEventQueryDto::default()
-                };
-                match client.list_research_events(&research_query).await {
-                    Ok(list) => research.write().list_loaded(list.events),
-                    Err(error) => research.write().list_failed(error.to_string()),
-                }
-                let selected_research_id = research.read().selected_id.clone();
-                if let Some(event_id) = selected_research_id {
-                    match client.get_research_event(&event_id).await {
-                        Ok(event) => research.write().detail_loaded(event),
-                        Err(error) => research.write().detail_failed(&event_id, error.to_string()),
-                    }
-                }
-
-                let news_query = NewsQueryDto {
-                    limit: Some(50),
-                    ..NewsQueryDto::default()
-                };
-                match client.list_news(&news_query).await {
-                    Ok(list) => news.write().list_loaded(list),
-                    Err(error) => news.write().list_failed(error.to_string()),
-                }
-                match client.list_news_sources().await {
-                    Ok(list) => news.write().sources_loaded(list),
-                    Err(error) => news.write().sources_failed(error.to_string()),
-                }
-                match client
-                    .list_news_clusters(&tm_trading_contracts::NewsClusterQueryDto::default())
-                    .await
+                // 1. Overview & Market Tabs (Parallelized queries)
+                if active_tab_val == DesktopTab::Overview
+                    || active_tab_val == DesktopTab::Market
+                    || active_tab_val == DesktopTab::All
+                    || is_bg_tick
                 {
-                    Ok(list) => news.write().clusters_loaded(list),
-                    Err(error) => news.write().clusters_failed(error.to_string()),
-                }
-                let selected_news_id = news.read().selected_id.clone();
-                if let Some(news_id) = selected_news_id {
-                    match client.get_news_item(&news_id).await {
-                        Ok(item) => news.write().detail_loaded(item),
-                        Err(error) => news.write().detail_failed(&news_id, error.to_string()),
+                    let (watchlists_res, overview_res, pulse_res) = tokio::join!(
+                        client.list_watchlists(),
+                        client.market_overview(&[], "1m", 60),
+                        client.market_pulse(&[], "1m", 60)
+                    );
+                    if let Ok(list) = watchlists_res {
+                        watchlists.set(list);
                     }
-                }
+                    match overview_res {
+                        Ok(overview) => {
+                            market_overview.set(Some(overview));
+                            market_error.set(None);
+                        }
+                        Err(error) => market_error.set(Some(error.to_string())),
+                    }
+                    if let Ok(pulse) = pulse_res {
+                        market_pulse.set(Some(pulse));
+                    }
 
-                let briefing_query = AiBriefingQueryDto {
-                    limit: Some(50),
-                    ..AiBriefingQueryDto::default()
-                };
-                match client.list_ai_briefings(&briefing_query).await {
-                    Ok(list) => ai_briefings.write().list_loaded(list.briefings),
-                    Err(error) => {
-                        tracing::error!(%error, "failed to list AI briefings");
-                        ai_briefings.write().list_failed();
-                    }
-                }
-                let selected_briefing_id = ai_briefings.read().selected_id.clone();
-                if let Some(briefing_id) = selected_briefing_id {
-                    match client.get_ai_briefing(&briefing_id).await {
-                        Ok(briefing) => ai_briefings.write().detail_loaded(briefing),
-                        Err(error) => {
-                            tracing::error!(%error, briefing_id = %briefing_id, "failed to load AI briefing");
-                            ai_briefings.write().detail_failed(&briefing_id);
+                    if active_tab_val == DesktopTab::Overview
+                        || active_tab_val == DesktopTab::All
+                        || is_bg_tick
+                    {
+                        let research_query = ResearchEventQueryDto {
+                            limit: Some(50),
+                            ..ResearchEventQueryDto::default()
+                        };
+                        match client.list_research_events(&research_query).await {
+                            Ok(list) => research.write().list_loaded(list.events),
+                            Err(error) => research.write().list_failed(error.to_string()),
+                        }
+                        let selected_research_id = research.read().selected_id.clone();
+                        if let Some(event_id) = selected_research_id {
+                            match client.get_research_event(&event_id).await {
+                                Ok(event) => research.write().detail_loaded(event),
+                                Err(error) => research.write().detail_failed(&event_id, error.to_string()),
+                            }
                         }
                     }
                 }
 
-                let tracked_job_id = ai_briefings.read().tracked_job_id().map(str::to_owned);
-                if let Some(job_id) = tracked_job_id {
-                    match client.get_ai_job(&job_id).await {
-                        Ok(job) => ai_briefings.write().tracked_job_loaded(job),
-                        Err(error) => {
-                            tracing::error!(%error, job_id = %job_id, "failed to load AI job");
-                            ai_briefings.write().jobs_failed();
-                        }
-                    }
-                } else {
-                    let ai_job_query = AiJobQueryDto {
-                        task: Some(AiJobTaskDto::ResearchExplanation),
-                        limit: Some(20),
+                // 2. News & AI Briefings Tab (Parallelized queries)
+                if active_tab_val == DesktopTab::NewsAi
+                    || active_tab_val == DesktopTab::All
+                    || is_bg_tick
+                {
+                    let news_query = NewsQueryDto {
+                        limit: Some(50),
+                        ..NewsQueryDto::default()
                     };
-                    match client.list_ai_jobs(&ai_job_query).await {
-                        Ok(list) => ai_briefings.write().jobs_loaded(list.jobs),
+                    let briefing_query = AiBriefingQueryDto {
+                        limit: Some(50),
+                        ..AiBriefingQueryDto::default()
+                    };
+                    let cluster_query = tm_trading_contracts::NewsClusterQueryDto::default();
+                    let (news_res, sources_res, clusters_res, briefings_res) = tokio::join!(
+                        client.list_news(&news_query),
+                        client.list_news_sources(),
+                        client.list_news_clusters(&cluster_query),
+                        client.list_ai_briefings(&briefing_query)
+                    );
+                    match news_res {
+                        Ok(list) => news.write().list_loaded(list),
+                        Err(error) => news.write().list_failed(error.to_string()),
+                    }
+                    match sources_res {
+                        Ok(list) => news.write().sources_loaded(list),
+                        Err(error) => news.write().sources_failed(error.to_string()),
+                    }
+                    match clusters_res {
+                        Ok(list) => news.write().clusters_loaded(list),
+                        Err(error) => news.write().clusters_failed(error.to_string()),
+                    }
+                    match briefings_res {
+                        Ok(list) => ai_briefings.write().list_loaded(list.briefings),
                         Err(error) => {
-                            tracing::error!(%error, "failed to list AI jobs");
-                            ai_briefings.write().jobs_failed();
+                            tracing::error!(%error, "failed to list AI briefings");
+                            ai_briefings.write().list_failed();
+                        }
+                    }
+
+                    let selected_news_id = news.read().selected_id.clone();
+                    if let Some(news_id) = selected_news_id {
+                        match client.get_news_item(&news_id).await {
+                            Ok(item) => news.write().detail_loaded(item),
+                            Err(error) => news.write().detail_failed(&news_id, error.to_string()),
+                        }
+                    }
+
+                    let selected_briefing_id = ai_briefings.read().selected_id.clone();
+                    if let Some(briefing_id) = selected_briefing_id {
+                        match client.get_ai_briefing(&briefing_id).await {
+                            Ok(briefing) => ai_briefings.write().detail_loaded(briefing),
+                            Err(error) => {
+                                tracing::error!(%error, briefing_id = %briefing_id, "failed to load AI briefing");
+                                ai_briefings.write().detail_failed(&briefing_id);
+                            }
+                        }
+                    }
+
+                    let tracked_job_id = ai_briefings.read().tracked_job_id().map(str::to_owned);
+                    if let Some(job_id) = tracked_job_id {
+                        match client.get_ai_job(&job_id).await {
+                            Ok(job) => ai_briefings.write().tracked_job_loaded(job),
+                            Err(error) => {
+                                tracing::error!(%error, job_id = %job_id, "failed to load AI job");
+                                ai_briefings.write().jobs_failed();
+                            }
+                        }
+                    } else {
+                        let ai_job_query = AiJobQueryDto {
+                            task: Some(AiJobTaskDto::ResearchExplanation),
+                            limit: Some(20),
+                        };
+                        match client.list_ai_jobs(&ai_job_query).await {
+                            Ok(list) => ai_briefings.write().jobs_loaded(list.jobs),
+                            Err(error) => {
+                                tracing::error!(%error, "failed to list AI jobs");
+                                ai_briefings.write().jobs_failed();
+                            }
                         }
                     }
                 }
 
-                match client.list_ai_provider_profiles().await {
-                    Ok(list) => ai_providers.write().list_loaded(list),
-                    Err(error) => ai_providers.write().list_failed(error.to_string()),
-                }
-
-                match client.list_ai_models().await {
-                    Ok(list) => ai_providers.write().models_loaded(list),
-                    Err(error) => ai_providers.write().models_failed(error.to_string()),
-                }
-
-                match client.list_ai_task_routes().await {
-                    Ok(list) => ai_providers.write().routes_loaded(list),
-                    Err(error) => ai_providers.write().routes_failed(error.to_string()),
-                }
-
-                let outbox_query = NotificationOutboxQueryDto {
-                    limit: Some(20),
-                    ..NotificationOutboxQueryDto::default()
-                };
-                match client.list_notification_outbox(&outbox_query).await {
-                    Ok(list) => notifications.write().outbox_loaded(list),
-                    Err(error) => notifications.write().outbox_failed(error.to_string()),
-                }
-
-                match client
-                    .notification_outbox_summary(&NotificationSummaryQueryDto::default())
-                    .await
+                // 3. AI Config Tab (Parallelized queries)
+                if active_tab_val == DesktopTab::AiConfig
+                    || active_tab_val == DesktopTab::All
+                    || is_bg_tick
                 {
-                    Ok(summary) => notifications.write().summary_loaded(summary),
-                    Err(error) => notifications.write().summary_failed(error.to_string()),
+                    let (profiles_res, models_res, routes_res) = tokio::join!(
+                        client.list_ai_provider_profiles(),
+                        client.list_ai_models(),
+                        client.list_ai_task_routes()
+                    );
+                    match profiles_res {
+                        Ok(list) => ai_providers.write().list_loaded(list),
+                        Err(error) => ai_providers.write().list_failed(error.to_string()),
+                    }
+                    match models_res {
+                        Ok(list) => ai_providers.write().models_loaded(list),
+                        Err(error) => ai_providers.write().models_failed(error.to_string()),
+                    }
+                    match routes_res {
+                        Ok(list) => ai_providers.write().routes_loaded(list),
+                        Err(error) => ai_providers.write().routes_failed(error.to_string()),
+                    }
                 }
 
-                let log_query = NotificationLogQueryDto {
-                    limit: Some(20),
-                    ..NotificationLogQueryDto::default()
-                };
-                match client.list_notification_logs(&log_query).await {
-                    Ok(logs) => notifications.write().logs_loaded(logs),
-                    Err(error) => notifications.write().logs_failed(error.to_string()),
+                // 4. Notifications Tab (Parallelized queries)
+                if active_tab_val == DesktopTab::Notifications
+                    || active_tab_val == DesktopTab::All
+                    || is_bg_tick
+                {
+                    let outbox_query = NotificationOutboxQueryDto {
+                        limit: Some(20),
+                        ..NotificationOutboxQueryDto::default()
+                    };
+                    let log_query = NotificationLogQueryDto {
+                        limit: Some(20),
+                        ..NotificationLogQueryDto::default()
+                    };
+                    let summary_query = NotificationSummaryQueryDto::default();
+                    let (outbox_res, summary_res, logs_res) = tokio::join!(
+                        client.list_notification_outbox(&outbox_query),
+                        client.notification_outbox_summary(&summary_query),
+                        client.list_notification_logs(&log_query)
+                    );
+                    match outbox_res {
+                        Ok(list) => notifications.write().outbox_loaded(list),
+                        Err(error) => notifications.write().outbox_failed(error.to_string()),
+                    }
+                    match summary_res {
+                        Ok(summary) => notifications.write().summary_loaded(summary),
+                        Err(error) => notifications.write().summary_failed(error.to_string()),
+                    }
+                    match logs_res {
+                        Ok(logs) => notifications.write().logs_loaded(logs),
+                        Err(error) => notifications.write().logs_failed(error.to_string()),
+                    }
                 }
 
-                match client.system_diagnostics().await {
-                    Ok(diag) => system_diagnostics.write().diagnostics_loaded(diag),
-                    Err(error) => system_diagnostics
-                        .write()
-                        .diagnostics_failed(error.to_string()),
+                // 5. Diagnostics Tab
+                if active_tab_val == DesktopTab::Diagnostics
+                    || active_tab_val == DesktopTab::All
+                    || is_bg_tick
+                {
+                    match client.system_diagnostics().await {
+                        Ok(diag) => system_diagnostics.write().diagnostics_loaded(diag),
+                        Err(error) => system_diagnostics
+                            .write()
+                            .diagnostics_failed(error.to_string()),
+                    }
                 }
 
+                // 6. Finalize Pending Operation Poll
                 if let Some(operation_id) = pending_operation() {
                     match client.get_operation(&operation_id).await {
                         Ok(current) => {
@@ -573,6 +717,12 @@ fn App() -> Element {
     let ai_providers_state = ai_providers();
     let ai_test_sender = actions;
     let ai_model_test_sender = actions;
+    let ai_create_provider_sender = actions;
+    let ai_delete_provider_sender = actions;
+    let ai_create_model_sender = actions;
+    let ai_delete_model_sender = actions;
+    let ai_create_route_sender = actions;
+    let ai_delete_route_sender = actions;
     let notifications_state = notifications();
     let notifications_test_sender = actions;
     let system_diagnostics_state = system_diagnostics();
@@ -1078,6 +1228,27 @@ fn App() -> Element {
                         },
                         on_test_model: move |id| {
                             ai_model_test_sender.send(UiAction::TestAiModel { id });
+                        },
+                        on_create_provider: move |req| {
+                            ai_create_provider_sender.send(UiAction::CreateAiProviderProfile(req));
+                        },
+                        on_delete_provider: move |id| {
+                            ai_delete_provider_sender.send(UiAction::DeleteAiProviderProfile(id));
+                        },
+                        on_create_model: move |(provider_id, request)| {
+                            ai_create_model_sender.send(UiAction::CreateAiModel {
+                                provider_id,
+                                request,
+                            });
+                        },
+                        on_delete_model: move |id| {
+                            ai_delete_model_sender.send(UiAction::DeleteAiModel(id));
+                        },
+                        on_create_route: move |req| {
+                            ai_create_route_sender.send(UiAction::CreateAiTaskRoute(req));
+                        },
+                        on_delete_route: move |task| {
+                            ai_delete_route_sender.send(UiAction::DeleteAiTaskRoute(task));
                         },
                     }
                 }

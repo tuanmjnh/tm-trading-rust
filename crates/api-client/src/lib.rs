@@ -4,11 +4,12 @@ use reqwest::Client;
 use thiserror::Error;
 use tm_trading_contracts::{
     AiBriefingDto, AiBriefingListDto, AiBriefingQueryDto, AiJobDto, AiJobListDto, AiJobQueryDto,
-    AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto, AiTaskRouteListDto,
-    BackupArchiveDto, CreateOperationRequest, CreateProviderInstanceRequest,
+    AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto, AiTaskRouteDto,
+    AiTaskRouteListDto, BackupArchiveDto, CreateOperationRequest, CreateProviderInstanceRequest,
     CreateWatchlistRequest, HealthResponse, MarketOverviewDto, MarketPulseDto, NewAiJobDto,
-    NewsClusterListDto, NewsClusterQueryDto, NewsItemDto, NewsListDto, NewsQueryDto,
-    NewsSourceListDto, NotificationLogListDto, NotificationLogQueryDto, NotificationOutboxListDto,
+    NewAiModelDto, NewAiProviderProfileDto, NewAiTaskRouteDto, NewsClusterListDto,
+    NewsClusterQueryDto, NewsItemDto, NewsListDto, NewsQueryDto, NewsSourceListDto,
+    NotificationLogListDto, NotificationLogQueryDto, NotificationOutboxListDto,
     NotificationOutboxQueryDto, NotificationOutboxSummaryDto, NotificationSummaryQueryDto,
     OperationActionDto, OperationResponse, ProviderDefinitionDto, ProviderInstanceDto,
     ReplaceWatchlistSymbolsRequest, ResearchEventDto, ResearchEventListDto, ResearchEventQueryDto,
@@ -578,6 +579,49 @@ impl ManagementApiClient {
         Self::decode(response, &path).await
     }
 
+    pub async fn create_ai_provider_profile(
+        &self,
+        request: &NewAiProviderProfileDto,
+    ) -> Result<AiProviderProfileDto, ApiClientError> {
+        let path = "/api/v1/ai-providers";
+        let response = self
+            .http
+            .post(format!("{}{}", self.base_url, path))
+            .bearer_auth(&self.token)
+            .json(request)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn delete_ai_provider_profile(&self, id: &str) -> Result<(), ApiClientError> {
+        let path = format!("/api/v1/ai-providers/{id}");
+        let response = self
+            .http
+            .delete(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(ApiClientError::Status {
+                path,
+                status: status.as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
+    }
+
     pub async fn list_ai_models(&self) -> Result<AiModelListDto, ApiClientError> {
         let path = "/api/v1/ai-models";
         let response = self
@@ -608,6 +652,50 @@ impl ManagementApiClient {
         Self::decode(response, &path).await
     }
 
+    pub async fn create_ai_model(
+        &self,
+        provider_id: &str,
+        request: &NewAiModelDto,
+    ) -> Result<AiModelDto, ApiClientError> {
+        let path = format!("/api/v1/ai-providers/{provider_id}/models");
+        let response = self
+            .http
+            .post(format!("{}{}", self.base_url, path))
+            .bearer_auth(&self.token)
+            .json(request)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, &path).await
+    }
+
+    pub async fn delete_ai_model(&self, id: &str) -> Result<(), ApiClientError> {
+        let path = format!("/api/v1/ai-models/{id}");
+        let response = self
+            .http
+            .delete(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(ApiClientError::Status {
+                path,
+                status: status.as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
+    }
+
     pub async fn list_ai_task_routes(&self) -> Result<AiTaskRouteListDto, ApiClientError> {
         let path = "/api/v1/ai-task-routes";
         let response = self
@@ -621,6 +709,49 @@ impl ManagementApiClient {
                 message: error.to_string(),
             })?;
         Self::decode(response, path).await
+    }
+
+    pub async fn create_ai_task_route(
+        &self,
+        request: &NewAiTaskRouteDto,
+    ) -> Result<AiTaskRouteDto, ApiClientError> {
+        let path = "/api/v1/ai-task-routes";
+        let response = self
+            .http
+            .post(format!("{}{}", self.base_url, path))
+            .bearer_auth(&self.token)
+            .json(request)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn delete_ai_task_route(&self, task: &str) -> Result<(), ApiClientError> {
+        let path = format!("/api/v1/ai-task-routes/{task}");
+        let response = self
+            .http
+            .delete(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.clone(),
+                message: error.to_string(),
+            })?;
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(ApiClientError::Status {
+                path,
+                status: status.as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            })
+        }
     }
 
     pub async fn list_ai_briefings(

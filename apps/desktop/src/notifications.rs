@@ -108,6 +108,19 @@ pub fn NotificationCenterPanel(
                 div { class: "banner error", role: "alert", "{error}" }
             }
 
+            // Telegram Setup Guidance Card
+            div { class: "watchlist-card", style: "margin: 12px 16px 16px; border-left: 3px solid var(--accent);",
+                div { class: "watchlist-card-head",
+                    h3 { "{strings.telegram_guide_title}" }
+                }
+                p { class: "panel-subtitle", style: "margin: 0;", "{strings.telegram_guide_hint}" }
+                div { class: "chips", style: "margin-top: 8px;",
+                    span { class: "chip", "TM_TRADING_TELEGRAM_BOT_TOKEN (@BotFather)" }
+                    span { class: "chip", "TM_TRADING_TELEGRAM_CHAT_ID (@userinfobot)" }
+                    span { class: "chip", "tm-trading-notification-worker" }
+                }
+            }
+
             // Test Notification Action Box
             div { class: "watchlist-create", style: "margin-bottom: 20px;",
                 input {

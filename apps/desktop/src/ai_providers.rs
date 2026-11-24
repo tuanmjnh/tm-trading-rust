@@ -2,10 +2,11 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 use tm_trading_contracts::{
     AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto, AiTaskRouteDto,
-    AiTaskRouteListDto,
+    AiTaskRouteListDto, NewAiModelDto, NewAiProviderProfileDto, NewAiTaskRouteDto,
 };
 
 use crate::i18n::UiStrings;
+use crate::modal::Modal;
 
 /// Independent state for the AI Provider Center panel.
 #[derive(Clone, Default, PartialEq)]
@@ -102,7 +103,37 @@ pub fn AiProviderPanel(
     strings: UiStrings,
     on_test: EventHandler<String>,
     on_test_model: EventHandler<String>,
+    #[props(default)] on_create_provider: Option<EventHandler<NewAiProviderProfileDto>>,
+    #[props(default)] on_delete_provider: Option<EventHandler<String>>,
+    #[props(default)] on_create_model: Option<EventHandler<(String, NewAiModelDto)>>,
+    #[props(default)] on_delete_model: Option<EventHandler<String>>,
+    #[props(default)] on_create_route: Option<EventHandler<NewAiTaskRouteDto>>,
+    #[props(default)] on_delete_route: Option<EventHandler<String>>,
 ) -> Element {
+    let mut show_add_provider = use_signal(|| false);
+    let mut new_provider_id = use_signal(String::new);
+    let mut new_provider_kind = use_signal(|| "gemini".to_owned());
+    let mut new_provider_display = use_signal(String::new);
+    let mut new_provider_base_url = use_signal(|| "https://generativelanguage.googleapis.com/v1beta".to_owned());
+    let mut new_provider_default_model = use_signal(|| "gemini-2.5-flash".to_owned());
+    let new_provider_timeout = use_signal(|| 30000u64);
+    let mut new_provider_api_key_env = use_signal(|| "GEMINI_API_KEY".to_owned());
+
+    let mut show_add_model = use_signal(|| false);
+    let mut new_model_provider = use_signal(String::new);
+    let mut new_model_id = use_signal(String::new);
+    let mut new_model_name = use_signal(String::new);
+    let mut new_model_display = use_signal(String::new);
+    let new_model_context = use_signal(|| Option::<u32>::Some(1_048_576));
+    let new_model_max_output = use_signal(|| Option::<u32>::Some(8_192));
+    let mut new_model_streaming = use_signal(|| true);
+    let mut new_model_json = use_signal(|| true);
+
+    let mut show_add_route = use_signal(|| false);
+    let mut new_route_task = use_signal(|| "research_explanation".to_owned());
+    let mut new_route_primary = use_signal(String::new);
+    let mut new_route_fallbacks = use_signal(String::new);
+
     let profile_count = state.profiles.as_ref().map_or(0, Vec::len);
     let healthy_count = state.profiles.as_ref().map_or(0, |profiles| {
         profiles
@@ -110,6 +141,8 @@ pub fn AiProviderPanel(
             .filter(|profile| profile.health_state == "HEALTHY")
             .count()
     });
+    let providers_list = state.profiles.as_ref().cloned().unwrap_or_default();
+    let registered_models = state.models.as_ref().cloned().unwrap_or_default();
 
     rsx! {
         section { class: "panel ai-provider-panel",
@@ -118,9 +151,18 @@ pub fn AiProviderPanel(
                     h2 { "{strings.ai_providers}" }
                     p { class: "panel-subtitle", "{strings.ai_providers_hint}" }
                 }
-                div { class: "signal-summary", aria_label: "{strings.ai_provider_summary}",
-                    span { strong { "{profile_count}" } " {strings.ai_provider_profiles_count}" }
-                    span { strong { "{healthy_count}" } " {strings.ai_provider_healthy_count}" }
+                div { class: "topbar-actions",
+                    div { class: "signal-summary", aria_label: "{strings.ai_provider_summary}",
+                        span { strong { "{profile_count}" } " {strings.ai_provider_profiles_count}" }
+                        span { strong { "{healthy_count}" } " {strings.ai_provider_healthy_count}" }
+                    }
+                    if on_create_provider.is_some() {
+                        button {
+                            class: "button primary",
+                            onclick: move |_| show_add_provider.set(true),
+                            "+ {strings.ai_provider_add}"
+                        }
+                    }
                 }
             }
             if let Some(error) = state.list_error.as_ref() {
@@ -166,6 +208,7 @@ pub fn AiProviderPanel(
                                 for profile in profiles.iter() {
                                     {
                                         let profile_id = profile.id.clone();
+                                        let del_id = profile.id.clone();
                                         let testing = state.testing_id.as_deref() == Some(profile.id.as_str());
                                         let test_sender = on_test;
                                         rsx! {
@@ -179,7 +222,7 @@ pub fn AiProviderPanel(
                                                 td {
                                                     span { class: "pill {health_class(&profile.health_state)}",
                                                         "{health_label(&profile.health_state, &strings)}"
-                                                    }
+                                                     }
                                                 }
                                                 td { class: "signal-time", "{format_optional_timestamp(profile.last_health_check_at)}" }
                                                 td { class: "signal-source-method",
@@ -191,6 +234,13 @@ pub fn AiProviderPanel(
                                                         disabled: testing || !profile.enabled,
                                                         onclick: move |_| test_sender.call(profile_id.clone()),
                                                         if testing { "{strings.ai_provider_testing}" } else { "{strings.ai_provider_test}" }
+                                                    }
+                                                    if let Some(on_delete) = on_delete_provider {
+                                                        button {
+                                                            class: "button danger",
+                                                            onclick: move |_| on_delete.call(del_id.clone()),
+                                                            "{strings.ai_provider_delete}"
+                                                        }
                                                     }
                                                 }
                                             }
@@ -206,6 +256,13 @@ pub fn AiProviderPanel(
                 div {
                     h3 { "{strings.ai_models}" }
                     p { class: "panel-subtitle", "{strings.ai_models_hint}" }
+                }
+                if on_create_model.is_some() {
+                    button {
+                        class: "button primary",
+                        onclick: move |_| show_add_model.set(true),
+                        "+ {strings.ai_model_add}"
+                    }
                 }
             }
             if let Some(error) = state.models_error.as_ref() {
@@ -252,6 +309,7 @@ pub fn AiProviderPanel(
                                 for model in models.iter() {
                                     {
                                         let model_id = model.id.clone();
+                                        let del_id = model.id.clone();
                                         let testing = state.testing_model_id.as_deref() == Some(model.id.as_str());
                                         let test_sender = on_test_model;
                                         let disabled = testing
@@ -287,6 +345,13 @@ pub fn AiProviderPanel(
                                                         onclick: move |_| test_sender.call(model_id.clone()),
                                                         if testing { "{strings.ai_provider_testing}" } else { "{strings.ai_provider_test}" }
                                                     }
+                                                    if let Some(on_delete) = on_delete_model {
+                                                        button {
+                                                            class: "button danger",
+                                                            onclick: move |_| on_delete.call(del_id.clone()),
+                                                            "{strings.ai_model_delete}"
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -301,6 +366,13 @@ pub fn AiProviderPanel(
                 div {
                     h3 { "{strings.ai_task_routes}" }
                     p { class: "panel-subtitle", "{strings.ai_task_routes_hint}" }
+                }
+                if on_create_route.is_some() {
+                    button {
+                        class: "button primary",
+                        onclick: move |_| show_add_route.set(true),
+                        "+ {strings.ai_task_route_add}"
+                    }
                 }
             }
             if let Some(error) = state.routes_error.as_ref() {
@@ -335,24 +407,299 @@ pub fn AiProviderPanel(
                                     th { "{strings.ai_task_route_fallback_column}" }
                                     th { "{strings.ai_task_route_attempts_column}" }
                                     th { "{strings.ai_task_route_state_column}" }
+                                    th { "{strings.ai_provider_actions_column}" }
                                 }
                             }
                             tbody {
                                 for route in routes.iter() {
-                                    tr { class: "signal-row",
-                                        td { span { class: "timeframe-chip", "{route.task}" } }
-                                        td { class: "signal-source", "{route.primary}" }
-                                        td { class: "signal-source",
-                                            "{route.fallbacks.join(\", \")}"
-                                        }
-                                        td { class: "signal-time", "{route.providers_in_reach}" }
-                                        td {
-                                            if route.enabled { "{strings.ai_model_enabled}" } else { "{strings.ai_model_disabled}" }
+                                    {
+                                        let del_task = route.task.clone();
+                                        rsx! {
+                                            tr { class: "signal-row",
+                                                td { span { class: "timeframe-chip", "{route.task}" } }
+                                                td { class: "signal-source", "{route.primary}" }
+                                                td { class: "signal-source",
+                                                    "{route.fallbacks.join(\", \")}"
+                                                }
+                                                td { class: "signal-time", "{route.providers_in_reach}" }
+                                                td {
+                                                    if route.enabled { "{strings.ai_model_enabled}" } else { "{strings.ai_model_disabled}" }
+                                                }
+                                                td { class: "actions",
+                                                    if let Some(on_delete) = on_delete_route {
+                                                        button {
+                                                            class: "button danger",
+                                                            onclick: move |_| on_delete.call(del_task.clone()),
+                                                            "{strings.ai_task_route_delete}"
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+        if show_add_provider() {
+            Modal {
+                title: strings.ai_provider_add.to_string(),
+                close_label: strings.modal_close.to_string(),
+                on_close: move |_| show_add_provider.set(false),
+                footer: rsx! {
+                    button {
+                        class: "button",
+                        onclick: move |_| show_add_provider.set(false),
+                        "{strings.modal_close}"
+                    }
+                    button {
+                        class: "button primary",
+                        onclick: move |_| {
+                            let id = new_provider_id().trim().to_owned();
+                            if id.is_empty() { return; }
+                            if let Some(on_create) = on_create_provider {
+                                on_create.call(NewAiProviderProfileDto {
+                                    id,
+                                    kind: new_provider_kind(),
+                                    display_name: new_provider_display().trim().to_owned(),
+                                    base_url: new_provider_base_url().trim().to_owned(),
+                                    default_model: new_provider_default_model().trim().to_owned(),
+                                    timeout_ms: new_provider_timeout(),
+                                    api_key_env: new_provider_api_key_env().trim().to_owned(),
+                                });
+                            }
+                            show_add_provider.set(false);
+                        },
+                        "{strings.ai_provider_add}"
+                    }
+                },
+                div { class: "form-group",
+                    label { "ID" }
+                    input {
+                        class: "text-input",
+                        placeholder: "e.g. gemini, openai, anthropic",
+                        value: "{new_provider_id()}",
+                        oninput: move |e| new_provider_id.set(e.value()),
+                    }
+                }
+                div { class: "form-group",
+                    label { "Kind" }
+                    select {
+                        class: "select-input",
+                        value: "{new_provider_kind()}",
+                        onchange: move |e| new_provider_kind.set(e.value()),
+                        option { value: "gemini", "Gemini" }
+                        option { value: "openai", "OpenAI" }
+                        option { value: "anthropic", "Anthropic" }
+                        option { value: "custom", "Custom" }
+                    }
+                }
+                div { class: "form-group",
+                    label { "Display Name" }
+                    input {
+                        class: "text-input",
+                        placeholder: "e.g. Google Gemini 2.5",
+                        value: "{new_provider_display()}",
+                        oninput: move |e| new_provider_display.set(e.value()),
+                    }
+                }
+                div { class: "form-group",
+                    label { "Base URL" }
+                    input {
+                        class: "text-input",
+                        value: "{new_provider_base_url()}",
+                        oninput: move |e| new_provider_base_url.set(e.value()),
+                    }
+                }
+                div { class: "form-group",
+                    label { "Default Model" }
+                    input {
+                        class: "text-input",
+                        value: "{new_provider_default_model()}",
+                        oninput: move |e| new_provider_default_model.set(e.value()),
+                    }
+                }
+                div { class: "form-group",
+                    label { "API Key Env Var" }
+                    input {
+                        class: "text-input",
+                        value: "{new_provider_api_key_env()}",
+                        oninput: move |e| new_provider_api_key_env.set(e.value()),
+                    }
+                }
+            }
+        }
+        if show_add_model() {
+            Modal {
+                title: strings.ai_model_add.to_string(),
+                close_label: strings.modal_close.to_string(),
+                on_close: move |_| show_add_model.set(false),
+                footer: rsx! {
+                    button {
+                        class: "button",
+                        onclick: move |_| show_add_model.set(false),
+                        "{strings.modal_close}"
+                    }
+                    button {
+                        class: "button primary",
+                        onclick: move |_| {
+                            let prov_id = new_model_provider().trim().to_owned();
+                            let id = new_model_id().trim().to_owned();
+                            let model_name = new_model_name().trim().to_owned();
+                            if prov_id.is_empty() || id.is_empty() || model_name.is_empty() { return; }
+                            if let Some(on_create) = on_create_model {
+                                on_create.call((
+                                    prov_id,
+                                    NewAiModelDto {
+                                        id,
+                                        model_id: model_name,
+                                        display_name: new_model_display().trim().to_owned(),
+                                        context_window: new_model_context(),
+                                        max_output_tokens: new_model_max_output(),
+                                        supports_streaming: new_model_streaming(),
+                                        supports_json_mode: new_model_json(),
+                                        supports_tools: false,
+                                        supports_vision: false,
+                                    },
+                                ));
+                            }
+                            show_add_model.set(false);
+                        },
+                        "{strings.ai_model_add}"
+                    }
+                },
+                div { class: "form-group",
+                    label { "Provider ID" }
+                    select {
+                        class: "select-input",
+                        value: "{new_model_provider()}",
+                        onchange: move |e| new_model_provider.set(e.value()),
+                        option { value: "", "Select Provider..." }
+                        for p in providers_list {
+                            option { value: "{p.id}", "{p.display_name} ({p.id})" }
+                        }
+                    }
+                }
+                div { class: "form-group",
+                    label { "Registered ID" }
+                    input {
+                        class: "text-input",
+                        placeholder: "e.g. gemini-flash",
+                        value: "{new_model_id()}",
+                        oninput: move |e| new_model_id.set(e.value()),
+                    }
+                }
+                div { class: "form-group",
+                    label { "Model ID" }
+                    input {
+                        class: "text-input",
+                        placeholder: "e.g. gemini-2.5-flash",
+                        value: "{new_model_name()}",
+                        oninput: move |e| new_model_name.set(e.value()),
+                    }
+                }
+                div { class: "form-group",
+                    label { "Display Name" }
+                    input {
+                        class: "text-input",
+                        placeholder: "e.g. Gemini 2.5 Flash",
+                        value: "{new_model_display()}",
+                        oninput: move |e| new_model_display.set(e.value()),
+                    }
+                }
+                label { class: "form-checkbox",
+                    input {
+                        r#type: "checkbox",
+                        checked: "{new_model_streaming()}",
+                        onchange: move |e| new_model_streaming.set(e.checked()),
+                    }
+                    "Supports Streaming"
+                }
+                label { class: "form-checkbox",
+                    input {
+                        r#type: "checkbox",
+                        checked: "{new_model_json()}",
+                        onchange: move |e| new_model_json.set(e.checked()),
+                    }
+                    "Supports JSON mode"
+                }
+            }
+        }
+        if show_add_route() {
+            Modal {
+                title: strings.ai_task_route_add.to_string(),
+                close_label: strings.modal_close.to_string(),
+                on_close: move |_| show_add_route.set(false),
+                footer: rsx! {
+                    button {
+                        class: "button",
+                        onclick: move |_| show_add_route.set(false),
+                        "{strings.modal_close}"
+                    }
+                    button {
+                        class: "button primary",
+                        onclick: move |_| {
+                            let task = new_route_task().trim().to_owned();
+                            let primary = new_route_primary().trim().to_owned();
+                            if task.is_empty() || primary.is_empty() { return; }
+                            let fallbacks = new_route_fallbacks()
+                                .split(',')
+                                .map(|s| s.trim().to_owned())
+                                .filter(|s| !s.is_empty())
+                                .collect::<Vec<_>>();
+                            if let Some(on_create) = on_create_route {
+                                on_create.call(NewAiTaskRouteDto {
+                                    task,
+                                    primary,
+                                    fallbacks,
+                                    timeout_ms: 30000,
+                                    max_attempts: 3,
+                                    concurrency: 2,
+                                    max_output_tokens: None,
+                                });
+                            }
+                            show_add_route.set(false);
+                        },
+                        "{strings.ai_task_route_add}"
+                    }
+                },
+                div { class: "form-group",
+                    label { "Task Name" }
+                    select {
+                        class: "select-input",
+                        value: "{new_route_task()}",
+                        onchange: move |e| new_route_task.set(e.value()),
+                        option { value: "research_explanation", "research_explanation" }
+                        option { value: "briefing_synthesis", "briefing_synthesis" }
+                        option { value: "telegram_alert_summary", "telegram_alert_summary" }
+                        option { value: "market_briefing", "market_briefing" }
+                        option { value: "news_classification", "news_classification" }
+                        option { value: "news_summary", "news_summary" }
+                        option { value: "daily_digest", "daily_digest" }
+                    }
+                }
+                div { class: "form-group",
+                    label { "Primary Model (provider:model)" }
+                    select {
+                        class: "select-input",
+                        value: "{new_route_primary()}",
+                        onchange: move |e| new_route_primary.set(e.value()),
+                        option { value: "", "Select Primary Model..." }
+                        for m in registered_models {
+                            option { value: "{m.provider_id}:{m.id}", "{m.provider_id}:{m.id} ({m.display_name})" }
+                        }
+                    }
+                }
+                div { class: "form-group",
+                    label { "Fallbacks (comma separated provider:model)" }
+                    input {
+                        class: "text-input",
+                        placeholder: "e.g. openai:gpt-4o-mini",
+                        value: "{new_route_fallbacks()}",
+                        oninput: move |e| new_route_fallbacks.set(e.value()),
                     }
                 }
             }
