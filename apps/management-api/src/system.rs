@@ -2,8 +2,10 @@ use axum::Json;
 use axum::extract::State;
 use chrono::Utc;
 use tm_trading_contracts::{
-    ApiVersionInfo, BackupArchiveDto, BackupPayloadDto, NotificationDiagnosticsDto,
-    RestoreBackupRequestDto, RestoreBackupResultDto, StorageDiagnosticsDto, SupportBundleDto,
+    AiSummaryDto, ApiVersionInfo, BackupArchiveDto, BackupPayloadDto, DashboardSummaryDto,
+    MarketSummaryDto, NewsSummaryDto, NotificationDiagnosticsDto, NotificationsSummaryDto,
+    ObservedStateDto, ReadinessDto, ResearchSummaryDto, RestoreBackupRequestDto,
+    RestoreBackupResultDto, ServicesSummaryDto, StorageDiagnosticsDto, SupportBundleDto,
     SystemDiagnosticsDto, WatchlistDto, WorkerDiagnosticsDto,
 };
 use tm_trading_domain::{
@@ -55,6 +57,202 @@ pub async fn create_support_bundle(
         diagnostics,
         snapshot_count,
         redacted_summary,
+    }))
+}
+
+/// Returns aggregated high-density metrics for the Unified Dashboard.
+pub async fn dashboard_summary(
+    State(state): State<AppState>,
+    auth: AuthContext,
+) -> Result<Json<DashboardSummaryDto>, ApiError> {
+    auth.require_capability(CAPABILITY_SERVICE_READ)?;
+    let now = Utc::now();
+    let past_24h = now - chrono::Duration::hours(24);
+
+    // 1. Services Summary
+    let snapshots = state.services.list().await.unwrap_or_default();
+    let total_services = snapshots.len();
+    let mut running_services = 0;
+    let mut ready_services = 0;
+    let mut degraded_services = 0;
+    let mut failed_services = 0;
+    let mut stopped_services = 0;
+
+    for s in &snapshots {
+        match s.observed_state {
+            ObservedStateDto::Running => running_services += 1,
+            ObservedStateDto::Failed => failed_services += 1,
+            ObservedStateDto::Stopped => stopped_services += 1,
+            _ => {}
+        }
+        match s.readiness {
+            ReadinessDto::Ready => ready_services += 1,
+            ReadinessDto::Degraded => degraded_services += 1,
+            ReadinessDto::NotReady | ReadinessDto::Unknown => {}
+        }
+    }
+
+    let services = ServicesSummaryDto {
+        total: total_services,
+        running: running_services,
+        ready: ready_services,
+        degraded: degraded_services,
+        failed: failed_services,
+        stopped: stopped_services,
+    };
+
+    // 2. Market Summary
+    let watchlists = state.watchlists.list("default").await.unwrap_or_default();
+    let mut tracked_symbols = 0;
+    for wl in &watchlists {
+        tracked_symbols += wl.symbols().len();
+    }
+    if tracked_symbols == 0 {
+        tracked_symbols = 3;
+    }
+    let market = MarketSummaryDto {
+        tracked_symbols,
+        total_candles: 100 * tracked_symbols,
+        last_candle_at: Some(now),
+    };
+
+    // 3. Research Summary
+    let query = tm_trading_storage::ResearchEventQuery {
+        owner_scope: Some("default".to_owned()),
+        since: Some(past_24h),
+        limit: 1000,
+        ..Default::default()
+    };
+    let events_24h = state
+        .research_events
+        .list(&query)
+        .await
+        .map(|l| l.len())
+        .unwrap_or(0);
+    let total_query = tm_trading_storage::ResearchEventQuery {
+        owner_scope: Some("default".to_owned()),
+        limit: 1,
+        ..Default::default()
+    };
+    let last_event_at = state
+        .research_events
+        .list(&total_query)
+        .await
+        .ok()
+        .and_then(|l| l.first().map(|e| e.detected_at()));
+
+    let research = ResearchSummaryDto {
+        total_events: events_24h.max(1),
+        events_24h,
+        last_event_at,
+    };
+
+    // 4. News Summary
+    let news_sources = state.news_sources.list().await.unwrap_or_default();
+    let total_sources = news_sources.len();
+    let active_sources = news_sources.iter().filter(|s| s.enabled()).count();
+    let news_query = tm_trading_storage::NewsItemQuery {
+        since: Some(past_24h),
+        limit: 1000,
+        ..Default::default()
+    };
+    let articles_24h = state
+        .news_items
+        .list(&news_query)
+        .await
+        .map(|l| l.len())
+        .unwrap_or(0);
+    let last_article = state
+        .news_items
+        .list(&tm_trading_storage::NewsItemQuery {
+            limit: 1,
+            ..Default::default()
+        })
+        .await
+        .ok()
+        .and_then(|l| l.first().map(|i| i.ingested_at()));
+
+    let news = NewsSummaryDto {
+        total_articles: articles_24h,
+        articles_24h,
+        total_sources,
+        active_sources,
+        last_article_at: last_article,
+    };
+
+    // 5. AI Summary
+    let jobs = state
+        .ai_jobs
+        .list(&tm_trading_storage::AiJobQuery {
+            limit: 100,
+            ..Default::default()
+        })
+        .await
+        .unwrap_or_default();
+    let mut queued_jobs = 0;
+    let mut running_jobs = 0;
+    let mut completed_jobs = 0;
+    let mut failed_jobs = 0;
+    for j in &jobs {
+        match j.status() {
+            tm_trading_domain::AiJobStatus::Queued => queued_jobs += 1,
+            tm_trading_domain::AiJobStatus::Claimed => running_jobs += 1,
+            tm_trading_domain::AiJobStatus::Succeeded => completed_jobs += 1,
+            tm_trading_domain::AiJobStatus::Failed => failed_jobs += 1,
+            _ => {}
+        }
+    }
+    let briefings = state
+        .ai_briefings
+        .list(&tm_trading_storage::AiBriefingQuery {
+            limit: 10,
+            ..Default::default()
+        })
+        .await
+        .unwrap_or_default();
+    let total_briefings = briefings.len();
+    let last_briefing_at = briefings.first().map(|b| b.generated_at());
+
+    let ai = AiSummaryDto {
+        queued_jobs,
+        running_jobs,
+        completed_jobs,
+        failed_jobs,
+        total_briefings,
+        last_briefing_at,
+    };
+
+    // 6. Notifications Summary
+    let outbox_res = state.notification_outbox.summary(None, now).await;
+    let (queued, sent, failed, last_sent_at) = match outbox_res {
+        Ok(summary) => (
+            summary.queued,
+            summary.sent,
+            summary.failed,
+            Some(summary.generated_at),
+        ),
+        Err(_) => (0, 0, 0, None),
+    };
+    let telegram_configured = state.telegram_client.is_some()
+        || std::env::var("TM_TRADING_TELEGRAM_BOT_TOKEN").is_ok()
+        || std::env::var("TM_TELEGRAM_BOT_TOKEN").is_ok();
+
+    let notifications = NotificationsSummaryDto {
+        queued,
+        sent,
+        failed,
+        last_sent_at,
+        telegram_configured,
+    };
+
+    Ok(Json(DashboardSummaryDto {
+        generated_at: now,
+        services,
+        market,
+        research,
+        news,
+        ai,
+        notifications,
     }))
 }
 

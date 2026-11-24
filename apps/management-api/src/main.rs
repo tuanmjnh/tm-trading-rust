@@ -90,7 +90,9 @@ async fn stores() -> Result<(Repositories, String, Option<String>), Box<dyn std:
 
     match store.as_str() {
         "memory" => {
-            tracing::info!("Storage initialized using ephemeral in-memory repositories (development only).");
+            tracing::info!(
+                "Storage initialized using ephemeral in-memory repositories (development only)."
+            );
             Ok((Repositories::in_memory(), "memory".to_owned(), None))
         }
         "mongodb" => {

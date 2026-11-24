@@ -14,6 +14,10 @@ use crate::ai_task::{AiTaskRouteDto, AiTaskRouteListDto, NewAiTaskRouteDto, Upda
 use crate::backup::{
     BackupArchiveDto, BackupPayloadDto, RestoreBackupRequestDto, RestoreBackupResultDto,
 };
+use crate::dashboard::{
+    AiSummaryDto, DashboardSummaryDto, MarketSummaryDto, NewsSummaryDto, NotificationsSummaryDto,
+    ResearchSummaryDto, ServicesSummaryDto,
+};
 use utoipa::OpenApi;
 
 use crate::error::ApiErrorResponse;
@@ -65,6 +69,7 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         version,
         health,
         system_diagnostics,
+        dashboard_summary,
         create_support_bundle,
         list_services,
         get_service,
@@ -131,6 +136,13 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         NotificationDiagnosticsDto,
         SystemDiagnosticsDto,
         SupportBundleDto,
+        DashboardSummaryDto,
+        ServicesSummaryDto,
+        MarketSummaryDto,
+        ResearchSummaryDto,
+        NewsSummaryDto,
+        AiSummaryDto,
+        NotificationsSummaryDto,
         BackupPayloadDto,
         BackupArchiveDto,
         RestoreBackupRequestDto,
@@ -273,6 +285,19 @@ pub fn health() {}
     )
 )]
 pub fn system_diagnostics() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/dashboard/summary",
+    tag = "System",
+    responses(
+        (status = 200, description = "Aggregated high-density metrics for the unified dashboard", body = DashboardSummaryDto),
+        (status = 401, description = "Missing or invalid credentials", body = ApiErrorResponse),
+        (status = 403, description = "Missing required capability", body = ApiErrorResponse),
+        (status = 500, description = "Unexpected server error", body = ApiErrorResponse)
+    )
+)]
+pub fn dashboard_summary() {}
 
 #[utoipa::path(
     post,

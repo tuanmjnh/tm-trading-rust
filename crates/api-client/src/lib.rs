@@ -6,8 +6,8 @@ use tm_trading_contracts::{
     AiBriefingDto, AiBriefingListDto, AiBriefingQueryDto, AiJobDto, AiJobListDto, AiJobQueryDto,
     AiModelDto, AiModelListDto, AiProviderProfileDto, AiProviderProfileListDto, AiTaskRouteDto,
     AiTaskRouteListDto, BackupArchiveDto, CreateOperationRequest, CreateProviderInstanceRequest,
-    CreateWatchlistRequest, HealthResponse, MarketOverviewDto, MarketPulseDto, NewAiJobDto,
-    NewAiModelDto, NewAiProviderProfileDto, NewAiTaskRouteDto, NewsClusterListDto,
+    CreateWatchlistRequest, DashboardSummaryDto, HealthResponse, MarketOverviewDto, MarketPulseDto,
+    NewAiJobDto, NewAiModelDto, NewAiProviderProfileDto, NewAiTaskRouteDto, NewsClusterListDto,
     NewsClusterQueryDto, NewsItemDto, NewsListDto, NewsQueryDto, NewsSourceListDto,
     NotificationLogListDto, NotificationLogQueryDto, NotificationOutboxListDto,
     NotificationOutboxQueryDto, NotificationOutboxSummaryDto, NotificationSummaryQueryDto,
@@ -58,6 +58,21 @@ impl ManagementApiClient {
 
     pub async fn health(&self) -> Result<HealthResponse, ApiClientError> {
         let path = "/api/v1/health";
+        let response = self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| ApiClientError::Request {
+                path: path.to_owned(),
+                message: error.to_string(),
+            })?;
+        Self::decode(response, path).await
+    }
+
+    pub async fn dashboard_summary(&self) -> Result<DashboardSummaryDto, ApiClientError> {
+        let path = "/api/v1/dashboard/summary";
         let response = self
             .http
             .get(format!("{}{path}", self.base_url))

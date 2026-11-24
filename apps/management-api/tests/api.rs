@@ -2862,6 +2862,7 @@ async fn system_backup_restore_and_tamper_protection() {
     let payload = tm_trading_contracts::BackupPayloadDto {
         watchlists: vec![new_watchlist],
         ai_provider_profiles: Vec::new(),
+        ai_models: Vec::new(),
         ai_task_routes: Vec::new(),
     };
     let archive = tm_trading_contracts::BackupArchiveDto::new(

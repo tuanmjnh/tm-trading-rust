@@ -39,6 +39,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/system/diagnostics",
             get(system::system_diagnostics),
         )
+        .route("/api/v1/dashboard/summary", get(system::dashboard_summary))
         .route(
             "/api/v1/system/support-bundle",
             post(system::create_support_bundle),

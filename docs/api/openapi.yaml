@@ -1131,6 +1131,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/dashboard/summary:
+    get:
+      tags:
+      - System
+      operationId: dashboard_summary
+      responses:
+        '200':
+          description: Aggregated high-density metrics for the unified dashboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSummaryDto'
+        '401':
+          description: Missing or invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Missing required capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/health:
     get:
       tags:
@@ -3069,6 +3099,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AiProviderProfileDto'
+    AiSummaryDto:
+      type: object
+      required:
+      - queued_jobs
+      - running_jobs
+      - completed_jobs
+      - failed_jobs
+      - total_briefings
+      properties:
+        completed_jobs:
+          type: integer
+          minimum: 0
+        failed_jobs:
+          type: integer
+          minimum: 0
+        last_briefing_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        queued_jobs:
+          type: integer
+          minimum: 0
+        running_jobs:
+          type: integer
+          minimum: 0
+        total_briefings:
+          type: integer
+          minimum: 0
     AiTaskRouteDto:
       type: object
       required:
@@ -3333,12 +3392,77 @@ components:
           type: array
           items:
             type: string
+    DashboardSummaryDto:
+      type: object
+      description: High-density aggregated metrics for the Desktop Unified Dashboard.
+      required:
+      - generated_at
+      - services
+      - market
+      - research
+      - news
+      - ai
+      - notifications
+      properties:
+        ai:
+          $ref: '#/components/schemas/AiSummaryDto'
+        generated_at:
+          type: string
+          format: date-time
+        market:
+          $ref: '#/components/schemas/MarketSummaryDto'
+        news:
+          $ref: '#/components/schemas/NewsSummaryDto'
+        notifications:
+          $ref: '#/components/schemas/NotificationsSummaryDto'
+        research:
+          $ref: '#/components/schemas/ResearchSummaryDto'
+        services:
+          $ref: '#/components/schemas/ServicesSummaryDto'
     DesiredStateDto:
       type: string
       description: Canonical desired state of a service instance.
       enum:
       - RUNNING
       - STOPPED
+    FundingRateDto:
+      type: object
+      description: Funding rate record for one symbol.
+      required:
+      - symbol
+      - rate
+      - pct
+      - next_funding_time
+      - price
+      - score
+      properties:
+        next_funding_time:
+          type: integer
+          format: int64
+        oi_contracts:
+          type:
+          - number
+          - 'null'
+          format: double
+        oi_notional_usd:
+          type:
+          - number
+          - 'null'
+          format: double
+        pct:
+          type: number
+          format: double
+        price:
+          type: number
+          format: double
+        rate:
+          type: number
+          format: double
+        score:
+          type: number
+          format: double
+        symbol:
+          type: string
     HealthResponse:
       type: object
       required:
@@ -3355,6 +3479,82 @@ components:
       - healthy
       - degraded
       - unhealthy
+    LiquidationZoneDto:
+      type: object
+      description: One liquidation price zone.
+      required:
+      - lev
+      - w
+      - side
+      - price
+      - pct
+      - usd
+      properties:
+        lev:
+          type: number
+          format: double
+        pct:
+          type: number
+          format: double
+        price:
+          type: number
+          format: double
+        side:
+          type: string
+        usd:
+          type: number
+          format: double
+        w:
+          type: number
+          format: double
+    MarketFundingDto:
+      type: object
+      description: Market funding rates response including snapshot and extreme funding rates.
+      required:
+      - generated_at
+      - threshold
+      - snapshot
+      - extremes
+      properties:
+        extremes:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundingRateDto'
+        generated_at:
+          type: string
+          format: date-time
+        snapshot:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundingRateDto'
+        threshold:
+          type: number
+          format: double
+    MarketLiquidationDto:
+      type: object
+      description: Estimated liquidation zones for a symbol.
+      required:
+      - generated_at
+      - symbol
+      - mark_price
+      - open_interest_usd
+      - zones
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        mark_price:
+          type: number
+          format: double
+        open_interest_usd:
+          type: number
+          format: double
+        symbol:
+          type: string
+        zones:
+          type: array
+          items:
+            $ref: '#/components/schemas/LiquidationZoneDto'
     MarketMoverDto:
       type: object
       description: One symbol ranked by movement.
@@ -3450,6 +3650,23 @@ components:
       - PARTIAL
       - STALE
       - EMPTY
+    MarketSummaryDto:
+      type: object
+      required:
+      - tracked_symbols
+      - total_candles
+      properties:
+        last_candle_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        total_candles:
+          type: integer
+          minimum: 0
+        tracked_symbols:
+          type: integer
+          minimum: 0
     MarketSymbolDto:
       type: object
       description: One symbol's closed-candle summary.
@@ -3941,6 +4158,31 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NewsSourceDto'
+    NewsSummaryDto:
+      type: object
+      required:
+      - total_articles
+      - articles_24h
+      - total_sources
+      - active_sources
+      properties:
+        active_sources:
+          type: integer
+          minimum: 0
+        articles_24h:
+          type: integer
+          minimum: 0
+        last_article_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        total_articles:
+          type: integer
+          minimum: 0
+        total_sources:
+          type: integer
+          minimum: 0
     NotificationAttemptDto:
       type: object
       description: Single channel attempt outcome recorded in delivery logs.
@@ -4276,6 +4518,30 @@ components:
           type:
           - string
           - 'null'
+    NotificationsSummaryDto:
+      type: object
+      required:
+      - queued
+      - sent
+      - failed
+      - telegram_configured
+      properties:
+        failed:
+          type: integer
+          minimum: 0
+        last_sent_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        queued:
+          type: integer
+          minimum: 0
+        sent:
+          type: integer
+          minimum: 0
+        telegram_configured:
+          type: boolean
     ObservedStateDto:
       type: string
       description: Canonical observed state of a service instance.
@@ -4666,6 +4932,23 @@ components:
       - COMPLETE
       - PARTIAL
       - UNKNOWN
+    ResearchSummaryDto:
+      type: object
+      required:
+      - total_events
+      - events_24h
+      properties:
+        events_24h:
+          type: integer
+          minimum: 0
+        last_event_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        total_events:
+          type: integer
+          minimum: 0
     RestoreBackupRequestDto:
       type: object
       description: Request to restore configurations from a backup archive.
@@ -4794,6 +5077,34 @@ components:
         updated_at:
           type: string
           format: date-time
+    ServicesSummaryDto:
+      type: object
+      required:
+      - total
+      - running
+      - ready
+      - degraded
+      - failed
+      - stopped
+      properties:
+        degraded:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        ready:
+          type: integer
+          minimum: 0
+        running:
+          type: integer
+          minimum: 0
+        stopped:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
     StorageDiagnosticsDto:
       type: object
       description: High-level diagnostic snapshot of backend storage.
@@ -4865,6 +5176,50 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/WorkerDiagnosticsDto'
+    TradingViewAlertPayload:
+      type: object
+      description: Inbound TradingView webhook payload.
+      required:
+      - v
+      - action
+      - side
+      - price
+      - sl
+      - tps
+      - ts
+      - symbol
+      properties:
+        action:
+          type: string
+        price:
+          type: number
+          format: double
+        side:
+          type: string
+        sl:
+          type: number
+          format: double
+        strategy:
+          type:
+          - string
+          - 'null'
+        symbol:
+          type: string
+        timeframe:
+          type:
+          - string
+          - 'null'
+        tps:
+          type: array
+          items:
+            type: number
+            format: double
+        ts:
+          type: string
+        v:
+          type: integer
+          format: int32
+          minimum: 0
     UpdateAiModelDto:
       type: object
       properties:
@@ -5023,6 +5378,25 @@ components:
         updated_at:
           type: string
           format: date-time
+    WebhookResponse:
+      type: object
+      description: Webhook intake acknowledgement response.
+      required:
+      - ok
+      - deduplicated
+      properties:
+        deduplicated:
+          type: boolean
+        error:
+          type:
+          - string
+          - 'null'
+        notify_id:
+          type:
+          - string
+          - 'null'
+        ok:
+          type: boolean
     WorkerDiagnosticsDto:
       type: object
       description: Diagnostic health status of a supervised worker process.

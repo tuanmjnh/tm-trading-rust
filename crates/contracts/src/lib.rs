@@ -4,6 +4,7 @@ mod ai_model;
 mod ai_provider;
 mod ai_task;
 mod backup;
+mod dashboard;
 mod error;
 mod market;
 mod news;
@@ -31,6 +32,10 @@ pub use ai_provider::{
 pub use ai_task::{AiTaskRouteDto, AiTaskRouteListDto, NewAiTaskRouteDto, UpdateAiTaskRouteDto};
 pub use backup::{
     BackupArchiveDto, BackupPayloadDto, RestoreBackupRequestDto, RestoreBackupResultDto,
+};
+pub use dashboard::{
+    AiSummaryDto, DashboardSummaryDto, MarketSummaryDto, NewsSummaryDto, NotificationsSummaryDto,
+    ResearchSummaryDto, ServicesSummaryDto,
 };
 pub use error::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
 pub use market::{
