@@ -18,15 +18,21 @@ impl MongoConnection {
         }
 
         let connection_string = ConnectionString::parse(uri)?;
-        match connection_string.tls {
-            Some(Tls::Disabled) => return Err(RepositoryError::TlsRequired),
-            Some(Tls::Enabled(options)) if options.allow_invalid_certificates == Some(true) => {
-                return Err(RepositoryError::InsecureTls);
+        let allow_insecure_dev = std::env::var("TM_STORAGE_ALLOW_INSECURE_DEV")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+
+        if !allow_insecure_dev {
+            match connection_string.tls {
+                Some(Tls::Disabled) => return Err(RepositoryError::TlsRequired),
+                Some(Tls::Enabled(options)) if options.allow_invalid_certificates == Some(true) => {
+                    return Err(RepositoryError::InsecureTls);
+                }
+                None if !matches!(connection_string.host_info, HostInfo::DnsRecord(_)) => {
+                    return Err(RepositoryError::TlsRequired);
+                }
+                _ => {}
             }
-            None if !matches!(connection_string.host_info, HostInfo::DnsRecord(_)) => {
-                return Err(RepositoryError::TlsRequired);
-            }
-            _ => {}
         }
 
         let client = Client::with_uri_str(uri).await?;

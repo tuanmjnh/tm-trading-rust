@@ -137,7 +137,7 @@ Localized UI strings live in `apps/desktop/src/i18n.rs`. Operation result summar
 
 ## Run with durable stores
 
-By default the Management API keeps operations and service snapshots in memory. Set `TM_TRADING_STORE=mongodb` to persist both; the connection must use TLS with certificate validation, and `TM_ENVIRONMENT=production` requires this setting.
+By default the Management API keeps operations and service snapshots in memory. Set `TM_TRADING_STORE=mongodb` to persist both; the connection must use TLS with certificate validation in production, and `TM_ENVIRONMENT=production` requires this setting. For local offline development with standalone MongoDB instances that do not have TLS configured, set `TM_STORAGE_ALLOW_INSECURE_DEV=1` to allow plain loopback connections (e.g. `mongodb://127.0.0.1:27017`).
 
 ```powershell
 $env:TM_TRADING_LOCAL_API_TOKEN = "local-user-token"

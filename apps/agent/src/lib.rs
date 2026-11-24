@@ -24,8 +24,8 @@ use tm_trading_contracts::{
 };
 use tm_trading_domain::{DesiredState, ObservedState, Readiness};
 use tm_trading_supervisor_core::{
-    AI_WORKER_ID, MARKET_WORKER_ID, NEWS_WORKER_ID, RESEARCH_WORKER_ID, ServiceState,
-    SupervisorError, WorkerDefinition, WorkerProcessIdentity, WorkerRegistry,
+    AI_WORKER_ID, MARKET_WORKER_ID, NEWS_WORKER_ID, NOTIFICATION_WORKER_ID, RESEARCH_WORKER_ID,
+    ServiceState, SupervisorError, WorkerDefinition, WorkerProcessIdentity, WorkerRegistry,
 };
 
 pub use api::ManagementApiClient;
@@ -44,6 +44,8 @@ const MAX_WORKER_EVENTS_PER_BATCH: usize = 128;
 const MARKET_WORKER_ENVIRONMENT: &[&str] = &[
     "TM_DATABASE_URI",
     "TM_DATABASE_NAME",
+    "TM_STORAGE_ALLOW_INSECURE_DEV",
+    "TM_TRADING_MARKET_WORKER_ENABLED",
     "TM_TRADING_MARKET_SYMBOLS",
     "TM_TRADING_MARKET_TIMEFRAME",
     "TM_TRADING_MARKET_BARS",
@@ -57,6 +59,9 @@ const MARKET_WORKER_ENVIRONMENT: &[&str] = &[
 const RESEARCH_WORKER_ENVIRONMENT: &[&str] = &[
     "TM_DATABASE_URI",
     "TM_DATABASE_NAME",
+    "TM_STORAGE_ALLOW_INSECURE_DEV",
+    "TM_TRADING_RESEARCH_WORKER_ENABLED",
+    "TM_TRADING_RESEARCH_METHODS",
     "TM_TRADING_RESEARCH_OWNER_SCOPE",
     "TM_TRADING_RESEARCH_SYMBOLS",
     "TM_TRADING_RESEARCH_TIMEFRAME",
@@ -70,6 +75,8 @@ const RESEARCH_WORKER_ENVIRONMENT: &[&str] = &[
 const NEWS_WORKER_ENVIRONMENT: &[&str] = &[
     "TM_DATABASE_URI",
     "TM_DATABASE_NAME",
+    "TM_STORAGE_ALLOW_INSECURE_DEV",
+    "TM_TRADING_NEWS_WORKER_ENABLED",
     "TM_TRADING_NEWS_MAX_ITEMS_PER_SOURCE",
     "TM_TRADING_NEWS_MAX_SOURCES_PER_CYCLE",
     "TM_TRADING_NEWS_CYCLE_MS",
@@ -81,10 +88,24 @@ const NEWS_WORKER_ENVIRONMENT: &[&str] = &[
 const AI_WORKER_ENVIRONMENT: &[&str] = &[
     "TM_DATABASE_URI",
     "TM_DATABASE_NAME",
+    "TM_STORAGE_ALLOW_INSECURE_DEV",
     "TM_TRADING_AI_WORKER_ENABLED",
     "TM_TRADING_AI_CLAIM_MS",
     "TM_TRADING_AI_HEARTBEAT_MS",
     "TM_TRADING_AI_LEASE_MS",
+];
+/// Environment handed to the notification worker only.
+const NOTIFICATION_WORKER_ENVIRONMENT: &[&str] = &[
+    "TM_DATABASE_URI",
+    "TM_DATABASE_NAME",
+    "TM_STORAGE_ALLOW_INSECURE_DEV",
+    "TM_TRADING_NOTIFICATION_WORKER_ENABLED",
+    "TM_TRADING_TELEGRAM_BOT_TOKEN",
+    "TM_TRADING_TELEGRAM_CHAT_ID",
+    "TM_TRADING_TELEGRAM_BASE_URL",
+    "TM_TRADING_NOTIFICATION_CLAIM_MS",
+    "TM_TRADING_NOTIFICATION_HEARTBEAT_MS",
+    "TM_TRADING_NOTIFICATION_LEASE_MS",
 ];
 /// Namespace of the provider credential variables the AI worker may read.
 ///
@@ -858,6 +879,9 @@ impl Agent {
             worker_specific_environment(command.command_mut(), AI_WORKER_ENVIRONMENT);
             ai_provider_secret_environment(command.command_mut());
         }
+        if definition.id == NOTIFICATION_WORKER_ID {
+            worker_specific_environment(command.command_mut(), NOTIFICATION_WORKER_ENVIRONMENT);
+        }
         if let Some(crash_after_ms) = self.crash_after_ms {
             command.command_mut().env(
                 "TM_SAMPLE_WORKER_CRASH_AFTER_MS",
@@ -951,7 +975,20 @@ impl ManagedWorker {
                 result = tokio::time::timeout(Duration::from_millis(25), self.events.recv()) => {
                     match result {
                         Ok(Some(event)) => self.handle_event(event)?,
-                        Ok(None) => return Err(AgentError::ExitedBeforeReady(None)),
+                        Ok(None) => {
+                            let exit_status =
+                                tokio::time::timeout(Duration::from_millis(500), self.child.wait()).await;
+                            let exit_code = match exit_status {
+                                Ok(Ok(status)) => status.code(),
+                                _ => self
+                                    .child
+                                    .try_wait()
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|status| status.code()),
+                            };
+                            return Err(AgentError::ExitedBeforeReady(exit_code));
+                        }
                         Err(_) => {}
                     }
                 }
@@ -1195,6 +1232,11 @@ fn allowlisted_environment(command: &mut Command) {
         "APPDATA",
         "LOCALAPPDATA",
         "TM_LOG_FORMAT",
+        "TM_DATABASE_URI",
+        "TM_DATABASE_NAME",
+        "TM_STORAGE_ALLOW_INSECURE_DEV",
+        "RUST_LOG",
+        "RUST_BACKTRACE",
         "TM_SAMPLE_WORKER_HEARTBEAT_MS",
         "TM_SAMPLE_WORKER_CYCLE_MS",
     ];

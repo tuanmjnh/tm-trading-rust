@@ -72,8 +72,14 @@ impl MarketWorkerConfig {
     /// Returns an error when a value is present but unusable. Missing values fall back to
     /// the documented defaults, and a duration outside its allowed range is clamped.
     pub fn from_env() -> Result<Self, MarketWorkerConfigError> {
-        let symbols =
+        let allow_insecure_dev = std::env::var("TM_STORAGE_ALLOW_INSECURE_DEV")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+        let mut symbols =
             parse_symbols(&std::env::var("TM_TRADING_MARKET_SYMBOLS").unwrap_or_default())?;
+        if symbols.is_empty() && allow_insecure_dev {
+            symbols = vec!["BTCUSDT".to_owned(), "ETHUSDT".to_owned()];
+        }
         let timeframe = std::env::var("TM_TRADING_MARKET_TIMEFRAME")
             .ok()
             .map(|value| value.trim().to_ascii_lowercase())
@@ -103,7 +109,7 @@ impl MarketWorkerConfig {
             .ok()
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty());
-        let source_of_truth = parse_bool("TM_TRADING_MARKET_SOURCE_OF_TRUTH", false)?;
+        let source_of_truth = parse_bool("TM_TRADING_MARKET_SOURCE_OF_TRUTH", allow_insecure_dev)?;
 
         Ok(Self {
             symbols,

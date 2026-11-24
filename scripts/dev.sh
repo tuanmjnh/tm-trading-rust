@@ -16,6 +16,20 @@ export TM_TRADING_AGENT_TOKEN="local-dev-agent-token"
 export TM_TRADING_LOG_FORMAT="compact"
 export RUST_LOG="info,tm_trading_desktop=info"
 
+# Shared local MongoDB database environment
+export TM_DATABASE_URI="mongodb://127.0.0.1:27017"
+export TM_DATABASE_NAME="tm-trading-rust"
+export TM_STORAGE_ALLOW_INSECURE_DEV="1"
+export TM_TRADING_STORE="mongodb"
+
+# Worker write permissions and default telemetry targets
+export TM_TRADING_MARKET_SOURCE_OF_TRUTH="1"
+export TM_TRADING_MARKET_SYMBOLS="BTCUSDT,ETHUSDT,SOLUSDT"
+export TM_TRADING_RESEARCH_OWNER_SCOPE="default"
+export TM_TRADING_RESEARCH_SOURCE_OF_TRUTH="1"
+export TM_TRADING_RESEARCH_SYMBOLS="BTCUSDT,ETHUSDT,SOLUSDT"
+export TM_TRADING_NEWS_SOURCE_OF_TRUTH="1"
+
 echo "=========================================================="
 echo "  TM TRADING - DESKTOP & API DEV ENVIRONMENT RUNNER (UNIX)"
 echo "=========================================================="

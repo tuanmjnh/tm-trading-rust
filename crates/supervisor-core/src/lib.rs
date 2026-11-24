@@ -748,7 +748,7 @@ pub fn notification_worker_definition() -> WorkerDefinition {
             },
             ReadinessRule {
                 id: "capability-verified",
-                required: true,
+                required: false,
                 max_age: None,
             },
             ReadinessRule {

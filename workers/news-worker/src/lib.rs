@@ -99,7 +99,10 @@ impl NewsWorkerConfig {
             MIN_CYCLE_TIMEOUT,
             MAX_CYCLE_TIMEOUT,
         )?;
-        let source_of_truth = parse_bool("TM_TRADING_NEWS_SOURCE_OF_TRUTH", false)?;
+        let allow_insecure_dev = std::env::var("TM_STORAGE_ALLOW_INSECURE_DEV")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+        let source_of_truth = parse_bool("TM_TRADING_NEWS_SOURCE_OF_TRUTH", allow_insecure_dev)?;
         Ok(Self {
             max_items_per_source,
             max_sources_per_cycle,

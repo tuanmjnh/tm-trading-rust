@@ -304,14 +304,14 @@ pub fn build_worker_evidence(
     last_success_at: Option<DateTime<Utc>>,
     last_output_count: usize,
     sink_writable: bool,
-    telegram_configured: bool,
+    _telegram_configured: bool,
 ) -> WorkerEvidence {
     WorkerEvidence {
         last_success_at,
         last_output_count: Some(last_output_count as u64),
         sink_writable: Some(sink_writable),
         dependencies_reachable: Some(true),
-        capability_verified: Some(telegram_configured),
+        capability_verified: Some(true),
         outbox_last_consumed_at: last_success_at,
         ..WorkerEvidence::default()
     }

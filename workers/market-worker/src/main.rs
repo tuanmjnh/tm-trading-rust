@@ -53,9 +53,8 @@ async fn run() -> Result<(), RunError> {
         .map_err(|error| RunError::Configuration(error.to_string()))?;
     validate_startup(&config)?;
 
-    let uri = std::env::var("TM_DATABASE_URI").map_err(|_| {
-        RunError::Configuration("TM_DATABASE_URI must be set for the market worker".to_owned())
-    })?;
+    let uri =
+        std::env::var("TM_DATABASE_URI").unwrap_or_else(|_| "mongodb://127.0.0.1:27017".to_owned());
     let database_name =
         std::env::var("TM_DATABASE_NAME").unwrap_or_else(|_| DEFAULT_DATABASE_NAME.to_owned());
     let pid = std::process::id();
@@ -67,7 +66,20 @@ async fn run() -> Result<(), RunError> {
         .map_err(classify_repository_error)?;
     let candles = MongoCandleRepository::new(connection.database()).await?;
     let providers = MongoProviderInstanceRepository::new(connection.database()).await?;
-    let instances = providers.list().await?;
+    let mut instances = providers.list().await?;
+    if instances.is_empty()
+        && let Ok(instance) = providers
+            .create(
+                "binance",
+                "Binance Public Market",
+                "https://api.binance.com",
+                5000,
+                Utc::now(),
+            )
+            .await
+    {
+        instances.push(instance);
+    }
     let candidates = provider_candidates(&instances, config.provider_definition_id.as_deref())
         .map_err(|error| RunError::Configuration(error.to_string()))?;
     if candidates.is_empty() {

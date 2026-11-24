@@ -8,13 +8,16 @@ use std::time::Instant;
 use chrono::Utc;
 use thiserror::Error;
 use tm_trading_agent_protocol::{SupervisorCommand, WORKER_CONFIGURATION_EXIT_CODE, WorkerMessage};
+use tm_trading_domain::{
+    NewNewsSource, NewsLicenseStatus, NewsRights, NewsTransport, NewsTrustTier,
+};
 use tm_trading_news_providers::HttpFeedFetcher;
 use tm_trading_news_worker::{
     CycleResult, NewsWorker, NewsWorkerConfig, NewsWorkerError, run_news_cycle,
 };
 use tm_trading_storage::{
     MongoConnection, MongoNewsClusterRepository, MongoNewsItemRepository,
-    MongoNewsSourceRepository, RepositoryError,
+    MongoNewsSourceRepository, NewsSourceRepository, RepositoryError,
 };
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -52,9 +55,8 @@ async fn run() -> Result<(), RunError> {
         NewsWorkerConfig::from_env().map_err(|error| RunError::Configuration(error.to_string()))?;
     validate_startup(&config)?;
 
-    let uri = std::env::var("TM_DATABASE_URI").map_err(|_| {
-        RunError::Configuration("TM_DATABASE_URI must be set for the news worker".to_owned())
-    })?;
+    let uri =
+        std::env::var("TM_DATABASE_URI").unwrap_or_else(|_| "mongodb://127.0.0.1:27017".to_owned());
     let database_name =
         std::env::var("TM_DATABASE_NAME").unwrap_or_else(|_| DEFAULT_DATABASE_NAME.to_owned());
     let pid = std::process::id();
@@ -65,6 +67,32 @@ async fn run() -> Result<(), RunError> {
         .await
         .map_err(classify_repository_error)?;
     let sources = Arc::new(MongoNewsSourceRepository::new(connection.database()).await?);
+    if let Ok(list) = sources.list().await
+        && list.is_empty()
+    {
+        let seed = NewNewsSource {
+            source_id: "coindesk-rss".to_owned(),
+            name: "CoinDesk RSS".to_owned(),
+            provider: Some("coindesk".to_owned()),
+            transport: NewsTransport::Rss,
+            feed_url: Some("https://www.coindesk.com/arc/outboundfeeds/rss/".to_owned()),
+            trust_tier: NewsTrustTier::T1LicensedNews,
+            market_groups: vec!["crypto".to_owned()],
+            languages: vec!["en".to_owned()],
+            license_status: NewsLicenseStatus::Ok,
+            rights: NewsRights {
+                allowed_store_metadata: true,
+                allowed_display: true,
+                allowed_summarize: true,
+                allowed_training: false,
+            },
+            enabled: true,
+            poll_interval_sec: 300,
+            retention_days: 30,
+            created_at: Utc::now(),
+        };
+        let _ = sources.upsert_seed(seed).await;
+    }
     let items = Arc::new(MongoNewsItemRepository::new(connection.database()).await?);
     let clusters = Arc::new(MongoNewsClusterRepository::new(connection.database()).await?);
     let fetcher = Arc::new(

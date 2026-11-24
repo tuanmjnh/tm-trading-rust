@@ -77,18 +77,19 @@ The worker is opt-in. It is only registered when `TM_TRADING_MARKET_WORKER_ENABL
 
 | Variable | Meaning |
 |---|---|
-| `TM_DATABASE_URI` | TLS MongoDB URI; only the market worker receives it |
+| `TM_DATABASE_URI` | TLS MongoDB URI (or plain `mongodb://` when `TM_STORAGE_ALLOW_INSECURE_DEV=1`); only the market worker receives it |
 | `TM_DATABASE_NAME` | Database name, default `tm-trading-rust` |
-| `TM_TRADING_MARKET_SYMBOLS` | Comma-separated symbols, required |
+| `TM_STORAGE_ALLOW_INSECURE_DEV` | `1`/`true` permits non-TLS local development connections and enables dev auto-seeding |
+| `TM_TRADING_MARKET_SYMBOLS` | Comma-separated symbols, required (defaults to `BTCUSDT,ETHUSDT` when insecure dev mode is active) |
 | `TM_TRADING_MARKET_TIMEFRAME` | Candle timeframe, default `1m` |
 | `TM_TRADING_MARKET_BARS` | Bars requested per cycle, default `100` |
 | `TM_TRADING_MARKET_CYCLE_MS` | Delay between completed cycles |
 | `TM_TRADING_MARKET_CYCLE_TIMEOUT_MS` | Hard deadline for one cycle |
 | `TM_TRADING_MARKET_HEARTBEAT_MS` | Heartbeat interval |
 | `TM_TRADING_MARKET_PROVIDER_ID` | Provider definition to use; required when the enabled set is ambiguous |
-| `TM_TRADING_MARKET_SOURCE_OF_TRUTH` | `1`/`true` allows candle writes; defaults off |
+| `TM_TRADING_MARKET_SOURCE_OF_TRUTH` | `1`/`true` allows candle writes; defaults off (defaults on in local dev mode) |
 
-`TM_TRADING_MARKET_SOURCE_OF_TRUTH` is deliberately off by default. With it disabled the worker exits with code `78` before probing a provider or writing a candle, so a misconfigured deployment cannot become a second writer.
+`TM_TRADING_MARKET_SOURCE_OF_TRUTH` is deliberately off by default. With it disabled the worker exits with code `78` before probing a provider or writing a candle, so a misconfigured deployment cannot become a second writer. In local dev mode with `TM_STORAGE_ALLOW_INSECURE_DEV=1`, it defaults to enabled and auto-seeds a default Binance market provider if empty.
 
 ### Readiness evidence
 
@@ -136,19 +137,20 @@ The worker is opt-in. It is registered only when `TM_TRADING_RESEARCH_WORKER_ENA
 
 | Variable | Meaning |
 |---|---|
-| `TM_DATABASE_URI` | TLS MongoDB URI; only the market and research workers receive it |
+| `TM_DATABASE_URI` | TLS MongoDB URI (or plain `mongodb://` when `TM_STORAGE_ALLOW_INSECURE_DEV=1`); only the market and research workers receive it |
 | `TM_DATABASE_NAME` | Database name, default `tm-trading-rust` |
-| `TM_TRADING_RESEARCH_OWNER_SCOPE` | Required owner scope for every event |
-| `TM_TRADING_RESEARCH_SYMBOLS` | Comma-separated symbols, required |
+| `TM_STORAGE_ALLOW_INSECURE_DEV` | `1`/`true` permits non-TLS local development connections and enables dev defaults |
+| `TM_TRADING_RESEARCH_OWNER_SCOPE` | Required owner scope for every event (defaults to `default` in local dev mode) |
+| `TM_TRADING_RESEARCH_SYMBOLS` | Comma-separated symbols, required (defaults to `BTCUSDT,ETHUSDT` in local dev mode) |
 | `TM_TRADING_RESEARCH_TIMEFRAME` | Candle timeframe, default `1m` |
 | `TM_TRADING_RESEARCH_BARS` | Closed candles read per symbol, default `120` |
 | `TM_TRADING_RESEARCH_CYCLE_MS` | Delay between completed scans |
 | `TM_TRADING_RESEARCH_CYCLE_TIMEOUT_MS` | Hard deadline for one scan |
 | `TM_TRADING_RESEARCH_HEARTBEAT_MS` | Heartbeat interval |
 | `TM_TRADING_RESEARCH_METHODS` | Comma-separated list of methods to execute: `vsa`, `price-action`, `trend`, `wonderwhales`, `sweep` (defaults to `vsa`) |
-| `TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` | `1`/`true` allows research event writes; defaults off |
+| `TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` | `1`/`true` allows research event writes; defaults off (defaults on in local dev mode) |
 
-`TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` is deliberately off by default. With it disabled the worker exits with code `78` before opening MongoDB or writing an event, so a cutover installation cannot become a second writer.
+`TM_TRADING_RESEARCH_SOURCE_OF_TRUTH` is deliberately off by default. With it disabled the worker exits with code `78` before opening MongoDB or writing an event, so a cutover installation cannot become a second writer. In local dev mode with `TM_STORAGE_ALLOW_INSECURE_DEV=1`, owner scope, symbols, and source of truth default to safe local values.
 
 ### Readiness evidence
 
@@ -191,16 +193,17 @@ The worker is opt-in. It is registered only when `TM_TRADING_NEWS_WORKER_ENABLED
 
 | Variable | Meaning |
 |---|---|
-| `TM_DATABASE_URI` | TLS MongoDB URI; only the domain workers receive it |
+| `TM_DATABASE_URI` | TLS MongoDB URI (or plain `mongodb://` when `TM_STORAGE_ALLOW_INSECURE_DEV=1`); only the domain workers receive it |
 | `TM_DATABASE_NAME` | Database name, default `tm-trading-rust` |
+| `TM_STORAGE_ALLOW_INSECURE_DEV` | `1`/`true` permits non-TLS local development connections and enables dev auto-seeding |
 | `TM_TRADING_NEWS_MAX_ITEMS_PER_SOURCE` | Items kept per source and cycle, default `40`, maximum `200` |
 | `TM_TRADING_NEWS_MAX_SOURCES_PER_CYCLE` | Sources polled per cycle, default `25`, maximum `100` |
 | `TM_TRADING_NEWS_CYCLE_MS` | Delay between completed cycles, default `60000` |
 | `TM_TRADING_NEWS_CYCLE_TIMEOUT_MS` | Hard deadline for one cycle, default `60000` |
 | `TM_TRADING_NEWS_HEARTBEAT_MS` | Heartbeat interval, default `5000` |
-| `TM_TRADING_NEWS_SOURCE_OF_TRUTH` | `1`/`true` allows news writes; defaults off |
+| `TM_TRADING_NEWS_SOURCE_OF_TRUTH` | `1`/`true` allows news writes; defaults off (defaults on in local dev mode) |
 
-`TM_TRADING_NEWS_SOURCE_OF_TRUTH` is deliberately off by default. With it disabled the worker exits with code `78` before opening MongoDB or polling a source, so a cutover installation cannot become a second writer.
+`TM_TRADING_NEWS_SOURCE_OF_TRUTH` is deliberately off by default. With it disabled the worker exits with code `78` before opening MongoDB or polling a source, so a cutover installation cannot become a second writer. In local dev mode with `TM_STORAGE_ALLOW_INSECURE_DEV=1`, it defaults to enabled and auto-seeds a default `coindesk-rss` source if the registry is empty.
 
 ### Readiness evidence
 
@@ -244,8 +247,9 @@ The worker is opt-in. It is registered only when `TM_TRADING_AI_WORKER_ENABLED=1
 
 | Variable | Meaning |
 |---|---|
-| `TM_DATABASE_URI` | TLS MongoDB URI; only the domain workers receive it |
+| `TM_DATABASE_URI` | TLS MongoDB URI (or plain `mongodb://` when `TM_STORAGE_ALLOW_INSECURE_DEV=1`); only the domain workers receive it |
 | `TM_DATABASE_NAME` | Database name, default `tm-trading-rust` |
+| `TM_STORAGE_ALLOW_INSECURE_DEV` | `1`/`true` permits non-TLS local development connections and standalone MongoDB without replica sets |
 | `TM_TRADING_AI_WORKER_ENABLED` | `1`/`true` allows the worker to publish briefings; defaults off |
 | `TM_TRADING_AI_CLAIM_MS` | Delay between two claim attempts, default `5000` |
 | `TM_TRADING_AI_HEARTBEAT_MS` | Heartbeat interval, default `5000` |
@@ -294,9 +298,10 @@ The worker is opt-in and supervised by the Host Agent. It runs continuously to d
 
 | Variable | Meaning |
 |---|---|
-| `TM_DATABASE_URI` | TLS MongoDB connection URI |
+| `TM_DATABASE_URI` | TLS MongoDB connection URI (or plain `mongodb://` when `TM_STORAGE_ALLOW_INSECURE_DEV=1`) |
 | `TM_DATABASE_NAME` | Database name, default `tm-trading-rust` |
-| `TM_TELEGRAM_BOT_TOKEN` | Telegram Bot token for sending messages; strictly secret-redacted in all logs and diagnostics |
+| `TM_STORAGE_ALLOW_INSECURE_DEV` | `1`/`true` permits non-TLS local development connections |
+| `TM_TELEGRAM_BOT_TOKEN` | Telegram Bot token for sending messages; strictly secret-redacted in all logs and diagnostics (optional in dev mode) |
 | `TM_TRADING_NOTIFICATIONS_POLL_MS` | Delay between outbox queue polling passes, default `2000` |
 | `TM_TRADING_NOTIFICATIONS_LEASE_MS` | Duration of the distributed lease claimed on an outbox item, default `30000` |
 | `TM_TRADING_NOTIFICATIONS_MAX_ATTEMPTS` | Maximum retry attempts before marking an item dead-letter, default `5` |

@@ -50,9 +50,8 @@ async fn run() -> Result<(), RunError> {
         .map_err(|error| RunError::Configuration(error.to_string()))?;
     validate_startup(&config)?;
 
-    let uri = std::env::var("TM_DATABASE_URI").map_err(|_| {
-        RunError::Configuration("TM_DATABASE_URI must be set for the research worker".to_owned())
-    })?;
+    let uri =
+        std::env::var("TM_DATABASE_URI").unwrap_or_else(|_| "mongodb://127.0.0.1:27017".to_owned());
     let database_name =
         std::env::var("TM_DATABASE_NAME").unwrap_or_else(|_| DEFAULT_DATABASE_NAME.to_owned());
     let pid = std::process::id();

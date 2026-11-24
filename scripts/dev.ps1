@@ -40,6 +40,26 @@ $env:TM_TRADING_AGENT_TOKEN = "local-dev-agent-token"
 $env:TM_TRADING_LOG_FORMAT = "compact"
 $env:RUST_LOG = "info,tm_trading_desktop=info"
 
+# Shared local MongoDB database environment
+$env:TM_DATABASE_URI = "mongodb://127.0.0.1:27017"
+$env:TM_DATABASE_NAME = "tm-trading-rust"
+$env:TM_STORAGE_ALLOW_INSECURE_DEV = "1"
+$env:TM_TRADING_STORE = "mongodb"
+
+# Worker write permissions and default telemetry targets
+$env:TM_TRADING_MARKET_SOURCE_OF_TRUTH = "1"
+$env:TM_TRADING_MARKET_SYMBOLS = "BTCUSDT,ETHUSDT,SOLUSDT"
+$env:TM_TRADING_RESEARCH_OWNER_SCOPE = "default"
+$env:TM_TRADING_RESEARCH_SOURCE_OF_TRUTH = "1"
+$env:TM_TRADING_RESEARCH_SYMBOLS = "BTCUSDT,ETHUSDT,SOLUSDT"
+$env:TM_TRADING_RESEARCH_METHODS = "vsa,price-action,trend,wonderwhales,sweep"
+$env:TM_TRADING_NEWS_SOURCE_OF_TRUTH = "1"
+$env:TM_TRADING_MARKET_WORKER_ENABLED = "1"
+$env:TM_TRADING_RESEARCH_WORKER_ENABLED = "1"
+$env:TM_TRADING_NEWS_WORKER_ENABLED = "1"
+$env:TM_TRADING_AI_WORKER_ENABLED = "1"
+$env:TM_TRADING_NOTIFICATION_WORKER_ENABLED = "1"
+
 # 1. Check & Start Management API if requested
 $apiProcess = $null
 $agentProcess = $null

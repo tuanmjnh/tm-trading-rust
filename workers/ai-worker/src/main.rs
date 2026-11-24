@@ -73,9 +73,8 @@ enum RunError {
 
 async fn run() -> Result<(), RunError> {
     let startup_deadline = tokio::time::Instant::now() + WORKER_STARTUP_BUDGET;
-    let uri = std::env::var("TM_DATABASE_URI").map_err(|_| {
-        RunError::Configuration("TM_DATABASE_URI must be set for the AI worker".to_owned())
-    })?;
+    let uri =
+        std::env::var("TM_DATABASE_URI").unwrap_or_else(|_| "mongodb://127.0.0.1:27017".to_owned());
     let database_name =
         std::env::var("TM_DATABASE_NAME").unwrap_or_else(|_| DEFAULT_DATABASE_NAME.to_owned());
     if !enabled("TM_TRADING_AI_WORKER_ENABLED") {
@@ -395,7 +394,10 @@ fn classify_capability_probe_error(error: AiCapabilityProbeError) -> CapabilityP
 }
 
 fn ensure_transaction_support(supported: bool) -> Result<(), CapabilityProbeError> {
-    if supported {
+    let allow_standalone = std::env::var("TM_STORAGE_ALLOW_INSECURE_DEV")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    if supported || allow_standalone {
         Ok(())
     } else {
         Err(CapabilityProbeError::Dependency(

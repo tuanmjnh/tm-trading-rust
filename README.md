@@ -98,6 +98,9 @@ dx serve --platform desktop
 - `TM_TRADING_API_URL`: Backend API URL (default: `http://127.0.0.1:8787`).
 - `TM_TRADING_LOCAL_API_TOKEN`: Local operator bearer token for authenticated commands.
 - `TM_TRADING_LOCALE`: UI language (`en` for English, `vi` for Vietnamese, default: `en`).
+- `TM_DATABASE_URI`: MongoDB connection URI (default in dev scripts: `mongodb://127.0.0.1:27017`).
+- `TM_DATABASE_NAME`: Database name (default: `tm-trading-rust`).
+- `TM_STORAGE_ALLOW_INSECURE_DEV`: Set to `1` or `true` in local development to permit non-TLS MongoDB connections and activate automatic dev fallback configurations.
 - `TM_TRADING_DESKTOP_DATA_DIR`: Custom data cache directory for WebView2 profile storage.
 - `RUST_LOG`: Log level filter (e.g. `info`, `debug`, `trace`).
 

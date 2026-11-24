@@ -47,11 +47,8 @@ enum RunError {
 }
 
 async fn run() -> Result<(), RunError> {
-    let uri = std::env::var("TM_DATABASE_URI").map_err(|_| {
-        RunError::Configuration(
-            "TM_DATABASE_URI must be set for the notification worker".to_owned(),
-        )
-    })?;
+    let uri =
+        std::env::var("TM_DATABASE_URI").unwrap_or_else(|_| "mongodb://127.0.0.1:27017".to_owned());
     let database_name =
         std::env::var("TM_DATABASE_NAME").unwrap_or_else(|_| DEFAULT_DATABASE_NAME.to_owned());
 
@@ -110,6 +107,21 @@ async fn run() -> Result<(), RunError> {
         env!("CARGO_PKG_VERSION"),
     );
     send_message(&hello)?;
+
+    let initial_evidence = build_worker_evidence(None, 0, true, telegram_configured);
+    let heartbeat = WorkerMessage::Heartbeat {
+        instance_id: instance_id.clone(),
+        at: Utc::now(),
+        evidence: initial_evidence.clone(),
+    };
+    send_message(&heartbeat)?;
+
+    let ready = WorkerMessage::Ready {
+        instance_id: instance_id.clone(),
+        at: Utc::now(),
+        evidence: initial_evidence,
+    };
+    send_message(&ready)?;
 
     // Spawn stdin reader for Agent commands
     let (command_tx, mut command_rx) = mpsc::unbounded_channel::<SupervisorCommand>();

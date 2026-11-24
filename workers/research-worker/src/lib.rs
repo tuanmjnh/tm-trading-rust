@@ -84,13 +84,22 @@ impl ResearchWorkerConfig {
     /// Returns an error when a required value is missing or a supplied value is invalid.
     /// Write authority remains off unless it is explicitly enabled.
     pub fn from_env() -> Result<Self, ResearchWorkerConfigError> {
+        let allow_insecure_dev = std::env::var("TM_STORAGE_ALLOW_INSECURE_DEV")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
         let owner_scope = std::env::var("TM_TRADING_RESEARCH_OWNER_SCOPE").unwrap_or_default();
-        let owner_scope = owner_scope.trim().to_owned();
+        let mut owner_scope = owner_scope.trim().to_owned();
+        if owner_scope.is_empty() && allow_insecure_dev {
+            owner_scope = "default".to_owned();
+        }
         if owner_scope.is_empty() {
             return Err(ResearchWorkerConfigError::MissingOwnerScope);
         }
-        let symbols =
+        let mut symbols =
             parse_symbols(&std::env::var("TM_TRADING_RESEARCH_SYMBOLS").unwrap_or_default())?;
+        if symbols.is_empty() && allow_insecure_dev {
+            symbols = vec!["BTCUSDT".to_owned(), "ETHUSDT".to_owned()];
+        }
         if symbols.is_empty() {
             return Err(ResearchWorkerConfigError::NoSymbols);
         }
@@ -119,7 +128,8 @@ impl ResearchWorkerConfig {
             MIN_CYCLE_TIMEOUT,
             MAX_CYCLE_TIMEOUT,
         )?;
-        let source_of_truth = parse_bool("TM_TRADING_RESEARCH_SOURCE_OF_TRUTH", false)?;
+        let source_of_truth =
+            parse_bool("TM_TRADING_RESEARCH_SOURCE_OF_TRUTH", allow_insecure_dev)?;
         let methods =
             parse_methods(&std::env::var("TM_TRADING_RESEARCH_METHODS").unwrap_or_default());
 
