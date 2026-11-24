@@ -5434,6 +5434,7 @@ dependencies = [
  "tm-trading-supervisor-core",
  "tokio",
  "tracing",
+ "url",
  "uuid",
  "windows 0.62.2",
 ]

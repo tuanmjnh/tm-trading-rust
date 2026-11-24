@@ -137,9 +137,27 @@ impl TelegramClient {
         let base_url = Url::parse(base_str)
             .map_err(|e| TelegramError::InvalidBaseUrl(format!("{base_str}: {e}")))?;
 
+        let scheme = base_url.scheme();
+        let host = base_url.host_str().unwrap_or_default();
+        let is_loopback = host == "127.0.0.1"
+            || host.eq_ignore_ascii_case("localhost")
+            || host == "::1"
+            || host == "[::1]";
+
+        if scheme == "http" && !is_loopback {
+            return Err(TelegramError::InvalidBaseUrl(format!(
+                "remote Telegram base URL '{base_str}' must use HTTPS to protect bot credentials"
+            )));
+        } else if scheme != "http" && scheme != "https" {
+            return Err(TelegramError::InvalidBaseUrl(format!(
+                "unsupported scheme '{scheme}' in Telegram base URL"
+            )));
+        }
+
         let request_timeout = timeout.unwrap_or(DEFAULT_TELEGRAM_TIMEOUT);
         let http_client = Client::builder()
             .timeout(request_timeout)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| TelegramError::Http(e.to_string()))?;
 
@@ -167,11 +185,7 @@ impl TelegramClient {
             return Err(TelegramError::EmptyText);
         }
 
-        let bounded_text = if text.len() > MAX_TELEGRAM_TEXT_CHARS {
-            &text[..MAX_TELEGRAM_TEXT_CHARS]
-        } else {
-            text
-        };
+        let bounded_text = safe_truncate_chars(text, MAX_TELEGRAM_TEXT_CHARS);
 
         let secret = self.token.expose_secret();
         let endpoint = format!(
@@ -267,6 +281,17 @@ impl TelegramClient {
     }
 }
 
+/// Truncates a UTF-8 string at a valid Unicode character boundary up to `max_chars`.
+///
+/// Prevents panics when slicing multi-byte characters such as Vietnamese diacritics and emojis.
+#[must_use]
+pub fn safe_truncate_chars(text: &str, max_chars: usize) -> &str {
+    match text.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => &text[..byte_idx],
+        None => text,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +328,42 @@ mod tests {
             redacted,
             "Failed to request https://api.telegram.org/bot***REDACTED***/sendMessage: timeout"
         );
+    }
+
+    #[test]
+    fn safe_truncate_chars_handles_vietnamese_and_emojis() {
+        let vietnamese = "Hệ thống giao dịch TM Trading: Tín hiệu MUA BTCUSDT tại vùng giá $95,000! 🚀🔥📈";
+        // String has multi-byte Vietnamese chars and 4-byte emojis
+        assert_eq!(safe_truncate_chars(vietnamese, 10), "Hệ thống g");
+        assert_eq!(safe_truncate_chars(vietnamese, 1000), vietnamese);
+
+        // Multi-byte emoji boundary test
+        let emoji_str = "🚀📈🔥";
+        assert_eq!(safe_truncate_chars(emoji_str, 1), "🚀");
+        assert_eq!(safe_truncate_chars(emoji_str, 2), "🚀📈");
+        assert_eq!(safe_truncate_chars(emoji_str, 3), "🚀📈🔥");
+    }
+
+    #[test]
+    fn base_url_enforces_https_for_remote_hosts() {
+        let token = TelegramBotToken::new("123456:ABC-DEF").unwrap();
+
+        // Loopback is allowed with HTTP (e.g. mock test server)
+        assert!(TelegramClient::new(token.clone(), Some("http://127.0.0.1:9090"), None).is_ok());
+        assert!(TelegramClient::new(token.clone(), Some("http://localhost:9090"), None).is_ok());
+        assert!(TelegramClient::new(token.clone(), Some("http://[::1]:9090"), None).is_ok());
+
+        // Remote host with HTTPS is allowed
+        assert!(TelegramClient::new(token.clone(), Some("https://api.telegram.org"), None).is_ok());
+        assert!(TelegramClient::new(token.clone(), Some("https://custom-telegram.proxy.internal"), None).is_ok());
+
+        // Remote host with HTTP is rejected
+        let err = TelegramClient::new(token.clone(), Some("http://api.telegram.org"), None).unwrap_err();
+        assert!(matches!(err, TelegramError::InvalidBaseUrl(_)));
+        assert!(err.to_string().contains("must use HTTPS"));
+
+        // Unsupported scheme is rejected
+        let err_scheme = TelegramClient::new(token, Some("ftp://api.telegram.org"), None).unwrap_err();
+        assert!(matches!(err_scheme, TelegramError::InvalidBaseUrl(_)));
     }
 }

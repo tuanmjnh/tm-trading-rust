@@ -21,13 +21,15 @@ pub struct ManagementApiClient {
 
 impl ManagementApiClient {
     pub fn new(base_url: &str, token: &str, agent_id: &str) -> Result<Self, AgentError> {
+        let validated_url = validate_management_api_url(base_url)?;
         let http = Client::builder()
             .timeout(Duration::from_secs(15))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| AgentError::Api(format!("failed to build HTTP client: {error}")))?;
         Ok(Self {
             http,
-            base_url: base_url.trim_end_matches('/').to_owned(),
+            base_url: validated_url,
             token: token.to_owned(),
             agent_id: agent_id.to_owned(),
         })
@@ -139,5 +141,66 @@ impl ManagementApiClient {
             .json()
             .await
             .map_err(|error| AgentError::Api(format!("response from {path} is invalid: {error}")))
+    }
+}
+
+/// Enforces HTTPS for remote Management API connections while permitting plain HTTP on loopback addresses.
+fn validate_management_api_url(base_url: &str) -> Result<String, AgentError> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    let parsed = url::Url::parse(trimmed)
+        .map_err(|error| AgentError::Api(format!("invalid management API URL '{base_url}': {error}")))?;
+
+    let scheme = parsed.scheme();
+    let host = parsed.host_str().unwrap_or_default();
+    let is_loopback = host == "127.0.0.1"
+        || host.eq_ignore_ascii_case("localhost")
+        || host == "::1"
+        || host == "[::1]";
+
+    match scheme {
+        "http" if is_loopback => Ok(trimmed.to_owned()),
+        "http" => Err(AgentError::Api(format!(
+            "remote management API URL '{base_url}' must use HTTPS to protect bearer credentials"
+        ))),
+        "https" => Ok(trimmed.to_owned()),
+        other => Err(AgentError::Api(format!(
+            "unsupported URL scheme '{other}' in management API URL; expected http (loopback only) or https"
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loopback_http_is_permitted() {
+        assert!(validate_management_api_url("http://127.0.0.1:8787").is_ok());
+        assert!(validate_management_api_url("http://localhost:8787").is_ok());
+        assert!(validate_management_api_url("http://[::1]:8787").is_ok());
+    }
+
+    #[test]
+    fn remote_https_is_permitted() {
+        assert!(validate_management_api_url("https://api.tm-trading.internal:8787").is_ok());
+        assert!(validate_management_api_url("https://management.production.com").is_ok());
+    }
+
+    #[test]
+    fn remote_http_is_rejected() {
+        let err = validate_management_api_url("http://remote-server.com:8787").unwrap_err();
+        assert!(err.to_string().contains("must use HTTPS"));
+
+        let err_ip = validate_management_api_url("http://192.168.1.100:8787").unwrap_err();
+        assert!(err_ip.to_string().contains("must use HTTPS"));
+    }
+
+    #[test]
+    fn invalid_or_unsupported_scheme_is_rejected() {
+        let err = validate_management_api_url("ftp://127.0.0.1:8787").unwrap_err();
+        assert!(err.to_string().contains("unsupported URL scheme"));
+
+        let err_parse = validate_management_api_url("not a url").unwrap_err();
+        assert!(err_parse.to_string().contains("invalid management API URL"));
     }
 }

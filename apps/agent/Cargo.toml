@@ -14,6 +14,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+url.workspace = true
 tm-trading-agent-protocol.workspace = true
 tm-trading-config.workspace = true
 tm-trading-contracts.workspace = true
