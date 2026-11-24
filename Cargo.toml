@@ -37,9 +37,9 @@ chrono = { version = "=0.4.45", features = ["serde"] }
 chrono-tz = "=0.10.4"
 dioxus = { version = "=0.7.10", features = ["desktop"] }
 futures-util = "=0.3.34"
-mongodb = { version = "=3.10.1", default-features = false, features = ["compat-3-0-0", "dns-resolver", "rustls-tls-aws-lc"] }
+mongodb = { version = "=3.10.1", default-features = false, features = ["compat-3-0-0", "dns-resolver", "rustls-tls"] }
 process-wrap = { version = "=10.0.1", default-features = false, features = ["creation-flags", "job-object", "kill-on-drop", "process-group", "tokio1"] }
-reqwest = { version = "=0.13.5", default-features = false, features = ["json", "query", "rustls"] }
+reqwest = { version = "=0.13.5", default-features = false, features = ["json", "query", "native-tls"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 sha1 = "=0.10.7"
@@ -75,23 +75,12 @@ dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
 
-# Build profile optimizations to control disk usage, compile times, and MSVC compiler limits:
+# Build profile optimizations to control disk usage and compile times:
 # Disable debug symbols (debug = 0) for 3rd-party dependencies.
-# This prevents:
-# 1. Multi-gigabyte PDB debug symbol bloat in target/debug/deps.
-# 2. MSVC cl.exe error D8050 in aws-lc-sys caused by long command lines exceeding c1.dll's debug record buffer when -Z7 is passed.
-# Local workspace crates retain full debug information (debug = 2).
+# This prevents multi-gigabyte PDB debug symbol bloat in target/debug/deps while preserving full debug info for local workspace crates.
 [profile.dev.package."*"]
 debug = 0
 
-[profile.dev.package.aws-lc-sys]
-debug = 0
-opt-level = 2
-
 [profile.test.package."*"]
 debug = 0
-
-[profile.test.package.aws-lc-sys]
-debug = 0
-opt-level = 2
 
