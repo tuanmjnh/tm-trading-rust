@@ -93,7 +93,7 @@ TM_TRADING_API_URL=http://127.0.0.1:8787
 TM_TRADING_LOCAL_API_TOKEN=tm-local-dev-token
 
 # Agent bearer token for supervised worker lifecycle:
-TM_TRADING_AGENT_API_TOKEN=tm-local-agent-token
+TM_TRADING_AGENT_TOKEN=tm-local-agent-token
 
 # Desktop locale: 'en' for English, 'vi' for Tiếng Việt:
 TM_TRADING_LOCALE=vi
@@ -101,8 +101,19 @@ TM_TRADING_LOCALE=vi
 # Logging format ('compact' or 'json'):
 TM_LOG_FORMAT=compact
 
-# Redb database directory:
-TM_TRADING_DATA_DIR=data
+# Database configuration (MongoDB local or Atlas):
+TM_DATABASE_URI=mongodb://127.0.0.1:27017
+TM_DATABASE_NAME=tm-trading-rust
+TM_STORAGE_ALLOW_INSECURE_DEV=1
+TM_TRADING_STORE=mongodb
+
+# Enable worker fleet on host agent
+TM_TRADING_MARKET_WORKER_ENABLED=1
+TM_TRADING_RESEARCH_WORKER_ENABLED=1
+TM_TRADING_RESEARCH_METHODS=vsa,price-action,trend,wonderwhales,sweep
+TM_TRADING_NEWS_WORKER_ENABLED=1
+TM_TRADING_AI_WORKER_ENABLED=1
+TM_TRADING_NOTIFICATION_WORKER_ENABLED=1
 "@
 Set-Content -Path (Join-Path $stageDir ".env.example") -Value $envExample -Encoding UTF8
 
@@ -117,11 +128,13 @@ SYSTEM REQUIREMENTS:
   2. Microsoft Edge WebView2 Evergreen Runtime.
      If missing, download bootstrapper:
      https://go.microsoft.com/fwlink/p/?LinkId=2124703
+  3. MongoDB server (local at mongodb://127.0.0.1:27017 or remote URI).
 
 QUICK START:
-  1. Copy '.env.example' to '.env' and adjust tokens if desired.
-  2. Double click 'start-all-services.cmd' to launch Management API and Desktop.
-  3. Or double click 'start-desktop-only.cmd' to connect to an existing server.
+  1. Copy '.env.example' to '.env' and adjust tokens/database if desired.
+  2. Double click 'start-all-services.cmd' to launch Backend API, Host Agent, and Desktop UI.
+  3. Double click 'stop-all-services.cmd' to stop all running services cleanly.
+  4. Or double click 'start-desktop-only.cmd' to connect Desktop to an already running server.
 
 SECURITY NOTICE:
   - This application operates strictly read-only and information-first.
@@ -129,17 +142,15 @@ SECURITY NOTICE:
   - Management API binds strictly to loopback (127.0.0.1).
 
 TROUBLESHOOTING & SUPPORT:
-  - Diagnostics and support bundle exports are available directly inside
-    the Desktop Control Center -> 'System Diagnostics & Environment' panel.
+  - Logs are output to the console and diagnostics are available in:
+    Desktop Control Center -> 'System Diagnostics & Environment' panel.
 ========================================================================
 "@
 Set-Content -Path (Join-Path $stageDir "README.txt") -Value $readmeTxt -Encoding UTF8
 
-$startAllCmd = @"
+$loadEnvCmd = @"
 @echo off
-title TM Trading Desktop & Services
-setlocal
-
+rem Canonical environment loader for TM Trading
 cd /d "%~dp0"
 if exist ".env" (
     for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
@@ -149,13 +160,46 @@ if exist ".env" (
 
 if "%TM_TRADING_API_URL%"=="" set "TM_TRADING_API_URL=http://127.0.0.1:8787"
 if "%TM_TRADING_LOCAL_API_TOKEN%"=="" set "TM_TRADING_LOCAL_API_TOKEN=tm-local-dev-token"
+if "%TM_TRADING_AGENT_TOKEN%"=="" set "TM_TRADING_AGENT_TOKEN=tm-local-agent-token"
+if "%TM_TRADING_LOCALE%"=="" set "TM_TRADING_LOCALE=vi"
+if "%TM_TRADING_LOG_FORMAT%"=="" set "TM_TRADING_LOG_FORMAT=compact"
+if "%TM_DATABASE_URI%"=="" set "TM_DATABASE_URI=mongodb://127.0.0.1:27017"
+if "%TM_DATABASE_NAME%"=="" set "TM_DATABASE_NAME=tm-trading-rust"
+if "%TM_STORAGE_ALLOW_INSECURE_DEV%"=="" set "TM_STORAGE_ALLOW_INSECURE_DEV=1"
+if "%TM_TRADING_STORE%"=="" set "TM_TRADING_STORE=mongodb"
+if "%TM_TRADING_MARKET_WORKER_ENABLED%"=="" set "TM_TRADING_MARKET_WORKER_ENABLED=1"
+if "%TM_TRADING_RESEARCH_WORKER_ENABLED%"=="" set "TM_TRADING_RESEARCH_WORKER_ENABLED=1"
+if "%TM_TRADING_RESEARCH_METHODS%"=="" set "TM_TRADING_RESEARCH_METHODS=vsa,price-action,trend,wonderwhales,sweep"
+if "%TM_TRADING_NEWS_WORKER_ENABLED%"=="" set "TM_TRADING_NEWS_WORKER_ENABLED=1"
+if "%TM_TRADING_AI_WORKER_ENABLED%"=="" set "TM_TRADING_AI_WORKER_ENABLED=1"
+if "%TM_TRADING_NOTIFICATION_WORKER_ENABLED%"=="" set "TM_TRADING_NOTIFICATION_WORKER_ENABLED=1"
+"@
+Set-Content -Path (Join-Path $stageDir "load-env.cmd") -Value $loadEnvCmd -Encoding ASCII
 
-echo Starting Management API Server in background...
+$startAllCmd = @"
+@echo off
+title TM Trading Desktop & Services
+setlocal
+cd /d "%~dp0"
+call "%~dp0load-env.cmd"
+
+echo [1/3] Starting Management API Server in background...
 start "TM Trading Management API" /min "%~dp0bin\tm-trading-management-api.exe"
 
-timeout /t 2 /nobreak >nul
+echo [...] Waiting for Management API to become ready on 8787...
+powershell -NoProfile -Command "for (`$i=0; `$i -lt 30; `$i++) { Start-Sleep -Milliseconds 500; try { `$t = New-Object System.Net.Sockets.TcpClient; `$t.Connect('127.0.0.1', 8787); `$t.Close(); exit 0 } catch {} }; exit 1"
+if %ERRORLEVEL% equ 0 (
+    echo [OK] Management API is live and listening!
+) else (
+    echo [WARN] Management API did not respond within timeout, continuing launch...
+)
 
-echo Launching TM Trading Control Center...
+echo [2/3] Starting Host Agent with all workers...
+start "TM Trading Host Agent" /min "%~dp0bin\tm-trading-agent.exe" --api-url "%TM_TRADING_API_URL%" --start all
+
+timeout /t 1 /nobreak >nul
+
+echo [3/3] Launching TM Trading Control Center...
 start "" "%~dp0bin\tm-trading-desktop.exe"
 exit /b 0
 "@
@@ -166,10 +210,31 @@ $startDesktopCmd = @"
 title TM Trading Control Center
 setlocal
 cd /d "%~dp0"
+call "%~dp0load-env.cmd"
 start "" "%~dp0bin\tm-trading-desktop.exe"
 exit /b 0
 "@
 Set-Content -Path (Join-Path $stageDir "start-desktop-only.cmd") -Value $startDesktopCmd -Encoding ASCII
+
+$stopAllCmd = @"
+@echo off
+title Stopping TM Trading Services
+setlocal
+echo Stopping all TM Trading processes...
+taskkill /F /IM tm-trading-desktop.exe 2>nul
+taskkill /F /IM tm-trading-agent.exe 2>nul
+taskkill /F /IM tm-trading-management-api.exe 2>nul
+taskkill /F /IM tm-trading-market-worker.exe 2>nul
+taskkill /F /IM tm-trading-research-worker.exe 2>nul
+taskkill /F /IM tm-trading-news-worker.exe 2>nul
+taskkill /F /IM tm-trading-ai-worker.exe 2>nul
+taskkill /F /IM tm-trading-notification-worker.exe 2>nul
+taskkill /F /IM tm-trading-sample-worker.exe 2>nul
+echo All TM Trading services stopped.
+timeout /t 2 /nobreak >nul
+exit /b 0
+"@
+Set-Content -Path (Join-Path $stageDir "stop-all-services.cmd") -Value $stopAllCmd -Encoding ASCII
 
 # 5. Archive to ZIP and calculate SHA-256
 Write-Host "[4/5] Creating distribution archive ($zipName)..." -ForegroundColor Yellow
