@@ -66,6 +66,7 @@ if ([string]::IsNullOrWhiteSpace($env:TEMP) -or -not (Test-Path $env:TEMP)) {
 $env:TM_TRADING_LOCALE = $Locale
 $env:TM_TRADING_API_URL = $ApiUrl
 $env:TM_TRADING_LOCAL_API_TOKEN = $ApiToken
+$env:TM_TRADING_LOCAL_API_SUBJECT = "default"
 $env:TM_TRADING_AGENT_TOKEN = "local-dev-agent-token"
 $env:TM_TRADING_LOG_FORMAT = "compact"
 $env:RUST_LOG = "info,tm_trading_desktop=info"
