@@ -469,14 +469,28 @@ fn App() -> Element {
                 let is_bg_tick = tick == 1 || tick % 5 == 0;
 
                 // Market & Research & News & AI Briefings (2s cycle)
-                let (watchlists_res, overview_res, pulse_res) = tokio::join!(
-                    client.list_watchlists(),
-                    client.market_overview(&[], "1m", 60),
-                    client.market_pulse(&[], "1m", 60)
-                );
+                let watchlists_res = client.list_watchlists().await;
+                let fallback_symbols: Vec<String> = if watchlists_res
+                    .as_ref()
+                    .map(|list| list.is_empty())
+                    .unwrap_or(true)
+                {
+                    std::env::var("TM_TRADING_MARKET_SYMBOLS")
+                        .unwrap_or_else(|_| "BTCUSDT,ETHUSDT,SOLUSDT".to_owned())
+                        .split(',')
+                        .map(|s| s.trim().to_owned())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 if let Ok(list) = watchlists_res {
                     watchlists.set(list);
                 }
+                let (overview_res, pulse_res) = tokio::join!(
+                    client.market_overview(&fallback_symbols, "1m", 60),
+                    client.market_pulse(&fallback_symbols, "1m", 60)
+                );
                 match overview_res {
                     Ok(overview) => {
                         market_overview.set(Some(overview));

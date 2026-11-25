@@ -108,25 +108,14 @@ $requiredBins = @(
     "tm-trading-notification-worker.exe"
 )
 
-$allBinsPresent = $true
-foreach ($bin in $requiredBins) {
-    if (-not (Test-Path (Join-Path $RepoRoot "target\debug\$bin"))) {
-        $allBinsPresent = $false
-        break
-    }
+# Always ensure workspace binaries are up-to-date (incremental Cargo build is fast when unchanged)
+Write-Host "[...] Building workspace binaries (API, Agent, Desktop, Workers)..." -ForegroundColor Cyan
+& cargo build --workspace --bins
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Workspace build failed. Please resolve compiler errors above." -ForegroundColor Red
+    exit 1
 }
-
-# Pre-build workspace binaries if missing or after clean to prevent Cargo lock contention
-$needsPrebuild = $Clean -or (-not $allBinsPresent)
-if ($needsPrebuild) {
-    Write-Host "[...] Pre-building all workspace binaries (API, Agent, Desktop, Workers)..." -ForegroundColor Cyan
-    & cargo build --workspace --bins
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Workspace build failed. Please resolve compiler errors above." -ForegroundColor Red
-        exit 1
-    }
-    Write-Host "[OK] All workspace binaries built successfully." -ForegroundColor Green
-}
+Write-Host "[OK] All workspace binaries built successfully." -ForegroundColor Green
 
 # 1. Check & Start Management API if requested
 $apiProcess = $null
