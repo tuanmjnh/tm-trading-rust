@@ -84,3 +84,6 @@ debug = 0
 [profile.test.package."*"]
 debug = 0
 
+[profile.release]
+strip = "debuginfo"
+

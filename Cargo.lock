@@ -5560,6 +5560,7 @@ dependencies = [
  "tm-trading-domain",
  "tm-trading-market-providers",
  "tm-trading-observability",
+ "tm-trading-research-engine",
  "tm-trading-storage",
  "tm-trading-telegram-client",
  "tokio",

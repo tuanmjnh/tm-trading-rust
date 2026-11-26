@@ -106,7 +106,7 @@ Cargo build caches can accumulate gigabytes of debug symbols and intermediate ob
 # Or clean before dev run:
 .\scripts\dev.ps1 -Clean
 ```
-*Note: The project's root `Cargo.toml` is configured with `[profile.dev.package."*"] debug = 1` to prevent multi-gigabyte PDB debug symbol bloat from third-party dependencies while preserving full debuginfo for workspace crates.*
+*Note: The project's root `Cargo.toml` is configured with `[profile.dev.package."*"] debug = 0` to prevent multi-gigabyte PDB debug symbol bloat from third-party dependencies while preserving full debuginfo for workspace crates.*
 
 #### Environment Variables for Desktop Development:
 - `TM_TRADING_API_URL`: Backend API URL (default: `http://127.0.0.1:8787`).

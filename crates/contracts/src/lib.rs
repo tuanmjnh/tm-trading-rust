@@ -6,6 +6,7 @@ mod ai_task;
 mod backup;
 mod dashboard;
 mod error;
+mod intelligence;
 mod market;
 mod news;
 mod notification;
@@ -38,6 +39,11 @@ pub use dashboard::{
     ResearchSummaryDto, ServicesSummaryDto,
 };
 pub use error::{ApiErrorBody, ApiErrorCode, ApiErrorResponse};
+pub use intelligence::{
+    AlertRuleEvaluationDto, ConfluenceScoreDto, CrossScanRowDto, MacroSeriesDto,
+    MarketIntelligenceDto, MarketRegimeDto, PlatformMaintenanceDto, ReconcileStatusDto,
+    ScannerMoverDto,
+};
 pub use market::{
     FundingRateDto, LiquidationZoneDto, MarketFundingDto, MarketLiquidationDto, MarketMoverDto,
     MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto, TradingViewAlertPayload,

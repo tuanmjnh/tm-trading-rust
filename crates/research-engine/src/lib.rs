@@ -5,6 +5,7 @@
 //! engine's golden fixtures.
 
 pub mod indicators;
+pub mod intelligence;
 pub mod methods;
 pub mod ta;
 

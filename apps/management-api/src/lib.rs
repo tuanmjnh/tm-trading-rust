@@ -102,6 +102,10 @@ pub fn router(state: AppState) -> Router {
             get(market::market_liquidation),
         )
         .route(
+            "/api/v1/market/intelligence",
+            get(market::market_intelligence),
+        )
+        .route(
             "/api/v1/webhooks/tradingview",
             post(webhook::handle_tradingview_webhook),
         )

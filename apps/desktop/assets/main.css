@@ -1660,6 +1660,28 @@ td.numeric {
   color: var(--text-muted);
 }
 
+.titlebar-fleet {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+
+.titlebar-fleet.ok {
+  color: #7ee787;
+  background: rgba(63, 185, 80, 0.12);
+  border-color: rgba(63, 185, 80, 0.3);
+}
+
+.titlebar-fleet.warn {
+  color: #e3b341;
+  background: rgba(210, 153, 34, 0.12);
+  border-color: rgba(210, 153, 34, 0.3);
+}
+
 .titlebar-controls {
   display: flex;
   align-items: center;
@@ -1706,10 +1728,10 @@ td.numeric {
   color: #ffffff;
 }
 
-/* 6-Column Bento KPI Strip */
+/* 4-Column Final-State KPI Strip */
 .kpi-bento-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   padding: 14px 20px 0;
   max-width: 1680px;
@@ -1717,13 +1739,7 @@ td.numeric {
   margin: 0 auto;
 }
 
-@media (max-width: 1200px) {
-  .kpi-bento-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 720px) {
+@media (max-width: 960px) {
   .kpi-bento-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1862,6 +1878,117 @@ td.numeric {
 .button.compact {
   padding: 4px 10px;
   font-size: 11px;
+}
+
+.bento-row-latest {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+
+@media (max-width: 1020px) {
+  .bento-row-latest {
+    grid-template-columns: 1fr;
+  }
+}
+
+.latest-card-body {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.latest-card-body.interactive {
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.latest-card-body.interactive:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.latest-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.latest-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.latest-card-meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+
+.latest-card-empty {
+  padding: 18px 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.service-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.service-chip {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.service-chip:hover {
+  border-color: var(--accent);
+  background: rgba(53, 194, 177, 0.08);
+}
+
+.service-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.funding-liq-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.funding-liq-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
 }
 
 

@@ -1185,6 +1185,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /api/v1/market/intelligence:
+    get:
+      tags:
+      - Market
+      operationId: market_intelligence
+      responses:
+        '200':
+          description: Combined market regime, scanner movers, and confluence scores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketIntelligenceDto'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+      security:
+      - bearerAuth: []
   /api/v1/market/overview:
     get:
       tags:
@@ -3196,6 +3216,23 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AiTaskRouteDto'
+    AlertRuleEvaluationDto:
+      type: object
+      description: Summary of alert-rule evaluation against recent research/news events.
+      required:
+      - evaluated_rules
+      - matched_events
+      properties:
+        evaluated_rules:
+          type: integer
+          minimum: 0
+        latest_match_title:
+          type:
+          - string
+          - 'null'
+        matched_events:
+          type: integer
+          minimum: 0
     ApiErrorBody:
       type: object
       required:
@@ -3349,6 +3386,37 @@ components:
       properties:
         accepted:
           type: boolean
+    ConfluenceScoreDto:
+      type: object
+      description: Multi-factor confluence score for a tracked symbol in `[-1.0, 1.0]`.
+      required:
+      - symbol
+      - total_score
+      - method_score
+      - regime_score
+      - funding_score
+      - zone_score
+      - bias
+      properties:
+        bias:
+          type: string
+        funding_score:
+          type: number
+          format: double
+        method_score:
+          type: number
+          format: double
+        regime_score:
+          type: number
+          format: double
+        symbol:
+          type: string
+        total_score:
+          type: number
+          format: double
+        zone_score:
+          type: number
+          format: double
     CreateOperationRequest:
       type: object
       required:
@@ -3392,6 +3460,33 @@ components:
           type: array
           items:
             type: string
+    CrossScanRowDto:
+      type: object
+      description: Observed cross-exchange price/funding spread (market context, not guaranteed arbitrage).
+      required:
+      - instrument
+      - pair
+      - abs_spread
+      - rel_spread_pct
+      - warning
+      properties:
+        abs_spread:
+          type: number
+          format: double
+        funding_spread:
+          type:
+          - number
+          - 'null'
+          format: double
+        instrument:
+          type: string
+        pair:
+          type: string
+        rel_spread_pct:
+          type: number
+          format: double
+        warning:
+          type: string
     DashboardSummaryDto:
       type: object
       description: High-density aggregated metrics for the Desktop Unified Dashboard.
@@ -3507,6 +3602,27 @@ components:
         w:
           type: number
           format: double
+    MacroSeriesDto:
+      type: object
+      description: Latest observed FRED macro series value.
+      required:
+      - series_id
+      - name
+      - unit
+      - value
+      - date
+      properties:
+        date:
+          type: string
+        name:
+          type: string
+        series_id:
+          type: string
+        unit:
+          type: string
+        value:
+          type: number
+          format: double
     MarketFundingDto:
       type: object
       description: Market funding rates response including snapshot and extreme funding rates.
@@ -3530,6 +3646,40 @@ components:
         threshold:
           type: number
           format: double
+    MarketIntelligenceDto:
+      type: object
+      description: Combined market intelligence snapshot (`regime`, `scanner`, `confluence`, `cross_scans`, `macro_series`, `alert_evaluation`, `platform`).
+      required:
+      - generated_at
+      - regime
+      - scanner_movers
+      - confluence
+      properties:
+        alert_evaluation:
+          $ref: '#/components/schemas/AlertRuleEvaluationDto'
+        confluence:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfluenceScoreDto'
+        cross_scans:
+          type: array
+          items:
+            $ref: '#/components/schemas/CrossScanRowDto'
+        generated_at:
+          type: string
+          format: date-time
+        macro_series:
+          type: array
+          items:
+            $ref: '#/components/schemas/MacroSeriesDto'
+        platform:
+          $ref: '#/components/schemas/PlatformMaintenanceDto'
+        regime:
+          $ref: '#/components/schemas/MarketRegimeDto'
+        scanner_movers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScannerMoverDto'
     MarketLiquidationDto:
       type: object
       description: Estimated liquidation zones for a symbol.
@@ -3637,6 +3787,58 @@ components:
         state:
           $ref: '#/components/schemas/MarketStateDto'
         timeframe:
+          type: string
+    MarketRegimeDto:
+      type: object
+      description: Macro crypto regime snapshot derived from Altcoin Season Index, Fear & Greed, and market dominance.
+      required:
+      - season
+      properties:
+        asi_d30:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        asi_d365:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        asi_d90:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        btc_dominance:
+          type:
+          - number
+          - 'null'
+          format: double
+        eth_dominance:
+          type:
+          - number
+          - 'null'
+          format: double
+        fng_avg30:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        fng_classification:
+          type:
+          - string
+          - 'null'
+        fng_value:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        season:
           type: string
     MarketStateDto:
       type: string
@@ -4650,6 +4852,25 @@ components:
       - failed
       - cancelled
       - expired
+    PlatformMaintenanceDto:
+      type: object
+      description: Platform maintenance summary (`reconcile`, `news_extract`, `retention`).
+      required:
+      - reconcile
+      - news_extract_eligible
+      - retention_days
+      properties:
+        news_extract_eligible:
+          type: integer
+          minimum: 0
+        reconcile:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReconcileStatusDto'
+        retention_days:
+          type: integer
+          format: int32
+          minimum: 0
     ProgressCommandRequest:
       type: object
       description: Agent report that a claimed command has started executing.
@@ -4764,6 +4985,32 @@ components:
       - DEGRADED
       - NOT_READY
       - UNKNOWN
+    ReconcileStatusDto:
+      type: object
+      description: Candle reconciliation verdict for a symbol/timeframe against venue REST bars.
+      required:
+      - symbol
+      - timeframe
+      - verdict
+      - checked
+      - mismatched
+      - missing_local
+      properties:
+        checked:
+          type: integer
+          minimum: 0
+        mismatched:
+          type: integer
+          minimum: 0
+        missing_local:
+          type: integer
+          minimum: 0
+        symbol:
+          type: string
+        timeframe:
+          type: string
+        verdict:
+          type: string
     ReplaceWatchlistSymbolsRequest:
       type: object
       required:
@@ -4990,6 +5237,26 @@ components:
         watchlists_restored:
           type: integer
           minimum: 0
+    ScannerMoverDto:
+      type: object
+      description: Top 24h market mover discovered by the scanner.
+      required:
+      - symbol
+      - last_price
+      - pct_24h
+      - quote_volume
+      properties:
+        last_price:
+          type: number
+          format: double
+        pct_24h:
+          type: number
+          format: double
+        quote_volume:
+          type: number
+          format: double
+        symbol:
+          type: string
     SendTestNotificationRequest:
       type: object
       description: Request to send a test notification.

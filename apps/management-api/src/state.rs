@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use tm_trading_contracts::ServiceSnapshot;
+use tm_trading_contracts::{MarketIntelligenceDto, ServiceSnapshot};
+
+pub type IntelligenceCache =
+    Arc<tokio::sync::RwLock<Option<(chrono::DateTime<chrono::Utc>, MarketIntelligenceDto)>>>;
 use tm_trading_storage::{
     AiBriefingRepository, AiJobRepository, AiModelRepository, AiProviderProfileRepository,
     AiTaskRouteRepository, CandleRepository, InMemoryAiBriefingRepository, InMemoryAiJobRepository,
@@ -95,6 +98,7 @@ pub struct AppState {
     pub storage_kind: String,
     pub database_name: Option<String>,
     pub auth: AuthConfig,
+    pub intelligence_cache: IntelligenceCache,
 }
 
 impl AppState {
@@ -128,6 +132,7 @@ impl AppState {
             storage_kind: "memory".to_owned(),
             database_name: None,
             auth,
+            intelligence_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 

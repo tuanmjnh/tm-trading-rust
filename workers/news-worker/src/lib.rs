@@ -466,6 +466,28 @@ pub async fn run_news_cycle(
     config: &NewsWorkerConfig,
     now: DateTime<Utc>,
 ) -> Result<NewsCycleOutcome, NewsWorkerError> {
+    run_news_cycle_with_force(
+        source_repository,
+        item_repository,
+        cluster_repository,
+        fetcher,
+        config,
+        now,
+        false,
+    )
+    .await
+}
+
+/// Polls every due (or forced on initial boot), allowed RSS source once and stores the items it returns.
+pub async fn run_news_cycle_with_force(
+    source_repository: &dyn NewsSourceRepository,
+    item_repository: &dyn NewsItemRepository,
+    cluster_repository: &dyn NewsClusterRepository,
+    fetcher: &dyn NewsFeedFetcher,
+    config: &NewsWorkerConfig,
+    now: DateTime<Utc>,
+    force_poll: bool,
+) -> Result<NewsCycleOutcome, NewsWorkerError> {
     if !config.source_of_truth {
         return Err(NewsWorkerError::WriteAuthorityDisabled);
     }
@@ -480,7 +502,7 @@ pub async fn run_news_cycle(
 
     for source in sources.iter().take(config.max_sources_per_cycle) {
         outcome.sources_considered += 1;
-        if !is_due(source, now)
+        if (!force_poll && !is_due(source, now))
             || source.transport() != NewsTransport::Rss
             || source.license_gate() != NewsLicenseGate::Allowed
         {

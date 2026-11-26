@@ -21,6 +21,11 @@ use crate::dashboard::{
 use utoipa::OpenApi;
 
 use crate::error::ApiErrorResponse;
+use crate::intelligence::{
+    AlertRuleEvaluationDto, ConfluenceScoreDto, CrossScanRowDto, MacroSeriesDto,
+    MarketIntelligenceDto, MarketRegimeDto, PlatformMaintenanceDto, ReconcileStatusDto,
+    ScannerMoverDto,
+};
 use crate::market::{
     FundingRateDto, LiquidationZoneDto, MarketFundingDto, MarketLiquidationDto, MarketMoverDto,
     MarketOverviewDto, MarketPulseDto, MarketStateDto, MarketSymbolDto, TradingViewAlertPayload,
@@ -92,6 +97,7 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         test_provider_instance,
         market_overview,
         market_pulse,
+        market_intelligence,
         list_research_events,
         get_research_event,
         list_news,
@@ -177,6 +183,15 @@ use crate::watchlist::{CreateWatchlistRequest, ReplaceWatchlistSymbolsRequest, W
         MarketFundingDto,
         LiquidationZoneDto,
         MarketLiquidationDto,
+        MarketRegimeDto,
+        ScannerMoverDto,
+        ConfluenceScoreDto,
+        CrossScanRowDto,
+        MacroSeriesDto,
+        AlertRuleEvaluationDto,
+        ReconcileStatusDto,
+        PlatformMaintenanceDto,
+        MarketIntelligenceDto,
         TradingViewAlertPayload,
         WebhookResponse,
         ResearchEventDto,
@@ -676,6 +691,18 @@ pub fn market_overview() {}
     )
 )]
 pub fn market_pulse() {}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/market/intelligence",
+    tag = "Market",
+    responses(
+        (status = 200, description = "Combined market regime, scanner movers, and confluence scores", body = MarketIntelligenceDto),
+        (status = 401, description = "Missing or invalid bearer token", body = ApiErrorResponse)
+    ),
+    security(("bearerAuth" = []))
+)]
+pub fn market_intelligence() {}
 
 #[utoipa::path(
     get,

@@ -170,6 +170,14 @@ if ($WithBackend) {
     }
 
     # Start Host Agent with workers enabled so Services table shows live worker instances
+    $agentStateFile = Join-Path $RepoRoot "target\debug\data\agent\agent-state.json"
+    if (Test-Path $agentStateFile) {
+        Remove-Item -Path $agentStateFile -Force -ErrorAction SilentlyContinue
+    }
+    $agentStateBak = "$agentStateFile.bak"
+    if (Test-Path $agentStateBak) {
+        Remove-Item -Path $agentStateBak -Force -ErrorAction SilentlyContinue
+    }
     Write-Host "[...] Starting Host Agent with live worker fleet..." -ForegroundColor Yellow
     $env:TM_TRADING_MARKET_WORKER_ENABLED = "1"
     $env:TM_TRADING_RESEARCH_WORKER_ENABLED = "1"

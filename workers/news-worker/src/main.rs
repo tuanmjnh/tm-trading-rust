@@ -13,7 +13,7 @@ use tm_trading_domain::{
 };
 use tm_trading_news_providers::HttpFeedFetcher;
 use tm_trading_news_worker::{
-    CycleResult, NewsWorker, NewsWorkerConfig, NewsWorkerError, run_news_cycle,
+    CycleResult, NewsWorker, NewsWorkerConfig, NewsWorkerError, run_news_cycle_with_force,
 };
 use tm_trading_storage::{
     MongoConnection, MongoNewsClusterRepository, MongoNewsItemRepository,
@@ -120,11 +120,13 @@ async fn run() -> Result<(), RunError> {
     let mut next_cycle = Instant::now();
     let mut active_cycle: Option<JoinHandle<()>> = None;
     let mut pending_operations: VecDeque<String> = VecDeque::new();
+    let mut initial_boot_cycle = true;
 
     loop {
         if active_cycle.is_none() {
             let operation_id = pending_operations.pop_front();
             if operation_id.is_some() || Instant::now() >= next_cycle {
+                let force_poll = std::mem::take(&mut initial_boot_cycle);
                 active_cycle = Some(spawn_cycle(
                     worker.config(),
                     Arc::clone(&sources),
@@ -132,6 +134,7 @@ async fn run() -> Result<(), RunError> {
                     Arc::clone(&clusters),
                     Arc::clone(&fetcher),
                     operation_id,
+                    force_poll,
                     cycle_result_tx.clone(),
                 ));
                 continue;
@@ -222,6 +225,7 @@ fn classify_repository_error(error: RepositoryError) -> RunError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_cycle(
     config: &NewsWorkerConfig,
     sources: Arc<MongoNewsSourceRepository>,
@@ -229,6 +233,7 @@ fn spawn_cycle(
     clusters: Arc<MongoNewsClusterRepository>,
     fetcher: Arc<HttpFeedFetcher>,
     operation_id: Option<String>,
+    force_poll: bool,
     result_tx: mpsc::UnboundedSender<(Option<String>, CycleResult)>,
 ) -> JoinHandle<()> {
     let config = config.clone();
@@ -236,13 +241,14 @@ fn spawn_cycle(
         let started = Instant::now();
         let result = match tokio::time::timeout(
             config.cycle_timeout,
-            run_news_cycle(
+            run_news_cycle_with_force(
                 sources.as_ref(),
                 items.as_ref(),
                 clusters.as_ref(),
                 fetcher.as_ref(),
                 &config,
                 Utc::now(),
+                force_poll,
             ),
         )
         .await

@@ -441,6 +441,7 @@ fn format_optional_timestamp(value: Option<DateTime<Utc>>) -> String {
     value.map_or_else(|| "-".to_owned(), format_timestamp)
 }
 
+#[allow(dead_code)]
 fn format_age(seconds: i64) -> String {
     if seconds < 60 {
         return format!("{seconds}s");
@@ -497,6 +498,7 @@ fn direction_class(direction: NewsDirectionDto) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn health_label(health: NewsHealthStateDto, strings: &UiStrings) -> &'static str {
     match health {
         NewsHealthStateDto::Ok => strings.news_health_ok,
@@ -506,6 +508,7 @@ fn health_label(health: NewsHealthStateDto, strings: &UiStrings) -> &'static str
     }
 }
 
+#[allow(dead_code)]
 fn health_class(health: NewsHealthStateDto) -> &'static str {
     match health {
         NewsHealthStateDto::Ok => "state-ok",

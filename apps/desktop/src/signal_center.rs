@@ -309,6 +309,7 @@ fn ProvenanceItem(label: &'static str, value: String) -> Element {
     }
 }
 
+#[allow(dead_code)]
 fn context_summary(context: &BTreeMap<String, String>) -> String {
     context
         .iter()

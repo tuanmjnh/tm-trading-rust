@@ -453,6 +453,7 @@ fn task_label(task: AiBriefingTaskDto, strings: &UiStrings) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn job_status_label(status: AiJobStatusDto, strings: &UiStrings) -> &'static str {
     match status {
         AiJobStatusDto::Queued => strings.ai_briefing_job_queued,
@@ -464,6 +465,7 @@ fn job_status_label(status: AiJobStatusDto, strings: &UiStrings) -> &'static str
     }
 }
 
+#[allow(dead_code)]
 fn job_error_label(error_code: &str, strings: &UiStrings) -> &'static str {
     match error_code {
         "unsupported_task" | "invalid_request" => strings.ai_briefing_job_error_invalid_request,
@@ -483,6 +485,7 @@ fn job_error_label(error_code: &str, strings: &UiStrings) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn job_status_class(status: AiJobStatusDto) -> &'static str {
     match status {
         AiJobStatusDto::Queued | AiJobStatusDto::Claimed => "status-progress",

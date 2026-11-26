@@ -12,7 +12,8 @@
 #>
 [CmdletBinding()]
 param(
-    [switch]$Full = $false
+    [switch]$Full = $false,
+    [switch]$Soft = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,7 +25,21 @@ Write-Host "  TM TRADING - WORKSPACE CLEANUP UTILITY                 " -Foregrou
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # 1. Clean Cargo target directory
-if (Test-Path "target") {
+if ($Soft) {
+    Write-Host "[...] Soft-cleaning incremental caches, release artifacts, and stale deps (>3d)..." -ForegroundColor Yellow
+    foreach ($sub in @("target\debug\incremental", "target\release", "target\tmp")) {
+        if (Test-Path $sub) {
+            Remove-Item -Path $sub -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if (Test-Path "target\debug\deps") {
+        $cutoff = (Get-Date).AddDays(-3)
+        Get-ChildItem -Path "target\debug\deps" -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoff } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host "[OK] Soft cleanup completed (active debug deps preserved)." -ForegroundColor Green
+} elseif (Test-Path "target") {
     Write-Host "[...] Cleaning Cargo build cache (cargo clean)..." -ForegroundColor Yellow
     & cargo clean
     Write-Host "[OK] Cargo target directory cleaned." -ForegroundColor Green

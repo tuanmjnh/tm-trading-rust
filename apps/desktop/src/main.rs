@@ -24,20 +24,20 @@ use modal::Modal;
 use slideover::Slideover;
 use tm_trading_api_client::{ManagementApiClient, new_idempotency_key};
 use tm_trading_contracts::{
-    AiBriefingQueryDto, AiJobQueryDto, AiJobTaskDto, MarketMoverDto, MarketOverviewDto,
-    MarketPulseDto, MarketStateDto, MarketSymbolDto, NewAiJobDto, NewAiModelDto,
-    NewAiProviderProfileDto, NewAiTaskRouteDto, NewsQueryDto, NotificationLogQueryDto,
-    NotificationOutboxQueryDto, NotificationSummaryQueryDto, OperationActionDto, OperationResponse,
-    OperationStatusDto, ResearchEventQueryDto, SendTestNotificationRequest, ServiceSnapshot,
-    WatchlistDto,
+    AiBriefingQueryDto, AiJobQueryDto, AiJobTaskDto, MarketFundingDto, MarketIntelligenceDto,
+    MarketLiquidationDto, MarketMoverDto, MarketOverviewDto, MarketPulseDto, MarketStateDto,
+    MarketSymbolDto, NewAiJobDto, NewAiModelDto, NewAiProviderProfileDto, NewAiTaskRouteDto,
+    NewsQueryDto, NotificationLogQueryDto, NotificationOutboxQueryDto, NotificationSummaryQueryDto,
+    OperationActionDto, OperationResponse, OperationStatusDto, ResearchEventQueryDto,
+    SendTestNotificationRequest, ServiceSnapshot, WatchlistDto,
 };
 
-use ai_briefings::{AiBriefingPanel, AiBriefingPanelState, AiBriefingSlideover};
+use ai_briefings::{AiBriefingPanelState, AiBriefingSlideover};
 use ai_providers::{AiProviderPanel, AiProviderPanelState};
 use i18n::{Locale, UiStrings};
 use news::{NewsItemSlideover, NewsPanel, NewsPanelState};
 use notifications::{NotificationCenterPanel, NotificationPanelState};
-use signal_center::{ResearchEventSlideover, ResearchPanelState, SignalCenterPanel};
+use signal_center::{ResearchEventSlideover, ResearchPanelState};
 use system_diagnostics::{SystemDiagnosticsPanel, SystemDiagnosticsPanelState};
 use webview2_check::detect_webview2_runtime;
 
@@ -177,6 +177,10 @@ enum ActiveOverlay {
     AiConfigSlideover,
     NotificationsSlideover,
     DiagnosticsSlideover,
+    IntelligenceSlideover,
+    FundingLiquidationSlideover,
+    NewsListSlideover,
+    ServicesFleetSlideover,
     ServiceDetailsSlideover(String),
 }
 
@@ -208,6 +212,9 @@ fn App() -> Element {
     let watchlist_error = use_signal(|| Option::<String>::None);
     let market_overview = use_signal(|| Option::<MarketOverviewDto>::None);
     let market_pulse = use_signal(|| Option::<MarketPulseDto>::None);
+    let mut market_funding = use_signal(|| Option::<MarketFundingDto>::None);
+    let mut market_liquidations = use_signal(Vec::<MarketLiquidationDto>::new);
+    let mut market_intelligence = use_signal(|| Option::<MarketIntelligenceDto>::None);
     let market_error = use_signal(|| Option::<String>::None);
     let research = use_signal(ResearchPanelState::default);
     let news = use_signal(NewsPanelState::default);
@@ -468,7 +475,7 @@ fn App() -> Element {
                 }
                 refreshed_at.set(Some(chrono::Local::now().format("%H:%M:%S").to_string()));
 
-                let is_bg_tick = tick == 1 || tick % 5 == 0;
+                let is_bg_tick = tick == 1 || tick.is_multiple_of(5);
 
                 // Market & Research & News & AI Briefings (2s cycle)
                 let watchlists_res = client.list_watchlists().await;
@@ -585,13 +592,41 @@ fn App() -> Element {
                 // Background Polling (Every ~10s: AI Profiles, Routes, Notifications, Diagnostics)
                 if is_bg_tick {
                     let cluster_query = tm_trading_contracts::NewsClusterQueryDto::default();
-                    let (sources_res, clusters_res, profiles_res, models_res, routes_res) = tokio::join!(
+                    let liq_symbols: Vec<String> =
+                        fallback_symbols.iter().take(3).cloned().collect();
+                    let liq_futs = liq_symbols.iter().map(|sym| client.market_liquidation(sym));
+                    let (
+                        sources_res,
+                        clusters_res,
+                        profiles_res,
+                        models_res,
+                        routes_res,
+                        funding_res,
+                        liquidations_res,
+                        intelligence_res,
+                    ) = tokio::join!(
                         client.list_news_sources(),
                         client.list_news_clusters(&cluster_query),
                         client.list_ai_provider_profiles(),
                         client.list_ai_models(),
-                        client.list_ai_task_routes()
+                        client.list_ai_task_routes(),
+                        client.market_funding(),
+                        futures_util::future::join_all(liq_futs),
+                        client.market_intelligence()
                     );
+                    if let Ok(data) = funding_res {
+                        market_funding.set(Some(data));
+                    }
+                    let liq_list: Vec<MarketLiquidationDto> = liquidations_res
+                        .into_iter()
+                        .filter_map(Result::ok)
+                        .collect();
+                    if !liq_list.is_empty() {
+                        market_liquidations.set(liq_list);
+                    }
+                    if let Ok(data) = intelligence_res {
+                        market_intelligence.set(Some(data));
+                    }
                     match sources_res {
                         Ok(list) => news.write().sources_loaded(list),
                         Err(error) => news.write().sources_failed(error.to_string()),
@@ -713,7 +748,7 @@ fn App() -> Element {
         .map_or("", |current| current.status.as_str())
         .to_owned();
 
-    // Derived KPI values for immediate display
+    // Derived final-state values for immediate display
     let ready_services_count = rows
         .iter()
         .filter(|s| s.readiness == tm_trading_contracts::ReadinessDto::Ready)
@@ -722,21 +757,10 @@ fn App() -> Element {
     let pulse_state_label = pulse
         .as_ref()
         .map_or("N/A", |p| market_state_label(p.state, &strings()));
-    let signals_count = research_events.len();
-    let news_count = news_state.items.as_ref().map_or(0, |items| items.len());
-    let routes_count = ai_providers_state
-        .routes
-        .as_ref()
-        .map_or(0, |routes| routes.len());
     let outbox_count = notifications_state
         .outbox
         .as_ref()
         .map_or(0, |items| items.len());
-    let webview2_version = system_diagnostics_state
-        .webview2
-        .version
-        .as_deref()
-        .unwrap_or("System default");
 
     let desktop_ctx = try_consume_context::<dioxus::desktop::DesktopContext>();
     let desktop_drag = desktop_ctx.clone();
@@ -747,23 +771,28 @@ fn App() -> Element {
 
     let movers_count = pulse.as_ref().map_or(0, |p| p.movers.len());
     let pulse_timeframe = pulse.as_ref().map_or("1m", |p| p.timeframe.as_str());
-    let briefings_count = ai_briefings_state
+    let latest_signal = research_events.first().cloned();
+    let latest_news = news_state
+        .items
+        .as_ref()
+        .and_then(|items| items.first().cloned());
+    let latest_briefing = ai_briefings_state
         .briefings
         .as_ref()
-        .map_or(0, |items| items.len());
-    let services_value_class =
+        .and_then(|items| items.first().cloned());
+    let fleet_pill_class =
         if total_services_count > 0 && ready_services_count == total_services_count {
-            "kpi-card-value ok"
+            "titlebar-fleet ok"
         } else if total_services_count == 0 {
-            "kpi-card-value"
+            "titlebar-fleet"
         } else {
-            "kpi-card-value warn"
+            "titlebar-fleet warn"
         };
 
     rsx! {
         AppStyles {}
         div { class: "shell",
-            // Custom Frameless TitleBar
+            // Custom Frameless TitleBar (minimalist: brand, final status, tools, window controls)
             header { class: "custom-titlebar",
                 div {
                     class: "titlebar-drag-zone",
@@ -780,12 +809,14 @@ fn App() -> Element {
                     div { class: "titlebar-brand",
                         span { class: "titlebar-logo", "TM" }
                         span { class: "titlebar-title", "TM TRADING" }
-                        span { class: "titlebar-badge", "CONTROL CENTER" }
                     }
                     div { class: "titlebar-status",
                         div { class: "connection",
                             span { class: "{connection_dot(&connection_state)}" }
                             span { "{connection_label(&connection_state, &strings())}" }
+                        }
+                        span { class: "{fleet_pill_class}",
+                            "{ready_services_count}/{total_services_count} READY"
                         }
                         span { class: "titlebar-refresh", "{refreshed_label}" }
                     }
@@ -794,17 +825,19 @@ fn App() -> Element {
                     class: "titlebar-controls",
                     onmousedown: move |event| event.stop_propagation(),
                     div { class: "titlebar-tools",
-                        div { class: "locale-switch", role: "group", aria_label: "{strings().language}",
-                            button {
-                                class: if locale() == Locale::English { "locale active" } else { "locale" },
-                                onclick: move |_| locale.set(Locale::English),
-                                "EN"
-                            }
-                            button {
-                                class: if locale() == Locale::Vietnamese { "locale active" } else { "locale" },
-                                onclick: move |_| locale.set(Locale::Vietnamese),
-                                "VI"
-                            }
+                        button {
+                            class: "button compact",
+                            type: "button",
+                            title: "{strings().language}",
+                            onclick: move |_| {
+                                let next = if locale() == Locale::English {
+                                    Locale::Vietnamese
+                                } else {
+                                    Locale::English
+                                };
+                                locale.set(next);
+                            },
+                            if locale() == Locale::English { "EN" } else { "VI" }
                         }
                         ActionDropdown {
                             trigger_label: format!("⚙️ {}", strings().quick_settings),
@@ -887,29 +920,8 @@ fn App() -> Element {
                 }
             }
 
-            // 6-Column Bento KPI Strip
+            // 4-Column Final-State KPI Strip
             section { class: "kpi-bento-grid",
-                button {
-                    class: "kpi-card interactive",
-                    type: "button",
-                    onclick: move |_| {
-                        if let Some(first) = rows.first() {
-                            active_overlay.set(ActiveOverlay::ServiceDetailsSlideover(first.service_instance_id.clone()));
-                        }
-                    },
-                    div { class: "kpi-card-top",
-                        span { class: "kpi-card-label", "{strings().kpi_services}" }
-                        span { class: "kpi-card-icon", "⚡" }
-                    }
-                    span { class: "{services_value_class}", "{ready_services_count}/{total_services_count}" }
-                    span { class: "kpi-card-sub",
-                        if total_services_count > 0 && ready_services_count == total_services_count {
-                            "All workers ready"
-                        } else {
-                            "Fleet status"
-                        }
-                    }
-                }
                 button {
                     class: "kpi-card interactive",
                     type: "button",
@@ -921,43 +933,85 @@ fn App() -> Element {
                     span { class: "kpi-card-value accent", "{pulse_state_label}" }
                     span { class: "kpi-card-sub", "{movers_count} symbols · {pulse_timeframe}" }
                 }
-                div { class: "kpi-card",
-                    div { class: "kpi-card-top",
-                        span { class: "kpi-card-label", "{strings().kpi_signals}" }
-                        span { class: "kpi-card-icon", "🎯" }
+                {
+                    let signal_id = latest_signal.as_ref().map(|s| s.id.clone());
+                    let signal_val = latest_signal
+                        .as_ref()
+                        .map_or_else(|| "—".to_owned(), |s| s.symbol.clone());
+                    let signal_sub = latest_signal.as_ref().map_or_else(
+                        || strings().research_events_count.to_owned(),
+                        |s| format!("{} · {}", s.method, s.timeframe),
+                    );
+                    rsx! {
+                        button {
+                            class: "kpi-card interactive",
+                            type: "button",
+                            onclick: move |_| {
+                                if let Some(event_id) = signal_id.clone() {
+                                    research_open_sender.send(UiAction::OpenResearchEvent { event_id });
+                                }
+                            },
+                            div { class: "kpi-card-top",
+                                span { class: "kpi-card-label", "{strings().kpi_signals}" }
+                                span { class: "kpi-card-icon", "🎯" }
+                            }
+                            span { class: "kpi-card-value", "{signal_val}" }
+                            span { class: "kpi-card-sub", "{signal_sub}" }
+                        }
                     }
-                    span { class: "kpi-card-value", "{signals_count}" }
-                    span { class: "kpi-card-sub", "VSA · Price Action · Trend" }
                 }
-                div { class: "kpi-card",
-                    div { class: "kpi-card-top",
-                        span { class: "kpi-card-label", "{strings().kpi_news}" }
-                        span { class: "kpi-card-icon", "📰" }
+                {
+                    let news_id = latest_news.as_ref().map(|n| n.id.clone());
+                    let news_val = latest_news
+                        .as_ref()
+                        .map_or_else(|| "—".to_owned(), |n| n.source_id.clone());
+                    let news_sub = latest_news.as_ref().map_or_else(
+                        || "Market & macro feed".to_owned(),
+                        |n| n.title.clone(),
+                    );
+                    rsx! {
+                        button {
+                            class: "kpi-card interactive",
+                            type: "button",
+                            onclick: move |_| {
+                                if let Some(id) = news_id.clone() {
+                                    news_open_sender.send(UiAction::OpenNewsItem { news_id: id });
+                                }
+                            },
+                            div { class: "kpi-card-top",
+                                span { class: "kpi-card-label", "{strings().kpi_news}" }
+                                span { class: "kpi-card-icon", "📰" }
+                            }
+                            span { class: "kpi-card-value", "{news_val}" }
+                            span { class: "kpi-card-sub", "{news_sub}" }
+                        }
                     }
-                    span { class: "kpi-card-value", "{news_count}" }
-                    span { class: "kpi-card-sub", "Market & macro feed" }
                 }
-                button {
-                    class: "kpi-card interactive",
-                    type: "button",
-                    onclick: move |_| active_overlay.set(ActiveOverlay::AiConfigSlideover),
-                    div { class: "kpi-card-top",
-                        span { class: "kpi-card-label", "{strings().kpi_ai_routes}" }
-                        span { class: "kpi-card-icon", "🤖" }
+                {
+                    let briefing_id = latest_briefing.as_ref().map(|b| b.id.clone());
+                    let ai_val = latest_briefing
+                        .as_ref()
+                        .map_or_else(|| "—".to_owned(), |b| b.model_id.clone());
+                    let ai_sub = format!("Outbox: {outbox_count}");
+                    rsx! {
+                        button {
+                            class: "kpi-card interactive",
+                            type: "button",
+                            onclick: move |_| {
+                                if let Some(id) = briefing_id.clone() {
+                                    ai_briefing_open_sender.send(UiAction::OpenAiBriefing { briefing_id: id });
+                                } else {
+                                    active_overlay.set(ActiveOverlay::AiConfigSlideover);
+                                }
+                            },
+                            div { class: "kpi-card-top",
+                                span { class: "kpi-card-label", "{strings().ai_briefing}" }
+                                span { class: "kpi-card-icon", "🤖" }
+                            }
+                            span { class: "kpi-card-value", "{ai_val}" }
+                            span { class: "kpi-card-sub", "{ai_sub}" }
+                        }
                     }
-                    span { class: "kpi-card-value", "{routes_count}" }
-                    span { class: "kpi-card-sub", "{briefings_count} briefings" }
-                }
-                button {
-                    class: "kpi-card interactive",
-                    type: "button",
-                    onclick: move |_| active_overlay.set(ActiveOverlay::NotificationsSlideover),
-                    div { class: "kpi-card-top",
-                        span { class: "kpi-card-label", "{strings().kpi_outbox}" }
-                        span { class: "kpi-card-icon", "🔔" }
-                    }
-                    span { class: "kpi-card-value", "{outbox_count}" }
-                    span { class: "kpi-card-sub", "Telegram delivery queue" }
                 }
             }
 
@@ -996,8 +1050,6 @@ fn App() -> Element {
                                                     th { "{strings().market_symbol_column}" }
                                                     th { class: "numeric", "{strings().market_last_close_column}" }
                                                     th { class: "numeric", "{strings().market_change_column}" }
-                                                    th { class: "numeric", "{strings().market_volume_ratio_column}" }
-                                                    th { class: "numeric", "{strings().market_volatility_column}" }
                                                     th { "{strings().market_status_column}" }
                                                 }
                                             }
@@ -1024,8 +1076,16 @@ fn App() -> Element {
                     div { class: "column-secondary",
                         section { class: "panel",
                             div { class: "panel-head",
-                                h2 { "{strings().services_and_agents}" }
-                                span { class: "panel-meta", "{ready_services_count}/{total_services_count} READY" }
+                                div { class: "panel-head-actions",
+                                    h2 { "{strings().services_and_agents}" }
+                                    span { class: "panel-meta", "{ready_services_count}/{total_services_count} READY" }
+                                }
+                                button {
+                                    class: "button compact",
+                                    type: "button",
+                                    onclick: move |_| active_overlay.set(ActiveOverlay::ServicesFleetSlideover),
+                                    "⚙️ {strings().view_details}"
+                                }
                             }
                             if rows.is_empty() {
                                 div { class: "empty",
@@ -1033,41 +1093,195 @@ fn App() -> Element {
                                     p { "{strings().no_services_hint}" }
                                 }
                             } else {
-                                div { class: "table-wrap",
-                                    table { class: "services",
-                                        thead {
-                                            tr {
-                                                th { "{strings().service_column}" }
-                                                th { "{strings().observed_column}" }
-                                                th { "{strings().readiness_column}" }
-                                                th { class: "numeric", "{strings().restarts_column}" }
-                                                th { class: "actions-head", "{strings().actions_column}" }
-                                            }
-                                        }
-                                        tbody {
-                                            for service in rows.iter() {
-                                                {
-                                                    let snapshot = service.clone();
-                                                    let service_id = snapshot.service_instance_id.clone();
-                                                    rsx! {
-                                                        ServiceRow {
-                                                            service: snapshot,
-                                                            strings: strings(),
-                                                            disabled: pending,
-                                                            on_command: move |action| {
-                                                                action_sender.send(UiAction::Command {
-                                                                    service_instance_id: service_id.clone(),
-                                                                    action,
-                                                                });
-                                                            },
-                                                            on_details: move |inst_id| {
-                                                                active_overlay.set(ActiveOverlay::ServiceDetailsSlideover(inst_id));
-                                                            },
-                                                        }
-                                                    }
+                                div { class: "service-chip-grid",
+                                    for service in rows.iter() {
+                                        {
+                                            let inst_id = service.service_instance_id.clone();
+                                            let short_name = short_service_name(&service.service_definition_id);
+                                            let dot_class = match (service.observed_state, service.readiness) {
+                                                (
+                                                    tm_trading_contracts::ObservedStateDto::Running,
+                                                    tm_trading_contracts::ReadinessDto::Ready,
+                                                ) => "dot connected",
+                                                (
+                                                    tm_trading_contracts::ObservedStateDto::Running
+                                                    | tm_trading_contracts::ObservedStateDto::Starting
+                                                    | tm_trading_contracts::ObservedStateDto::Stopping,
+                                                    _,
+                                                ) => "dot connecting",
+                                                _ => "dot disconnected",
+                                            };
+                                            let tooltip = format!(
+                                                "{} ({} / {})",
+                                                service.service_definition_id,
+                                                service.observed_state.as_str(),
+                                                service.readiness.as_str()
+                                            );
+                                            rsx! {
+                                                button {
+                                                    key: "{inst_id}",
+                                                    class: "service-chip",
+                                                    type: "button",
+                                                    title: "{tooltip}",
+                                                    onclick: move |_| {
+                                                        active_overlay.set(ActiveOverlay::ServiceDetailsSlideover(inst_id.clone()));
+                                                    },
+                                                    span { class: "{dot_class}" }
+                                                    span { class: "service-chip-name", "{short_name}" }
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+                        section { class: "panel",
+                            div { class: "panel-head",
+                                div { class: "panel-head-actions",
+                                    h2 { "{strings().funding_liquidation_title}" }
+                                    if !market_liquidations.read().is_empty() {
+                                        span { class: "panel-meta",
+                                            "{market_liquidations.read().len()} symbols"
+                                        }
+                                    }
+                                }
+                                button {
+                                    class: "button compact",
+                                    type: "button",
+                                    onclick: move |_| active_overlay.set(ActiveOverlay::FundingLiquidationSlideover),
+                                    "📊 {strings().view_details}"
+                                }
+                            }
+                            div { class: "funding-liq-grid",
+                                div { class: "funding-liq-item",
+                                    span { class: "kpi-card-label", "{strings().top_funding_extremes}" }
+                                    if let Some(f) = market_funding.read().as_ref() {
+                                        {
+                                            let top_list: Vec<String> = f
+                                                .extremes
+                                                .iter()
+                                                .chain(f.snapshot.iter())
+                                                .take(3)
+                                                .map(|r| format!("{} {:+.2}%", r.symbol, r.pct))
+                                                .collect();
+                                            let headline = if top_list.is_empty() {
+                                                "—".to_owned()
+                                            } else {
+                                                top_list.join(" · ")
+                                            };
+                                            rsx! {
+                                                span { class: "latest-card-title", "{headline}" }
+                                                span { class: "latest-card-meta",
+                                                    "{f.extremes.len()} extremes · {f.snapshot.len()} pairs"
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        span { class: "latest-card-meta", "—" }
+                                    }
+                                }
+                                div { class: "funding-liq-item",
+                                    span { class: "kpi-card-label", "{strings().open_interest_zones}" }
+                                    if !market_liquidations.read().is_empty() {
+                                        for liq in market_liquidations.read().iter() {
+                                            {
+                                                let oi_b = liq.open_interest_usd / 1_000_000_000.0;
+                                                let long_z = liq.zones.iter().find(|z| z.side.eq_ignore_ascii_case("long"));
+                                                let short_z = liq.zones.iter().find(|z| z.side.eq_ignore_ascii_case("short"));
+                                                let row_text = format!(
+                                                    "{}: OI ${oi_b:.2}B · L {} · S {}",
+                                                    liq.symbol,
+                                                    long_z.map_or_else(|| "—".to_owned(), |z| format!("${:.0}", z.price)),
+                                                    short_z.map_or_else(|| "—".to_owned(), |z| format!("${:.0}", z.price)),
+                                                );
+                                                rsx! {
+                                                    span { class: "latest-card-meta", "{row_text}" }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        span { class: "latest-card-meta", "—" }
+                                    }
+                                }
+                            }
+                        }
+                        section { class: "panel",
+                            div { class: "panel-head",
+                                div { class: "panel-head-actions",
+                                    h2 { "{strings().market_intelligence_title}" }
+                                    if let Some(intel) = market_intelligence.read().as_ref() {
+                                        span { class: "panel-meta",
+                                            "{intel.regime.season.to_uppercase()} {strings().season_suffix}"
+                                        }
+                                    }
+                                }
+                                button {
+                                    class: "button compact",
+                                    type: "button",
+                                    onclick: move |_| active_overlay.set(ActiveOverlay::IntelligenceSlideover),
+                                    "📊 {strings().view_details}"
+                                }
+                            }
+                            div { class: "funding-liq-grid",
+                                div { class: "funding-liq-item",
+                                    span { class: "kpi-card-label", "{strings().regime_sentiment_title}" }
+                                    if let Some(intel) = market_intelligence.read().as_ref() {
+                                        {
+                                            let fng_text = match (
+                                                intel.regime.fng_value,
+                                                intel.regime.fng_classification.as_deref(),
+                                            ) {
+                                                (Some(v), Some(c)) => format!("F&G {v} ({c})"),
+                                                (Some(v), None) => format!("F&G {v}"),
+                                                _ => "F&G —".to_owned(),
+                                            };
+                                            let dom_text = format!(
+                                                "BTC.D: {} · ASI: {}",
+                                                intel.regime.btc_dominance.map_or_else(|| "—".to_owned(), |d| format!("{d:.1}%")),
+                                                intel.regime.asi_d90.map_or_else(|| "—".to_owned(), |a| a.to_string()),
+                                            );
+                                            rsx! {
+                                                span { class: "latest-card-title", "{fng_text}" }
+                                                span { class: "latest-card-meta", "{dom_text}" }
+                                            }
+                                        }
+                                    } else {
+                                        span { class: "latest-card-meta", "—" }
+                                    }
+                                }
+                                div { class: "funding-liq-item",
+                                    span { class: "kpi-card-label", "{strings().confluence_mover_title}" }
+                                    if let Some(intel) = market_intelligence.read().as_ref() {
+                                        {
+                                            let conf_text = intel.confluence.first().map_or_else(
+                                                || "—".to_owned(),
+                                                |c| format!("{} {:+.2} ({})", c.symbol, c.total_score, c.bias),
+                                            );
+                                            let mover_text = intel.scanner_movers.first().map_or_else(
+                                                || "Scanner: —".to_owned(),
+                                                |m| format!("Top 24h: {} ({:+.2}%)", m.symbol, m.pct_24h),
+                                            );
+                                            let cross_text = intel.cross_scans.first().map_or_else(
+                                                || "Cross: —".to_owned(),
+                                                |c| format!("{} {}: {:.3}%", c.instrument, c.pair, c.rel_spread_pct),
+                                            );
+                                            let macro_text = intel.macro_series.first().map_or_else(
+                                                || format!("{}: {}", strings().alerts_matched_label, intel.alert_evaluation.matched_events),
+                                                |m| format!("{}: {} {} · {}: {}", m.series_id, m.value, m.unit, strings().alerts_matched_label, intel.alert_evaluation.matched_events),
+                                            );
+                                            let platform_text = intel.platform.reconcile.first().map_or_else(
+                                                || format!("{}: {} · {}: {}d", strings().extract_eligible_label, intel.platform.news_extract_eligible, strings().retention_label, intel.platform.retention_days),
+                                                |r| format!("{} {}: {} · {}: {}", strings().reconcile_label, r.symbol, r.verdict.to_uppercase(), strings().extract_eligible_label, intel.platform.news_extract_eligible),
+                                            );
+                                            rsx! {
+                                                span { class: "latest-card-title", "{conf_text}" }
+                                                span { class: "latest-card-meta", "{mover_text}" }
+                                                span { class: "latest-card-meta", "{cross_text} · {macro_text}" }
+                                                span { class: "latest-card-meta", "{platform_text}" }
+                                            }
+                                        }
+                                    } else {
+                                        span { class: "latest-card-meta", "—" }
                                     }
                                 }
                             }
@@ -1100,78 +1314,394 @@ fn App() -> Element {
                     }
                 }
 
-                // Row 2: Signal Center (Left) + News & AI Briefings (Right)
-                div { class: "bento-row-bottom",
-                    div { class: "column-primary",
-                        SignalCenterPanel {
-                            state: research_state.clone(),
-                            strings: strings(),
-                            on_open: move |event_id| {
-                                research_open_sender.send(UiAction::OpenResearchEvent { event_id });
-                            },
+                // Row 2: Latest Final Snapshots (Latest Signal + Latest News + Latest AI Briefing)
+                div { class: "bento-row-latest",
+                    section { class: "panel",
+                        div { class: "panel-head",
+                            h2 { "{strings().signal_center}" }
+                            if let Some(sig) = latest_signal.as_ref() {
+                                span { class: "panel-meta", "{sig.timeframe} · {sig.method}" }
+                            }
+                        }
+                        if let Some(sig) = latest_signal.clone() {
+                            {
+                                let sig_id = sig.id.clone();
+                                let dir_label = match sig.direction {
+                                    1 => "BULL",
+                                    -1 => "BEAR",
+                                    _ => "NEUTRAL",
+                                };
+                                let dir_class = match sig.direction {
+                                    1 => "pill state-ok",
+                                    -1 => "pill state-failed",
+                                    _ => "pill state-partial",
+                                };
+                                let observed_time = sig.observed_at.format("%H:%M:%S UTC");
+                                rsx! {
+                                    div {
+                                        class: "latest-card-body interactive",
+                                        onclick: move |_| {
+                                            research_open_sender.send(UiAction::OpenResearchEvent {
+                                                event_id: sig_id.clone(),
+                                            });
+                                        },
+                                        div { class: "latest-card-header",
+                                            span { class: "latest-card-title", "{sig.symbol} · {sig.event_type}" }
+                                            span { class: "{dir_class}", "{dir_label}" }
+                                        }
+                                        p { class: "latest-card-meta",
+                                            "Score: {sig.score:.2} · {observed_time}"
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            div { class: "latest-card-empty", "—" }
                         }
                     }
-                    div { class: "column-secondary",
-                        NewsPanel {
-                            state: news_state.clone(),
-                            strings: strings(),
-                            on_open: move |news_id| {
-                                news_open_sender.send(UiAction::OpenNewsItem { news_id });
-                            },
-                        }
-                        AiBriefingPanel {
-                            state: ai_briefings_state.clone(),
-                            strings: strings(),
-                            research_events,
-                            on_open: move |briefing_id| {
-                                ai_briefing_open_sender.send(UiAction::OpenAiBriefing { briefing_id });
-                            },
-                            on_request: move |research_event_id| {
-                                ai_briefing_request_sender.send(UiAction::RequestAiBriefing {
-                                    research_event_id,
-                                });
-                            },
-                        }
-                    }
-                }
-            }
 
-            // Bottom Telemetry Bar: Host Agent status, MongoDB connection, Outbox health, WebView2
-            footer { class: "telemetry-bar",
-                div { class: "telemetry-group",
-                    div { class: "telemetry-item",
-                        span { class: "telemetry-pill live", "{strings().telemetry_live}" }
-                        span { "{strings().telemetry_agent}: 127.0.0.1" }
+                    section { class: "panel",
+                        div { class: "panel-head",
+                            div { class: "panel-head-actions",
+                                h2 { "{strings().news_events}" }
+                                if let Some(item) = latest_news.as_ref() {
+                                    span { class: "panel-meta", "{item.source_id}" }
+                                }
+                            }
+                            button {
+                                class: "button compact",
+                                type: "button",
+                                onclick: move |_| active_overlay.set(ActiveOverlay::NewsListSlideover),
+                                "📰 {strings().view_details}"
+                            }
+                        }
+                        if let Some(err) = news_state.list_error.as_ref() {
+                            div { class: "latest-card-empty error-text", "{err}" }
+                        } else if let Some(item) = latest_news.clone() {
+                            {
+                                let item_id = item.id.clone();
+                                let ingested_time = item.ingested_at.format("%H:%M:%S UTC");
+                                rsx! {
+                                    div {
+                                        class: "latest-card-body interactive",
+                                        onclick: move |_| {
+                                            news_open_sender.send(UiAction::OpenNewsItem {
+                                                news_id: item_id.clone(),
+                                            });
+                                        },
+                                        div { class: "latest-card-header",
+                                            span { class: "latest-card-title", "{item.title}" }
+                                        }
+                                        p { class: "latest-card-meta",
+                                            "{item.market_group} · {ingested_time}"
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            div { class: "latest-card-empty", "—" }
+                        }
                     }
-                    div { class: "telemetry-item",
-                        span { class: "telemetry-pill live", "{strings().telemetry_live}" }
-                        span { "{strings().telemetry_mongodb}: tm-trading-rust" }
-                    }
-                    div { class: "telemetry-item",
-                        span { "WebView2: {webview2_version}" }
-                    }
-                    div {
-                        class: "telemetry-item interactive",
-                        title: "Open Notification Center",
-                        onclick: move |_| active_overlay.set(ActiveOverlay::NotificationsSlideover),
-                        span { "🔔 {strings().telemetry_outbox}: {outbox_count} {strings().logs_unit}" }
-                    }
-                }
-                div { class: "telemetry-actions",
-                    button {
-                        class: "button compact",
-                        onclick: move |_| active_overlay.set(ActiveOverlay::DiagnosticsSlideover),
-                        "🛠️ {strings().tab_diagnostics}"
-                    }
-                    button {
-                        class: "button compact",
-                        onclick: move |_| active_overlay.set(ActiveOverlay::AiConfigSlideover),
-                        "🤖 {strings().tab_ai_settings}"
+
+                    section { class: "panel",
+                        div { class: "panel-head",
+                            h2 { "{strings().ai_briefing}" }
+                            if let Some(sig) = latest_signal.clone() {
+                                button {
+                                    class: "button compact",
+                                    type: "button",
+                                    onclick: move |_| {
+                                        ai_briefing_request_sender.send(UiAction::RequestAiBriefing {
+                                            research_event_id: sig.id.clone(),
+                                        });
+                                    },
+                                    "✨ {strings().ai_briefing_request_button}"
+                                }
+                            }
+                        }
+                        if let Some(briefing) = latest_briefing.clone() {
+                            {
+                                let b_id = briefing.id.clone();
+                                let generated_time = briefing.generated_at.format("%H:%M:%S UTC");
+                                let headline = briefing
+                                    .facts
+                                    .first()
+                                    .cloned()
+                                    .unwrap_or_else(|| briefing.model_id.clone());
+                                rsx! {
+                                    div {
+                                        class: "latest-card-body interactive",
+                                        onclick: move |_| {
+                                            ai_briefing_open_sender.send(UiAction::OpenAiBriefing {
+                                                briefing_id: b_id.clone(),
+                                            });
+                                        },
+                                        div { class: "latest-card-header",
+                                            span { class: "latest-card-title", "{headline}" }
+                                        }
+                                        p { class: "latest-card-meta",
+                                            "{briefing.model_id} · {generated_time}"
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            div { class: "latest-card-empty", "—" }
+                        }
                     }
                 }
             }
 
             // Overlays: Deep Configuration & Operations (Modals & Slideovers)
+            if active_overlay() == ActiveOverlay::NewsListSlideover {
+                Slideover {
+                    title: strings().news_events.to_owned(),
+                    close_label: strings().modal_close.to_owned(),
+                    wide: true,
+                    on_close: move |_| active_overlay.set(ActiveOverlay::None),
+                    NewsPanel {
+                        state: news_state.clone(),
+                        strings: strings(),
+                        on_open: move |news_id| {
+                            news_open_sender.send(UiAction::OpenNewsItem { news_id });
+                        },
+                    }
+                }
+            }
+            if active_overlay() == ActiveOverlay::FundingLiquidationSlideover {
+                Slideover {
+                    title: strings().funding_liquidation_title.to_owned(),
+                    close_label: strings().modal_close.to_owned(),
+                    wide: true,
+                    on_close: move |_| active_overlay.set(ActiveOverlay::None),
+                    div { class: "research-detail",
+                        div { class: "card",
+                            h3 { "{strings().top_funding_extremes}" }
+                            if let Some(f) = market_funding.read().as_ref() {
+                                div { class: "table-wrap",
+                                    table { class: "services",
+                                        thead {
+                                            tr {
+                                                th { "{strings().symbol_col}" }
+                                                th { class: "numeric", "{strings().funding_col} %" }
+                                                th { class: "numeric", "{strings().price_col}" }
+                                            }
+                                        }
+                                        tbody {
+                                            for r in f.extremes.iter().chain(f.snapshot.iter()).take(10) {
+                                                tr {
+                                                    td { div { class: "service-name", "{r.symbol}" } }
+                                                    td { class: "numeric", "{r.pct:+.4}%" }
+                                                    td { class: "numeric", "${r.price:.4}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                p { class: "muted", "—" }
+                            }
+                        }
+                        for liq in market_liquidations.read().iter() {
+                            div { class: "card",
+                                h3 { "{liq.symbol} — ${liq.mark_price:.2} (OI: ${liq.open_interest_usd / 1_000_000_000.0:.2}B)" }
+                                div { class: "table-wrap",
+                                    table { class: "services",
+                                        thead {
+                                            tr {
+                                                th { "{strings().side_col}" }
+                                                th { class: "numeric", "{strings().leverage_col}" }
+                                                th { class: "numeric", "{strings().liq_price_col}" }
+                                                th { class: "numeric", "{strings().distance_col}" }
+                                            }
+                                        }
+                                        tbody {
+                                            for z in liq.zones.iter().take(8) {
+                                                tr {
+                                                    td { "{z.side}" }
+                                                    td { class: "numeric", "{z.lev:.0}x" }
+                                                    td { class: "numeric", "${z.price:.2}" }
+                                                    td { class: "numeric", "{z.pct:+.2}%" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if active_overlay() == ActiveOverlay::IntelligenceSlideover {
+                Slideover {
+                    title: strings().market_intelligence_title.to_owned(),
+                    close_label: strings().modal_close.to_owned(),
+                    wide: true,
+                    on_close: move |_| active_overlay.set(ActiveOverlay::None),
+                    if let Some(intel) = market_intelligence.read().as_ref() {
+                        div { class: "research-detail",
+                            div { class: "card",
+                                h3 { "{strings().confluence_rankings_title}" }
+                                if intel.confluence.is_empty() {
+                                    p { class: "muted", "—" }
+                                } else {
+                                    div { class: "table-wrap",
+                                        table { class: "services",
+                                            thead {
+                                                tr {
+                                                    th { "{strings().symbol_col}" }
+                                                    th { class: "numeric", "{strings().method_col}" }
+                                                    th { class: "numeric", "{strings().regime_col}" }
+                                                    th { class: "numeric", "{strings().funding_col}" }
+                                                    th { class: "numeric", "{strings().total_col}" }
+                                                    th { "{strings().bias_col}" }
+                                                }
+                                            }
+                                            tbody {
+                                                for row in intel.confluence.iter() {
+                                                    tr {
+                                                        td { div { class: "service-name", "{row.symbol}" } }
+                                                        td { class: "numeric", "{row.method_score:+.2}" }
+                                                        td { class: "numeric", "{row.regime_score:+.2}" }
+                                                        td { class: "numeric", "{row.funding_score:+.2}" }
+                                                        td { class: "numeric", "{row.total_score:+.2}" }
+                                                        td { span { class: "pill", "{row.bias}" } }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            div { class: "card",
+                                h3 { "{strings().scanner_movers_title}" }
+                                if intel.scanner_movers.is_empty() {
+                                    p { class: "muted", "—" }
+                                } else {
+                                    div { class: "table-wrap",
+                                        table { class: "services",
+                                            thead {
+                                                tr {
+                                                    th { "{strings().symbol_col}" }
+                                                    th { class: "numeric", "{strings().price_col}" }
+                                                    th { class: "numeric", "{strings().change_24h_col}" }
+                                                    th { class: "numeric", "{strings().volume_usd_col}" }
+                                                }
+                                            }
+                                            tbody {
+                                                for m in intel.scanner_movers.iter() {
+                                                    tr {
+                                                        td { div { class: "service-name", "{m.symbol}" } }
+                                                        td { class: "numeric", "{m.last_price:.4}" }
+                                                        td { class: "numeric", "{m.pct_24h:+.2}%" }
+                                                        td { class: "numeric", "${m.quote_volume / 1_000_000.0:.1}M" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            div { class: "card",
+                                h3 { "{strings().cross_platform_title}" }
+                                if !intel.cross_scans.is_empty() {
+                                    div { class: "table-wrap",
+                                        table { class: "services",
+                                            thead {
+                                                tr {
+                                                    th { "{strings().instrument_col}" }
+                                                    th { "{strings().pair_col}" }
+                                                    th { class: "numeric", "{strings().abs_spread_col}" }
+                                                    th { class: "numeric", "{strings().rel_spread_col}" }
+                                                }
+                                            }
+                                            tbody {
+                                                for c in intel.cross_scans.iter() {
+                                                    tr {
+                                                        td { "{c.instrument}" }
+                                                        td { "{c.pair}" }
+                                                        td { class: "numeric", "{c.abs_spread:.2}" }
+                                                        td { class: "numeric", "{c.rel_spread_pct:.3}%" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                p { class: "muted",
+                                    "{strings().alerts_matched_label}: {intel.alert_evaluation.matched_events} · {strings().extract_eligible_label}: {intel.platform.news_extract_eligible} · {strings().retention_label}: {intel.platform.retention_days}d"
+                                }
+                                for r in intel.platform.reconcile.iter() {
+                                    p { class: "muted",
+                                        "{strings().reconcile_label} {r.symbol} ({r.timeframe}): {r.verdict} (checked={r.checked}, mismatched={r.mismatched}, missing={r.missing_local})"
+                                    }
+                                }
+                                for m in intel.macro_series.iter() {
+                                    p { class: "muted",
+                                        "Macro {m.series_id} ({m.date}): {m.value} {m.unit}"
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        div { class: "empty",
+                            p { class: "empty-title", "{strings().connecting}" }
+                        }
+                    }
+                }
+            }
+            if active_overlay() == ActiveOverlay::ServicesFleetSlideover {
+                Slideover {
+                    title: strings().services_and_agents.to_owned(),
+                    close_label: strings().modal_close.to_owned(),
+                    wide: true,
+                    on_close: move |_| active_overlay.set(ActiveOverlay::None),
+                    if rows.is_empty() {
+                        div { class: "empty",
+                            p { class: "empty-title", "{strings().no_services}" }
+                            p { "{strings().no_services_hint}" }
+                        }
+                    } else {
+                        div { class: "table-wrap",
+                            table { class: "services",
+                                thead {
+                                    tr {
+                                        th { "{strings().service_column}" }
+                                        th { "{strings().observed_column}" }
+                                        th { "{strings().readiness_column}" }
+                                        th { class: "numeric", "{strings().restarts_column}" }
+                                        th { class: "actions-head", "{strings().actions_column}" }
+                                    }
+                                }
+                                tbody {
+                                    for service in rows.iter() {
+                                        {
+                                            let snapshot = service.clone();
+                                            let service_id = snapshot.service_instance_id.clone();
+                                            rsx! {
+                                                ServiceRow {
+                                                    service: snapshot,
+                                                    strings: strings(),
+                                                    disabled: pending,
+                                                    on_command: move |action| {
+                                                        action_sender.send(UiAction::Command {
+                                                            service_instance_id: service_id.clone(),
+                                                            action,
+                                                        });
+                                                    },
+                                                    on_details: move |inst_id| {
+                                                        active_overlay.set(ActiveOverlay::ServiceDetailsSlideover(inst_id));
+                                                    },
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if let ActiveOverlay::ServiceDetailsSlideover(inst_id) = active_overlay() {
                 {
                     let selected_svc = rows.iter().find(|s| s.service_instance_id == inst_id).cloned();
@@ -1362,8 +1892,6 @@ fn MarketMoverRow(mover: MarketMoverDto, strings: UiStrings) -> Element {
             td { div { class: "service-name", "{mover.symbol}" } }
             td { class: "numeric", "{format_number(mover.last_close)}" }
             td { class: "{change_class}", "{change_text}" }
-            td { class: "numeric", "{format_number(mover.volume_ratio)}" }
-            td { class: "numeric", "{format_percent(mover.volatility_percent)}" }
             td {
                 span { class: "pill {market_state_class(mover.state)}",
                     "{market_state_label(mover.state, &strings)}"
@@ -1627,7 +2155,7 @@ fn WatchlistModal(
                                     WatchlistCard {
                                         key: "{watchlist.id}",
                                         watchlist,
-                                        strings: strings.clone(),
+                                        strings,
                                         on_replace: move |symbols| {
                                             replace_cb.call((list_id.clone(), symbols));
                                         },
@@ -1698,6 +2226,18 @@ fn WatchlistCard(
 }
 
 /// Splits a comma-separated symbol field; the server does the real validation.
+fn short_service_name(definition_id: &str) -> &str {
+    let trimmed = definition_id
+        .strip_prefix("tm-trading-")
+        .unwrap_or(definition_id);
+    let trimmed = trimmed.strip_suffix("-worker").unwrap_or(trimmed);
+    if trimmed.is_empty() {
+        definition_id
+    } else {
+        trimmed
+    }
+}
+
 fn parse_symbols(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(str::trim)
