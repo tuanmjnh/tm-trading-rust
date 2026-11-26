@@ -68,8 +68,10 @@ fn main() {
         .with_window(
             dioxus::desktop::WindowBuilder::new()
                 .with_title("TM Trading Control Center")
+                .with_decorations(false)
                 .with_resizable(true)
-                .with_inner_size(dioxus::desktop::LogicalSize::new(1380.0, 880.0)),
+                .with_inner_size(dioxus::desktop::LogicalSize::new(1420.0, 900.0))
+                .with_min_inner_size(dioxus::desktop::LogicalSize::new(1080.0, 700.0)),
         );
     dioxus::LaunchBuilder::new().with_cfg(config).launch(App);
 }
@@ -590,20 +592,25 @@ fn App() -> Element {
                         client.list_ai_models(),
                         client.list_ai_task_routes()
                     );
-                    if let Ok(list) = sources_res {
-                        news.write().sources_loaded(list);
+                    match sources_res {
+                        Ok(list) => news.write().sources_loaded(list),
+                        Err(error) => news.write().sources_failed(error.to_string()),
                     }
-                    if let Ok(list) = clusters_res {
-                        news.write().clusters_loaded(list);
+                    match clusters_res {
+                        Ok(list) => news.write().clusters_loaded(list),
+                        Err(error) => news.write().clusters_failed(error.to_string()),
                     }
-                    if let Ok(list) = profiles_res {
-                        ai_providers.write().list_loaded(list);
+                    match profiles_res {
+                        Ok(list) => ai_providers.write().list_loaded(list),
+                        Err(error) => ai_providers.write().list_failed(error.to_string()),
                     }
-                    if let Ok(list) = models_res {
-                        ai_providers.write().models_loaded(list);
+                    match models_res {
+                        Ok(list) => ai_providers.write().models_loaded(list),
+                        Err(error) => ai_providers.write().models_failed(error.to_string()),
                     }
-                    if let Ok(list) = routes_res {
-                        ai_providers.write().routes_loaded(list);
+                    match routes_res {
+                        Ok(list) => ai_providers.write().routes_loaded(list),
+                        Err(error) => ai_providers.write().routes_failed(error.to_string()),
                     }
 
                     let outbox_query = NotificationOutboxQueryDto {
@@ -621,17 +628,23 @@ fn App() -> Element {
                         client.list_notification_logs(&log_query),
                         client.system_diagnostics()
                     );
-                    if let Ok(list) = outbox_res {
-                        notifications.write().outbox_loaded(list);
+                    match outbox_res {
+                        Ok(list) => notifications.write().outbox_loaded(list),
+                        Err(error) => notifications.write().outbox_failed(error.to_string()),
                     }
-                    if let Ok(summary) = summary_res {
-                        notifications.write().summary_loaded(summary);
+                    match summary_res {
+                        Ok(summary) => notifications.write().summary_loaded(summary),
+                        Err(error) => notifications.write().summary_failed(error.to_string()),
                     }
-                    if let Ok(logs) = logs_res {
-                        notifications.write().logs_loaded(logs);
+                    match logs_res {
+                        Ok(logs) => notifications.write().logs_loaded(logs),
+                        Err(error) => notifications.write().logs_failed(error.to_string()),
                     }
-                    if let Ok(diag) = diag_res {
-                        system_diagnostics.write().diagnostics_loaded(diag);
+                    match diag_res {
+                        Ok(diag) => system_diagnostics.write().diagnostics_loaded(diag),
+                        Err(error) => system_diagnostics
+                            .write()
+                            .diagnostics_failed(error.to_string()),
                     }
                 }
 
@@ -725,137 +738,294 @@ fn App() -> Element {
         .as_deref()
         .unwrap_or("System default");
 
+    let desktop_ctx = try_consume_context::<dioxus::desktop::DesktopContext>();
+    let desktop_drag = desktop_ctx.clone();
+    let desktop_dbl = desktop_ctx.clone();
+    let desktop_min = desktop_ctx.clone();
+    let desktop_max = desktop_ctx.clone();
+    let desktop_close = desktop_ctx;
+
+    let movers_count = pulse.as_ref().map_or(0, |p| p.movers.len());
+    let pulse_timeframe = pulse.as_ref().map_or("1m", |p| p.timeframe.as_str());
+    let briefings_count = ai_briefings_state
+        .briefings
+        .as_ref()
+        .map_or(0, |items| items.len());
+    let services_value_class =
+        if total_services_count > 0 && ready_services_count == total_services_count {
+            "kpi-card-value ok"
+        } else if total_services_count == 0 {
+            "kpi-card-value"
+        } else {
+            "kpi-card-value warn"
+        };
+
     rsx! {
         AppStyles {}
         div { class: "shell",
-            // Unified Topbar: Brand, Connectivity, Locale & Quick Actions Dropdown
-            header { class: "topbar",
-                div { class: "brand",
-                    span { class: "brand-mark" }
-                    div {
-                        h1 { "{strings().app_title}" }
-                        p { class: "brand-subtitle", "UNIFIED OPERATIONS DESK" }
+            // Custom Frameless TitleBar
+            header { class: "custom-titlebar",
+                div {
+                    class: "titlebar-drag-zone",
+                    onmousedown: move |_| {
+                        if let Some(ctx) = desktop_drag.as_ref() {
+                            ctx.drag();
+                        }
+                    },
+                    ondoubleclick: move |_| {
+                        if let Some(ctx) = desktop_dbl.as_ref() {
+                            ctx.toggle_maximized();
+                        }
+                    },
+                    div { class: "titlebar-brand",
+                        span { class: "titlebar-logo", "TM" }
+                        span { class: "titlebar-title", "TM TRADING" }
+                        span { class: "titlebar-badge", "CONTROL CENTER" }
+                    }
+                    div { class: "titlebar-status",
+                        div { class: "connection",
+                            span { class: "{connection_dot(&connection_state)}" }
+                            span { "{connection_label(&connection_state, &strings())}" }
+                        }
+                        span { class: "titlebar-refresh", "{refreshed_label}" }
                     }
                 }
-                div { class: "topbar-actions",
-                    div { class: "connection",
-                        span { class: "{connection_dot(&connection_state)}" }
-                        span { "{connection_label(&connection_state, &strings())}" }
-                    }
-                    div { class: "locale-switch", role: "group", aria_label: "{strings().language}",
-                        button {
-                            class: if locale() == Locale::English { "locale active" } else { "locale" },
-                            onclick: move |_| locale.set(Locale::English),
-                            "EN"
-                        }
-                        button {
-                            class: if locale() == Locale::Vietnamese { "locale active" } else { "locale" },
-                            onclick: move |_| locale.set(Locale::Vietnamese),
-                            "VI"
-                        }
-                    }
-                    ActionDropdown {
-                        trigger_label: format!("⚙️ {}", strings().quick_settings),
-                        disabled: false,
-                        items: vec![
-                            DropdownItem {
-                                id: "ai_config".to_owned(),
-                                label: format!("🤖 {}", strings().tab_ai_settings),
-                                class: None,
-                                disabled: false,
-                            },
-                            DropdownItem {
-                                id: "notifications".to_owned(),
-                                label: format!("🔔 {}", strings().tab_notifications),
-                                class: None,
-                                disabled: false,
-                            },
-                            DropdownItem {
-                                id: "diagnostics".to_owned(),
-                                label: format!("🛠️ {}", strings().tab_diagnostics),
-                                class: None,
-                                disabled: false,
-                            },
-                            DropdownItem {
-                                id: "watchlist".to_owned(),
-                                label: format!("📋 {}", strings().watchlists_manage),
-                                class: None,
-                                disabled: false,
-                            },
-                        ],
-                        on_select: move |action_id: String| {
-                            match action_id.as_str() {
-                                "ai_config" => active_overlay.set(ActiveOverlay::AiConfigSlideover),
-                                "notifications" => active_overlay.set(ActiveOverlay::NotificationsSlideover),
-                                "diagnostics" => active_overlay.set(ActiveOverlay::DiagnosticsSlideover),
-                                "watchlist" => active_overlay.set(ActiveOverlay::WatchlistModal),
-                                _ => {}
+                div {
+                    class: "titlebar-controls",
+                    onmousedown: move |event| event.stop_propagation(),
+                    div { class: "titlebar-tools",
+                        div { class: "locale-switch", role: "group", aria_label: "{strings().language}",
+                            button {
+                                class: if locale() == Locale::English { "locale active" } else { "locale" },
+                                onclick: move |_| locale.set(Locale::English),
+                                "EN"
                             }
-                        },
+                            button {
+                                class: if locale() == Locale::Vietnamese { "locale active" } else { "locale" },
+                                onclick: move |_| locale.set(Locale::Vietnamese),
+                                "VI"
+                            }
+                        }
+                        ActionDropdown {
+                            trigger_label: format!("⚙️ {}", strings().quick_settings),
+                            disabled: false,
+                            items: vec![
+                                DropdownItem {
+                                    id: "ai_config".to_owned(),
+                                    label: format!("🤖 {}", strings().tab_ai_settings),
+                                    class: None,
+                                    disabled: false,
+                                },
+                                DropdownItem {
+                                    id: "notifications".to_owned(),
+                                    label: format!("🔔 {}", strings().tab_notifications),
+                                    class: None,
+                                    disabled: false,
+                                },
+                                DropdownItem {
+                                    id: "diagnostics".to_owned(),
+                                    label: format!("🛠️ {}", strings().tab_diagnostics),
+                                    class: None,
+                                    disabled: false,
+                                },
+                                DropdownItem {
+                                    id: "watchlist".to_owned(),
+                                    label: format!("📋 {}", strings().watchlists_manage),
+                                    class: None,
+                                    disabled: false,
+                                },
+                            ],
+                            on_select: move |action_id: String| {
+                                match action_id.as_str() {
+                                    "ai_config" => active_overlay.set(ActiveOverlay::AiConfigSlideover),
+                                    "notifications" => active_overlay.set(ActiveOverlay::NotificationsSlideover),
+                                    "diagnostics" => active_overlay.set(ActiveOverlay::DiagnosticsSlideover),
+                                    "watchlist" => active_overlay.set(ActiveOverlay::WatchlistModal),
+                                    _ => {}
+                                }
+                            },
+                        }
+                    }
+                    div { class: "window-buttons",
+                        button {
+                            class: "win-btn",
+                            type: "button",
+                            title: "Minimize",
+                            aria_label: "Minimize",
+                            onclick: move |_| {
+                                if let Some(ctx) = desktop_min.as_ref() {
+                                    ctx.window.set_minimized(true);
+                                }
+                            },
+                            "─"
+                        }
+                        button {
+                            class: "win-btn",
+                            type: "button",
+                            title: "Maximize / Restore",
+                            aria_label: "Maximize",
+                            onclick: move |_| {
+                                if let Some(ctx) = desktop_max.as_ref() {
+                                    ctx.toggle_maximized();
+                                }
+                            },
+                            "□"
+                        }
+                        button {
+                            class: "win-btn win-close",
+                            type: "button",
+                            title: "Close",
+                            aria_label: "Close",
+                            onclick: move |_| {
+                                if let Some(ctx) = desktop_close.as_ref() {
+                                    ctx.close();
+                                }
+                            },
+                            "✕"
+                        }
                     }
                 }
             }
 
-            // Executive KPI Ribbon: Dense, high-contrast operational status cards
-            div { class: "kpi-ribbon",
-                div {
-                    class: "kpi-chip interactive",
-                    title: "Click to inspect services",
+            // 6-Column Bento KPI Strip
+            section { class: "kpi-bento-grid",
+                button {
+                    class: "kpi-card interactive",
+                    type: "button",
                     onclick: move |_| {
                         if let Some(first) = rows.first() {
                             active_overlay.set(ActiveOverlay::ServiceDetailsSlideover(first.service_instance_id.clone()));
                         }
                     },
-                    span { class: "kpi-title", "{strings().kpi_services}" }
-                    span { class: "kpi-value", "{ready_services_count}/{total_services_count}" }
+                    div { class: "kpi-card-top",
+                        span { class: "kpi-card-label", "{strings().kpi_services}" }
+                        span { class: "kpi-card-icon", "⚡" }
+                    }
+                    span { class: "{services_value_class}", "{ready_services_count}/{total_services_count}" }
+                    span { class: "kpi-card-sub",
+                        if total_services_count > 0 && ready_services_count == total_services_count {
+                            "All workers ready"
+                        } else {
+                            "Fleet status"
+                        }
+                    }
                 }
-                div {
-                    class: "kpi-chip interactive",
-                    title: "Click to manage watchlists",
+                button {
+                    class: "kpi-card interactive",
+                    type: "button",
                     onclick: move |_| active_overlay.set(ActiveOverlay::WatchlistModal),
-                    span { class: "kpi-title", "{strings().kpi_market}" }
-                    span { class: "kpi-value", "{pulse_state_label}" }
+                    div { class: "kpi-card-top",
+                        span { class: "kpi-card-label", "{strings().kpi_market}" }
+                        span { class: "kpi-card-icon", "📈" }
+                    }
+                    span { class: "kpi-card-value accent", "{pulse_state_label}" }
+                    span { class: "kpi-card-sub", "{movers_count} symbols · {pulse_timeframe}" }
                 }
-                div { class: "kpi-chip",
-                    span { class: "kpi-title", "{strings().kpi_signals}" }
-                    span { class: "kpi-value", "{signals_count}" }
+                div { class: "kpi-card",
+                    div { class: "kpi-card-top",
+                        span { class: "kpi-card-label", "{strings().kpi_signals}" }
+                        span { class: "kpi-card-icon", "🎯" }
+                    }
+                    span { class: "kpi-card-value", "{signals_count}" }
+                    span { class: "kpi-card-sub", "VSA · Price Action · Trend" }
                 }
-                div { class: "kpi-chip",
-                    span { class: "kpi-title", "{strings().kpi_news}" }
-                    span { class: "kpi-value", "{news_count}" }
+                div { class: "kpi-card",
+                    div { class: "kpi-card-top",
+                        span { class: "kpi-card-label", "{strings().kpi_news}" }
+                        span { class: "kpi-card-icon", "📰" }
+                    }
+                    span { class: "kpi-card-value", "{news_count}" }
+                    span { class: "kpi-card-sub", "Market & macro feed" }
                 }
-                div {
-                    class: "kpi-chip interactive",
-                    title: "Click to configure AI providers and task routes",
+                button {
+                    class: "kpi-card interactive",
+                    type: "button",
                     onclick: move |_| active_overlay.set(ActiveOverlay::AiConfigSlideover),
-                    span { class: "kpi-title", "{strings().kpi_ai_routes}" }
-                    span { class: "kpi-value", "{routes_count}" }
+                    div { class: "kpi-card-top",
+                        span { class: "kpi-card-label", "{strings().kpi_ai_routes}" }
+                        span { class: "kpi-card-icon", "🤖" }
+                    }
+                    span { class: "kpi-card-value", "{routes_count}" }
+                    span { class: "kpi-card-sub", "{briefings_count} briefings" }
                 }
-                div {
-                    class: "kpi-chip interactive",
-                    title: "Click to open notification outbox and test channel",
+                button {
+                    class: "kpi-card interactive",
+                    type: "button",
                     onclick: move |_| active_overlay.set(ActiveOverlay::NotificationsSlideover),
-                    span { class: "kpi-title", "{strings().kpi_outbox}" }
-                    span { class: "kpi-value", "{outbox_count}" }
-                }
-                div {
-                    class: "kpi-chip interactive",
-                    title: "Click to open system diagnostics and support bundle",
-                    onclick: move |_| active_overlay.set(ActiveOverlay::DiagnosticsSlideover),
-                    span { class: "kpi-title", "{strings().kpi_runtime}" }
-                    span { class: "kpi-value", "{webview2_version}" }
+                    div { class: "kpi-card-top",
+                        span { class: "kpi-card-label", "{strings().kpi_outbox}" }
+                        span { class: "kpi-card-icon", "🔔" }
+                    }
+                    span { class: "kpi-card-value", "{outbox_count}" }
+                    span { class: "kpi-card-sub", "Telegram delivery queue" }
                 }
             }
 
-            // Unified Operations Content (Single Bento / Split Grid Layout)
-            main { class: "content",
-                // Section 1: Core Service Control Fleet (Left) + Market Pulse & Movers (Right)
-                div { class: "dashboard-split-grid", style: "margin-bottom: 20px;",
+            // Unified Bento Operations Workspace
+            main { class: "content bento-content",
+                // Row 1: Live Market Pulse (Left) + Service Control Fleet (Right)
+                div { class: "bento-row-top",
                     div { class: "column-primary",
+                        section { class: "panel market-panel",
+                            div { class: "panel-head",
+                                div { class: "panel-head-actions",
+                                    h2 { "{strings().market_pulse}" }
+                                    if let Some(pulse) = pulse.as_ref() {
+                                        span { class: "pill {market_state_class(pulse.state)}",
+                                            "{pulse.timeframe} · {market_state_label(pulse.state, &strings())}"
+                                        }
+                                    }
+                                }
+                                button {
+                                    class: "button compact",
+                                    onclick: move |_| active_overlay.set(ActiveOverlay::WatchlistModal),
+                                    "📋 {strings().watchlists_manage}"
+                                }
+                            }
+                            if let Some(pulse) = pulse.as_ref() {
+                                if pulse.movers.is_empty() {
+                                    div { class: "empty",
+                                        p { class: "empty-title", "{strings().market_empty}" }
+                                        p { "{strings().market_empty_hint}" }
+                                    }
+                                } else {
+                                    div { class: "table-wrap",
+                                        table { class: "services",
+                                            thead {
+                                                tr {
+                                                    th { "{strings().market_symbol_column}" }
+                                                    th { class: "numeric", "{strings().market_last_close_column}" }
+                                                    th { class: "numeric", "{strings().market_change_column}" }
+                                                    th { class: "numeric", "{strings().market_volume_ratio_column}" }
+                                                    th { class: "numeric", "{strings().market_volatility_column}" }
+                                                    th { "{strings().market_status_column}" }
+                                                }
+                                            }
+                                            tbody {
+                                                for mover in pulse.movers.iter().take(8) {
+                                                    MarketMoverRow {
+                                                        key: "{mover.symbol}",
+                                                        mover: mover.clone(),
+                                                        strings: strings(),
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                div { class: "empty",
+                                    p { class: "empty-title", "{strings().connecting}" }
+                                    p { "{strings().market_empty_hint}" }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "column-secondary",
                         section { class: "panel",
                             div { class: "panel-head",
                                 h2 { "{strings().services_and_agents}" }
-                                span { class: "panel-meta", "{refreshed_label}" }
+                                span { class: "panel-meta", "{ready_services_count}/{total_services_count} READY" }
                             }
                             if rows.is_empty() {
                                 div { class: "empty",
@@ -868,12 +1038,9 @@ fn App() -> Element {
                                         thead {
                                             tr {
                                                 th { "{strings().service_column}" }
-                                                th { "{strings().agent_column}" }
-                                                th { "{strings().desired_column}" }
                                                 th { "{strings().observed_column}" }
                                                 th { "{strings().readiness_column}" }
                                                 th { class: "numeric", "{strings().restarts_column}" }
-                                                th { class: "numeric", "{strings().last_exit_column}" }
                                                 th { class: "actions-head", "{strings().actions_column}" }
                                             }
                                         }
@@ -931,61 +1098,10 @@ fn App() -> Element {
                             }
                         }
                     }
-                    div { class: "column-secondary",
-                        section { class: "panel market-panel",
-                            div { class: "panel-head",
-                                div { class: "flex items-center gap-2",
-                                    h2 { "{strings().market_pulse}" }
-                                    if let Some(pulse) = pulse.as_ref() {
-                                        span { class: "panel-meta",
-                                            "{pulse.timeframe} · {market_state_label(pulse.state, &strings())}"
-                                        }
-                                    }
-                                }
-                                button {
-                                    class: "button",
-                                    onclick: move |_| active_overlay.set(ActiveOverlay::WatchlistModal),
-                                    "📋 {strings().watchlists_manage}"
-                                }
-                            }
-                            if let Some(pulse) = pulse.as_ref() {
-                                if pulse.movers.is_empty() {
-                                    div { class: "empty",
-                                        p { class: "empty-title", "{strings().market_empty}" }
-                                        p { "{strings().market_empty_hint}" }
-                                    }
-                                } else {
-                                    div { class: "table-wrap",
-                                        table { class: "services",
-                                            thead {
-                                                tr {
-                                                    th { "{strings().market_symbol_column}" }
-                                                    th { class: "numeric", "{strings().market_last_close_column}" }
-                                                    th { class: "numeric", "{strings().market_change_column}" }
-                                                    th { class: "numeric", "{strings().market_volume_ratio_column}" }
-                                                    th { class: "numeric", "{strings().market_volatility_column}" }
-                                                    th { "{strings().market_status_column}" }
-                                                }
-                                            }
-                                            tbody {
-                                                for mover in pulse.movers.iter().take(6) {
-                                                    MarketMoverRow {
-                                                        key: "{mover.symbol}",
-                                                        mover: mover.clone(),
-                                                        strings: strings(),
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
 
-                // Section 2: Signal Center (Left) + News & AI Briefings (Right)
-                div { class: "dashboard-split-grid",
+                // Row 2: Signal Center (Left) + News & AI Briefings (Right)
+                div { class: "bento-row-bottom",
                     div { class: "column-primary",
                         SignalCenterPanel {
                             state: research_state.clone(),
@@ -1020,7 +1136,7 @@ fn App() -> Element {
                 }
             }
 
-            // Bottom Telemetry Bar: Host Agent status, MongoDB connection, Outbox health
+            // Bottom Telemetry Bar: Host Agent status, MongoDB connection, Outbox health, WebView2
             footer { class: "telemetry-bar",
                 div { class: "telemetry-group",
                     div { class: "telemetry-item",
@@ -1029,7 +1145,10 @@ fn App() -> Element {
                     }
                     div { class: "telemetry-item",
                         span { class: "telemetry-pill live", "{strings().telemetry_live}" }
-                        span { "{strings().telemetry_mongodb}: Connected" }
+                        span { "{strings().telemetry_mongodb}: tm-trading-rust" }
+                    }
+                    div { class: "telemetry-item",
+                        span { "WebView2: {webview2_version}" }
                     }
                     div {
                         class: "telemetry-item interactive",
@@ -1040,12 +1159,12 @@ fn App() -> Element {
                 }
                 div { class: "telemetry-actions",
                     button {
-                        class: "button",
+                        class: "button compact",
                         onclick: move |_| active_overlay.set(ActiveOverlay::DiagnosticsSlideover),
                         "🛠️ {strings().tab_diagnostics}"
                     }
                     button {
-                        class: "button",
+                        class: "button compact",
                         onclick: move |_| active_overlay.set(ActiveOverlay::AiConfigSlideover),
                         "🤖 {strings().tab_ai_settings}"
                     }
@@ -1223,11 +1342,26 @@ fn MarketSymbolRow(symbol: MarketSymbolDto, strings: UiStrings) -> Element {
 
 #[component]
 fn MarketMoverRow(mover: MarketMoverDto, strings: UiStrings) -> Element {
+    let change_class = match mover.change_percent {
+        Some(v) if v > 0.0 => "numeric delta-up",
+        Some(v) if v < 0.0 => "numeric delta-down",
+        _ => "numeric delta-flat",
+    };
+    let change_text = mover.change_percent.map_or_else(
+        || "-".to_owned(),
+        |v| {
+            if v > 0.0 {
+                format!("+{v:.2}%")
+            } else {
+                format!("{v:.2}%")
+            }
+        },
+    );
     rsx! {
         tr {
             td { div { class: "service-name", "{mover.symbol}" } }
             td { class: "numeric", "{format_number(mover.last_close)}" }
-            td { class: "numeric", "{format_percent(mover.change_percent)}" }
+            td { class: "{change_class}", "{change_text}" }
             td { class: "numeric", "{format_number(mover.volume_ratio)}" }
             td { class: "numeric", "{format_percent(mover.volatility_percent)}" }
             td {
@@ -1248,20 +1382,13 @@ fn ServiceRow(
     on_details: EventHandler<String>,
 ) -> Element {
     let running = service.observed_state == tm_trading_contracts::ObservedStateDto::Running;
-    let desired = service.desired_state.as_str();
     let observed = service.observed_state.as_str();
     let readiness = service.readiness.as_str();
-    let desired_class = format!("pill state-{}", desired.to_lowercase());
     let observed_class = format!("pill state-{}", observed.to_lowercase());
     let readiness_class = format!("pill state-{}", readiness.to_lowercase());
     let restart_count = service.restart_count;
-    let last_exit = match service.last_exit_code {
-        Some(code) => code.to_string(),
-        None => "-".to_owned(),
-    };
     let definition_id = service.service_definition_id.clone();
     let instance_id = service.service_instance_id.clone();
-    let agent_id = service.agent_id.clone();
     let details_id_cell = service.service_instance_id.clone();
     let details_id_menu = service.service_instance_id.clone();
 
@@ -1273,12 +1400,9 @@ fn ServiceRow(
                 div { class: "service-name", "{definition_id}" }
                 div { class: "service-instance", title: "{instance_id}", "{instance_id}" }
             }
-            td { class: "muted", "{agent_id}" }
-            td { span { class: desired_class, "{desired}" } }
             td { span { class: observed_class, "{observed}" } }
             td { span { class: readiness_class, "{readiness}" } }
             td { class: "numeric", "{restart_count}" }
-            td { class: "numeric", "{last_exit}" }
             td { class: "actions",
                 if running {
                     button {
